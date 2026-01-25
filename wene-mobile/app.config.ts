@@ -32,14 +32,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     scheme: 'wene', // Custom scheme for deeplink (wene://r/*)
     version: timestamp ? `1.0.0-${timestamp}` : '1.0.0',
     orientation: 'portrait',
-  // icon: './assets/icon.png', // TODO: Add icon asset
-  userInterfaceStyle: 'light',
-  splash: {
-    // image: './assets/splash.png', // TODO: Add splash asset
-    resizeMode: 'contain',
-    backgroundColor: '#ffffff',
-  },
-  assetBundlePatterns: ['**/*'],
+    icon: './assets/icon.png',
+    userInterfaceStyle: 'light',
+    splash: {
+      image: './assets/splash.png',
+      resizeMode: 'contain',
+      backgroundColor: '#ffffff',
+    },
+    assetBundlePatterns: ['**/*'],
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'jp.wene.app',
@@ -50,7 +50,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   android: {
     versionCode,
     adaptiveIcon: {
-      // foregroundImage: './assets/adaptive-icon.png', // TODO: Add adaptive icon asset
+      foregroundImage: './assets/adaptive-icon.png',
       backgroundColor: '#ffffff',
     },
     package: 'jp.wene.app',
@@ -83,7 +83,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ],
   },
   web: {
-    // favicon: './assets/favicon.png', // TODO: Add favicon asset
+    favicon: './assets/favicon.png',
   },
   plugins: [
     'expo-router',

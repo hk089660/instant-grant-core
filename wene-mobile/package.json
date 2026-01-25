@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "scripts": {
+    "generate-icons": "node scripts/generate-icons.js",
+    "deploy:adb": "bash scripts/deploy-via-adb.sh",
     "start": "expo start",
     "start:clear": "expo start --clear",
     "start:reset": "EXPO_NO_CACHE=1 expo start --clear --reset-cache",
@@ -41,6 +43,7 @@
   "devDependencies": {
     "@babel/core": "^7.24.0",
     "@types/react": "~19.1.10",
+    "sharp": "^0.34.5",
     "typescript": "~5.9.2"
   },
   "private": true,
