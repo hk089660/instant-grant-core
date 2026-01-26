@@ -18,7 +18,9 @@
 
 <div align="center">
 
-**[📹 デモ動画を見る / Watch Demo Video (11MB)](https://github.com/hk089660/-instant-grant-core/raw/feature/japan-use-cases/docs/demo.mp4)**
+**[📹 デモ動画を見る / Watch Demo Video (11MB)](https://github.com/hk089660/-instant-grant-core/raw/main/docs/demo.mp4)**
+
+*If the link above doesn't work, try: [feature branch link](https://github.com/hk089660/-instant-grant-core/raw/feature/japan-use-cases/docs/demo.mp4)*
 
 *Click the link above to watch the demo video*
 
