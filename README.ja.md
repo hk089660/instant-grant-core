@@ -1,235 +1,238 @@
 # we-ne
 
-[English README](./README.md)
+> **日本の公的支援を変える、Solana上の即時・透明な給付配布システム**
 
-**すぐ届き、すぐ使える給付を、日本で現実に機能させるための Solana 基盤**
+[![CI](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml/badge.svg)](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-we-ne（ウィネー）は、日本社会における「給付」「支援」「分配」を、  
-**即時性・低コスト・透明性**を重視して実行するためのオンチェーン基盤です。
-
-本リポジトリは、既存の `solana-grant-program` を中核に据え、  
-**SPL トークンによる固定レート型・定期給付（サブスク型）**を実際に動かす  
-最小実装（MVP）をまとめたものです。
+[English README](./README.md) | [アーキテクチャ](./docs/ARCHITECTURE.md) | [開発ガイド](./docs/DEVELOPMENT.md)
 
 ---
 
-## 思想 / Philosophy
+## 🎯 we-neとは？
 
-日本では、支援が必要だと分かってから実際に届くまでに、  
-多くの時間・事務処理・中間コストが発生します。
+we-neは、Solana上に構築された**非カストディアルな給付配布システム**です。支援金を即座に、透明性をもって届けます。
 
-- 手続きが重く、緊急性に対応できない  
-- 少額支援ほどコスト負けしやすい  
-- 実行の透明性が低く、検証が難しい
-
-we-ne は、これらを **技術によって単純化する** ことを目指します。
-
-> **支援は、思い立った瞬間に作れ、**  
-> **条件を満たした人に、即座に届き、**  
-> **その実行は誰でも検証できるべきである**
-
-本プロジェクトは、投機や金融商品を目的としたものではありません。  
-**生活支援・地域活動・実証実験**など、日本での現実的な利用を主眼に置いています。
+**一言で**: SPLトークンによる定期給付、二重受給防止、モバイルウォレット連携——すべてオンチェーンで検証可能
 
 ---
 
-## なぜ Solana なのか
+## 🚨 解決する課題
 
-給付や支援において最も重要なのは、  
-**「届くまでの速さ」と「実際に使える距離」**です。
+### 日本の公的支援の問題
 
-Solana は、この思想と非常に相性の良い特性を持っています。
+- **遅い**: 申請から受給まで数週間〜数ヶ月
+- **コスト高**: 少額給付ほど事務費が重い
+- **不透明**: 資金が届いたか検証困難
+- **柔軟性がない**: 緊急時に対応できない固定スケジュール
 
-- **高速な確定性**："申請中" ではなく "今、届いた" 体験を作れる  
-- **低い手数料**：少額・高頻度の給付が成立する  
-- **オンチェーン実行**：誰が・いつ・どの条件で配布されたかを検証できる  
-- **グローバル基盤**：日本の小規模ユースケースでも成立する柔軟性
+### グローバルな課題
 
-we-ne は、**給付を金融ではなく生活インフラとして扱う**ために Solana を採用しています。
+- 届くのが遅すぎる災害支援
+- 手数料負けする少額助成
+- 説明責任を欠く援助プログラム
+
+### we-neのソリューション
+
+- ⚡ **即時配布**: 数秒で決済完了
+- 💰 **低コスト**: 1トランザクション約0.1円
+- 🔍 **完全な透明性**: すべての受給がオンチェーンで検証可能
+- 📱 **モバイルファースト**: スマートフォンで受給
 
 ---
 
-## 現在できていること（MVP）
+## 🏗️ 仕組み
 
-現在の we-ne は、以下の仕様で **実際に動作する MVP** になっています。
-
-### スマートコントラクト（grant_program）
-
-- SPL トークン限定の給付プログラム  
-- 固定レート方式（例：1 トークン = 1 円相当として運用）  
-- 定期給付（1 期間につき 1 回のみ受給可能）  
-- 二重受給防止（period index + ClaimReceipt PDA）  
-- 入金・受給・停止まで一通り実装済み
-
-```text
-Create Grant → Fund Grant → Periodic Claim → Pause / Resume
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      ハイレベルフロー                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   給付者                  Solana                  受給者     │
+│   ──────                 ──────                 ─────────   │
+│                                                             │
+│   1. Grant作成 ────────► Grant PDA                          │
+│   2. 資金投入 ─────────► Token Vault                        │
+│                                                             │
+│                           ┌─────────┐                       │
+│                           │ 期間    │◄──── 3. アプリ起動    │
+│                           │ チェック │                       │
+│                           └────┬────┘                       │
+│                                │                            │
+│                           ┌────▼────┐                       │
+│                           │  受給   │◄──── 4. Phantom       │
+│                           │ 記録    │      で署名           │
+│                           └────┬────┘                       │
+│                                │                            │
+│                           ┌────▼────┐                       │
+│   5. Explorerで確認 ◄─────┤ トークン├────► ウォレット       │
+│                           │ 送金    │                       │
+│                           └─────────┘                       │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-Anchor による `build / test` は通過済みです。
+**主要コンポーネント**:
+1. **スマートコントラクト** (`grant_program/`): Grant、Claim、Receiptを管理するAnchorプログラム
+2. **モバイルアプリ** (`wene-mobile/`): 受給者向けReact Nativeアプリ
+3. **Phantom連携**: ディープリンクによる非カストディアル署名
 
-### モバイルアプリ（wene-mobile）
-
-- React Native（Expo + TypeScript）による受給者向けUI
-- Solanaウォレット連携（Phantom Wallet対応）
-- 給付プログラムへの接続と受給機能
-- Deep Link対応（`wene://r/<campaignId>` および `https://wene.app/r/<campaignId>`）
-- iOS / Android 両対応
-
-モバイルアプリの詳細は [`wene-mobile/README.md`](./wene-mobile/README.md) を参照してください。
+→ 詳細: [アーキテクチャ](./docs/ARCHITECTURE.md)
 
 ---
 
-## 定期給付（期間ベース）の考え方
+## 📱 デモ
 
-we-ne は、月次給付に限らず、**日次・週次・月次といった定期的な給付**を  
-同一の仕組みで扱えるように設計されています。
+> 🎬 **デモ動画**: [準備中]
 
-給付の頻度は、Grant 作成時に設定する `period_seconds` によって決まります。  
-これは「給付を何日・何週間・何か月ごとに行うか」を秒単位で指定する方式です。
+### スクリーンショット
 
-例：
-- 日次給付：`period_seconds = 86,400`  
-- 週次給付：`period_seconds = 604,800`  
-- 月次給付（暫定）：`period_seconds = 2,592,000`
-
-各期間ごとに `period_index` が計算され、  
-`(grant, claimer, period_index)` をキーとした ClaimReceipt により、  
-**同一期間内での二重受給が防止**されます。
-
-この仕組みにより、we-ne は以下を実現します。
-
-- 給付頻度を用途に応じて柔軟に変更できる  
-- 実装を増やさずに日次・週次・月次へ拡張できる  
-- 定期給付を「時間ベースのルール」として明確に説明できる
-
-we-ne は、給付を特定の周期に縛るのではなく、  
-**時間によって区切られた繰り返し給付のエンジン**として設計されています。
+| ホーム | 受給 | 完了 |
+|------|------|------|
+| ウォレット接続 | 給付内容確認 | トークン受け取り |
 
 ---
 
-## 条件付き給付（Allowlist）の考え方
+## 🚀 クイックスタート
 
-we-ne は、定期給付に **条件を組み合わせること** を前提に設計されています。
+### 前提条件
+- Node.js v18以上
+- スマートコントラクト: Rust, Solana CLI, Anchor
+- モバイル: Android StudioまたはXcode
 
-条件付き給付では、「誰が受け取れるか」を複雑なロジックで判定するのではなく、  
-**事前に定義された対象リスト（Allowlist）** に基づいて制御します。
+### モバイルアプリ起動（開発）
 
-Allowlist は Merkle Tree を用いて Grant に紐づけられる想定です。
+```bash
+# クローンとインストール
+git clone https://github.com/hk089660/-instant-grant-core.git
+cd we-ne/wene-mobile
+npm install
 
-- Grant 作成時に Allowlist の Merkle Root を登録  
-- Claim 時に、受給者が自分が対象であることを証明  
-- 条件を満たさない場合は受給不可
+# Expo起動
+npm start
 
-この方式により、we-ne は以下を実現します。
-
-- KYC や個人情報を扱わずに条件付き給付を行える  
-- 学校・地域・団体などの名簿ベース運用と相性が良い  
-- 定期給付（日次・週次・月次）と自然に組み合わせられる
-
-we-ne は、条件を複雑化するのではなく、  
-**「誰が対象か」を明示することで成立する給付**を重視しています。
-
----
-
-## リポジトリ構成
-
-```text
-we-ne/
-├─ README.md              # 英語版 README
-├─ README.ja.md           # 日本語版 README（このファイル）
-├─ grant_program/         # Solana スマートコントラクト（Anchor）
-│  ├─ Anchor.toml
-│  ├─ programs/
-│  │  └─ grant_program/
-│  │     └─ src/
-│  │        └─ lib.rs     # Grant / Claim / Allowlist / Receipt の中核実装
-│  └─ tests/              # Anchor tests
-└─ wene-mobile/           # モバイルアプリ（React Native + Expo）
-   ├─ app/                # Expo Router による画面定義
-   ├─ src/                # アプリケーションロジック
-   │  ├─ solana/          # Solana クライアント実装
-   │  ├─ screens/         # 画面コンポーネント
-   │  └─ wallet/          # ウォレットアダプター
-   ├─ android/            # Android ネイティブプロジェクト
-   └─ ios/                # iOS ネイティブプロジェクト
+# Expo GoアプリでQRスキャン
 ```
 
----
+### スマートコントラクトビルド
 
-## 開発環境
-
-### スマートコントラクト（grant_program）
-
-- Rust  
-- Solana CLI  
-- Anchor  
-- anchor-lang / anchor-spl
-
-#### ビルド
 ```bash
 cd grant_program
 anchor build
-```
-
-#### テスト
-```bash
-cd grant_program
 anchor test
 ```
 
-### モバイルアプリ（wene-mobile）
-
-- Node.js（推奨: v18以上）
-- npm または yarn
-- Expo CLI
-- iOS開発: Xcode（macOSのみ）
-- Android開発: Android Studio / Android SDK
-
-#### セットアップ
-```bash
-cd wene-mobile
-npm install
-```
-
-#### 開発サーバー起動
-```bash
-npm start
-```
-
-#### ビルド
-```bash
-# Android APK
-npm run build:apk
-
-# iOS Simulator
-npm run build:ios
-```
-
-詳細な手順は [`wene-mobile/README.md`](./wene-mobile/README.md) を参照してください。
+→ 詳細: [開発ガイド](./docs/DEVELOPMENT.md)
 
 ---
 
-## セキュリティ・注意事項
+## 📁 リポジトリ構成
 
-- KYC / 本人確認は行いません（ウォレット単位）  
-- スマートコントラクトの監査は未実施です  
-- 本番運用を想定していません
-
-**研究・検証目的でのみ利用してください。**
+```
+we-ne/
+├── grant_program/           # Solanaスマートコントラクト（Anchor）
+│   ├── programs/grant_program/src/lib.rs   # コアロジック
+│   └── tests/               # 統合テスト
+│
+├── wene-mobile/             # モバイルアプリ（React Native + Expo）
+│   ├── app/                 # 画面（Expo Router）
+│   ├── src/solana/          # ブロックチェーンクライアント
+│   ├── src/wallet/          # Phantomアダプター
+│   └── src/utils/phantom.ts # ディープリンク暗号化
+│
+├── docs/                    # ドキュメント
+│   ├── ARCHITECTURE.md      # システム設計
+│   ├── SECURITY.md          # 脅威モデル
+│   ├── PHANTOM_FLOW.md      # ウォレット連携
+│   ├── DEVELOPMENT.md       # 開発セットアップ
+│   └── ROADMAP.md           # 将来計画
+│
+├── .github/workflows/       # CI/CD
+├── LICENSE                  # MIT
+├── CONTRIBUTING.md          # 貢献ガイド
+└── SECURITY.md              # 脆弱性報告
+```
 
 ---
 
-## Status
+## 🔐 セキュリティモデル
 
-- Anchor build: ✅  
-- Anchor test: ✅  
-- SPL fixed-rate periodic grant (MVP): ✅
-- Mobile app (React Native + Expo): ✅
-- Wallet integration (Phantom): ✅
-- Deep Link support: ✅
+| 観点 | 実装 |
+|------|------|
+| **鍵の管理** | 非カストディアル——秘密鍵はPhantomウォレット内のみ |
+| **セッショントークン** | NaCl boxで暗号化、アプリサンドボックス内に保存 |
+| **二重受給防止** | オンチェーンClaimReceipt PDAで防止 |
+| **ディープリンク** | 暗号化ペイロード、厳格なURL検証 |
+
+⚠️ **監査状況**: 未監査——テスト目的でのみ使用してください
+
+→ 詳細: [セキュリティ](./docs/SECURITY.md)
 
 ---
 
-## コンタクト
+## 🗺️ ロードマップ
 
-Issue / Discussion を通じたフィードバックを歓迎します。
+| フェーズ | 期間 | 成果物 |
+|---------|------|--------|
+| **MVP** | ✅ 完了 | 基本的な受給フロー、Phantom連携 |
+| **Allowlist** | +2週間 | Merkleベースの受給資格 |
+| **管理ダッシュボード** | +1ヶ月 | 給付者向けWeb UI |
+| **メインネットβ** | +3ヶ月 | 監査、パートナー、本番デプロイ |
+
+→ 詳細: [ロードマップ](./docs/ROADMAP.md)
+
+---
+
+## 💡 なぜSolana？なぜ今？なぜFoundation Grant？
+
+### なぜSolana？
+
+- **速度**: 1秒以下のファイナリティでリアルタイム支援
+- **コスト**: 1トランザクション約0.1円で少額給付も可能
+- **エコシステム**: Phantom、SPLトークン、開発ツール
+- **日本でのプレゼンス**: 成長するSolanaコミュニティ
+
+### なぜ今？
+
+- 日本でデジタル給付配布の検討が進行中
+- コロナ後、効率的な支援配布への関心増
+- モバイルウォレット普及が加速
+
+### なぜFoundation Grant？
+
+- **新しいユースケース**: 公的支援インフラ（DeFi/NFTではない）
+- **実社会へのインパクト**: 実際の支援プログラム向け設計
+- **オープンソース**: MITライセンス、再利用可能なコンポーネント
+- **日本市場**: ローカルチーム、ローカルパートナーシップ
+
+---
+
+## 🤝 コントリビュート
+
+貢献を歓迎します！[CONTRIBUTING.md](./CONTRIBUTING.md)をご覧ください。
+
+優先領域:
+- テストカバレッジ
+- ドキュメント翻訳
+- セキュリティレビュー
+- UI/UXフィードバック
+
+---
+
+## 📜 ライセンス
+
+[MITライセンス](./LICENSE) — 自由に使用、改変、配布可能
+
+---
+
+## 📞 連絡先
+
+- **Issues**: [GitHub Issues](https://github.com/hk089660/-instant-grant-core/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/hk089660/-instant-grant-core/discussions)
+- **セキュリティ**: 脆弱性報告は[SECURITY.md](./SECURITY.md)参照
+
+---
+
+<p align="center">
+  <i>Solana上で公共のために構築 ❤️</i>
+</p>

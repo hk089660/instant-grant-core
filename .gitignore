@@ -1,1 +1,96 @@
+# ===================
+# OS & Editor
+# ===================
 .DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.iml
+
+# ===================
+# Secrets & Keys (CRITICAL)
+# ===================
+*.env
+*.env.*
+!*.env.example
+*.key
+*.pem
+*.p8
+*.p12
+*.keystore
+!debug.keystore
+*.jks
+*.mobileprovision
+id.json
+*-keypair.json
+*_keypair.json
+*.secret
+.env*.local
+
+# ===================
+# Solana / Anchor
+# ===================
+grant_program/.anchor/
+grant_program/target/
+grant_program/test-ledger/
+**/*.rs.bk
+
+# ===================
+# Node.js
+# ===================
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn-debug.log
+.pnpm-debug.log
+package-lock.json.bak
+
+# ===================
+# React Native / Expo
+# ===================
+wene-mobile/.expo/
+wene-mobile/dist/
+wene-mobile/web-build/
+*.tsbuildinfo
+expo-env.d.ts
+
+# ===================
+# iOS
+# ===================
+wene-mobile/ios/build/
+wene-mobile/ios/Pods/
+wene-mobile/ios/*.xcworkspace
+wene-mobile/ios/*.xcuserstate
+wene-mobile/ios/DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+wene-mobile/ios/.xcode.env.local
+
+# ===================
+# Android
+# ===================
+wene-mobile/android/build/
+wene-mobile/android/app/build/
+wene-mobile/android/.gradle/
+wene-mobile/android/local.properties
+wene-mobile/android/.cxx/
+*.apk
+*.aab
+*.hprof
+
+# ===================
+# Metro
+# ===================
+.metro-health-check*
+
+# ===================
+# Misc
+# ===================
+.cursor/
+*.log
+coverage/
+.nyc_output/

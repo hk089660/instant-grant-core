@@ -1,224 +1,241 @@
 # we-ne
 
-[日本語版 README はこちら](./README.ja.md)
+> **Instant, transparent benefit distribution on Solana — built for Japan's public support needs**
 
-**A Solana-based infrastructure for instant, verifiable, and low-cost benefit distribution in Japan**
+[![CI](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml/badge.svg)](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-we-ne is an on-chain foundation designed to execute "benefits," "support," and "distribution" in Japanese society with an emphasis on **immediacy, low cost, and transparency**.
-
-This repository integrates the existing `solana-grant-program` at its core and provides a **minimum viable product (MVP)** for implementing **SPL token-based fixed-rate periodic benefits (subscription-style)**.
-
----
-
-## Philosophy
-
-In Japan, there is often a significant delay, administrative overhead, and intermediary costs between identifying a need for support and actually delivering it.
-
-- Heavy procedures that cannot respond to urgent needs
-- Small-scale support often becomes cost-prohibitive
-- Low transparency in execution makes verification difficult
-
-we-ne aims to **simplify these through technology**.
-
-> **Support should be creatable the moment you think of it,**  
-> **delivered instantly to those who meet the conditions,**  
-> **and its execution should be verifiable by anyone**
-
-This project is not intended for speculation or financial products.  
-It focuses on **real-world use cases in Japan** such as livelihood support, community activities, and proof-of-concept experiments.
+[日本語版 README](./README.ja.md) | [Architecture](./docs/ARCHITECTURE.md) | [Development Guide](./docs/DEVELOPMENT.md)
 
 ---
 
-## Why Solana?
+## 🎯 What is we-ne?
 
-The most important factors in benefits and support are **"speed of delivery" and "practical accessibility"**.
+we-ne is a **non-custodial benefit distribution system** built on Solana, designed to deliver support payments instantly and transparently.
 
-Solana has characteristics that align well with this philosophy:
-
-- **Fast finality**: Creates an "it just arrived" experience instead of "pending"
-- **Low fees**: Makes small-scale, high-frequency benefits viable
-- **On-chain execution**: Verifiable who, when, and under what conditions distributions occurred
-- **Global infrastructure**: Flexible enough to work for small-scale use cases in Japan
-
-we-ne adopts Solana to **treat benefits as living infrastructure, not financial products**.
+**One-liner**: SPL token grants with periodic claims, double-claim prevention, and mobile wallet integration — all verifiable on-chain.
 
 ---
 
-## Current Capabilities (MVP)
+## 🚨 Problem & Why It Matters
 
-The current we-ne is a **working MVP** with the following specifications:
+### The Problem (Japan Context)
 
-### Smart Contract (grant_program)
+In Japan, public support programs suffer from:
+- **Slow delivery**: Weeks/months from application to receipt
+- **High overhead**: Administrative costs eat into small grants
+- **Opacity**: Hard to verify if funds reached intended recipients
+- **Inflexibility**: Fixed schedules don't match urgent needs
 
-- SPL token-only benefit program
-- Fixed-rate method (e.g., operated as 1 token = 1 yen equivalent)
-- Periodic benefits (claimable only once per period)
-- Double-claim prevention (period index + ClaimReceipt PDA)
-- Complete implementation from funding to claiming to pausing
+### Global Relevance
 
-```text
-Create Grant → Fund Grant → Periodic Claim → Pause / Resume
+These problems exist worldwide:
+- Disaster relief that arrives too late
+- Micro-grants where fees exceed value
+- Aid programs lacking accountability
+
+### Our Solution
+
+we-ne provides:
+- ⚡ **Instant delivery**: Claims settle in seconds
+- 💰 **Low cost**: ~$0.001 per transaction
+- 🔍 **Full transparency**: Every claim verifiable on-chain
+- 📱 **Mobile-first**: Recipients claim via smartphone
+
+---
+
+## 🏗️ How It Works
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      HIGH-LEVEL FLOW                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   GRANTOR                 SOLANA                 RECIPIENT  │
+│   ───────                 ──────                 ─────────  │
+│                                                             │
+│   1. Create Grant ──────► Grant PDA                         │
+│   2. Fund Vault ────────► Token Vault                       │
+│                                                             │
+│                           ┌─────────┐                       │
+│                           │ Period  │◄──── 3. Open App      │
+│                           │ Check   │                       │
+│                           └────┬────┘                       │
+│                                │                            │
+│                           ┌────▼────┐                       │
+│                           │  Claim  │◄──── 4. Sign in       │
+│                           │ Receipt │      Phantom          │
+│                           └────┬────┘                       │
+│                                │                            │
+│                           ┌────▼────┐                       │
+│   5. Verify on Explorer ◄─┤ Tokens  ├────► Wallet           │
+│                           │Transfer │                       │
+│                           └─────────┘                       │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-Anchor `build / test` passes successfully.
+**Key Components**:
+1. **Smart Contract** (`grant_program/`): Anchor program managing grants, claims, and receipts
+2. **Mobile App** (`wene-mobile/`): React Native app for recipients to claim benefits
+3. **Phantom Integration**: Non-custodial signing via deep links
 
-### Mobile App (wene-mobile)
-
-- Recipient-facing UI built with React Native (Expo + TypeScript)
-- Solana wallet integration (Phantom Wallet support)
-- Connection to grant programs and claiming functionality
-- Deep Link support (`wene://r/<campaignId>` and `https://wene.app/r/<campaignId>`)
-- iOS / Android compatible
-
-For mobile app details, see [`wene-mobile/README.md`](./wene-mobile/README.md).
+→ See [Architecture](./docs/ARCHITECTURE.md) for details
 
 ---
 
-## Periodic Benefits (Period-Based) Concept
+## 📱 Demo
 
-we-ne is designed to handle **daily, weekly, monthly, and other periodic benefits** using the same mechanism, not just monthly benefits.
+> 🎬 **Video demo**: [Coming Soon]
 
-The benefit frequency is determined by `period_seconds` set when creating the Grant.  
-This specifies how often benefits are distributed in seconds.
+### Screenshots
 
-Examples:
-- Daily benefits: `period_seconds = 86,400`
-- Weekly benefits: `period_seconds = 604,800`
-- Monthly benefits (approximate): `period_seconds = 2,592,000`
-
-Each period calculates a `period_index`, and the ClaimReceipt keyed by `(grant, claimer, period_index)` **prevents double-claiming within the same period**.
-
-This mechanism enables we-ne to:
-
-- Flexibly change benefit frequency according to use case
-- Extend to daily/weekly/monthly without additional implementation
-- Clearly explain periodic benefits as "time-based rules"
-
-we-ne is designed as a **recurring benefit engine divided by time**, not bound to specific cycles.
+| Home | Claim | Success |
+|------|-------|---------|
+| Connect wallet | Review grant details | Tokens received |
 
 ---
 
-## Conditional Benefits (Allowlist) Concept
+## 🚀 Quickstart
 
-we-ne is designed with the premise of **combining conditions with periodic benefits**.
+### Prerequisites
+- Node.js v18+
+- For smart contract: Rust, Solana CLI, Anchor
+- For mobile: Android Studio or Xcode
 
-In conditional benefits, instead of judging "who can receive" with complex logic, control is based on **a pre-defined target list (Allowlist)**.
+### Run Mobile App (Development)
 
-The Allowlist is intended to be linked to the Grant using a Merkle Tree.
+```bash
+# Clone and install
+git clone https://github.com/hk089660/-instant-grant-core.git
+cd we-ne/wene-mobile
+npm install
 
-- Register the Merkle Root of the Allowlist when creating the Grant
-- When claiming, recipients prove they are on the list
-- Those who don't meet conditions cannot claim
+# Start Expo
+npm start
 
-This approach enables we-ne to:
-
-- Provide conditional benefits without handling KYC or personal information
-- Work well with roster-based operations for schools, regions, organizations, etc.
-- Naturally combine with periodic benefits (daily/weekly/monthly)
-
-we-ne emphasizes **benefits that work by explicitly identifying "who is eligible"**, rather than complicating conditions.
-
----
-
-## Repository Structure
-
-```text
-we-ne/
-├─ README.md              # This file (English)
-├─ README.ja.md           # Japanese README
-├─ grant_program/         # Solana smart contract (Anchor)
-│  ├─ Anchor.toml
-│  ├─ programs/
-│  │  └─ grant_program/
-│  │     └─ src/
-│  │        └─ lib.rs     # Core implementation: Grant / Claim / Allowlist / Receipt
-│  └─ tests/              # Anchor tests
-└─ wene-mobile/           # Mobile app (React Native + Expo)
-   ├─ app/                # Screen definitions with Expo Router
-   ├─ src/                # Application logic
-   │  ├─ solana/          # Solana client implementation
-   │  ├─ screens/         # Screen components
-   │  └─ wallet/          # Wallet adapters
-   ├─ android/            # Android native project
-   └─ ios/                # iOS native project
+# Scan QR with Expo Go app
 ```
 
----
+### Build Smart Contract
 
-## Development Environment
-
-### Smart Contract (grant_program)
-
-- Rust
-- Solana CLI
-- Anchor
-- anchor-lang / anchor-spl
-
-#### Build
 ```bash
 cd grant_program
 anchor build
-```
-
-#### Test
-```bash
-cd grant_program
 anchor test
 ```
 
-### Mobile App (wene-mobile)
-
-- Node.js (recommended: v18+)
-- npm or yarn
-- Expo CLI
-- iOS development: Xcode (macOS only)
-- Android development: Android Studio / Android SDK
-
-#### Setup
-```bash
-cd wene-mobile
-npm install
-```
-
-#### Start Development Server
-```bash
-npm start
-```
-
-#### Build
-```bash
-# Android APK
-npm run build:apk
-
-# iOS Simulator
-npm run build:ios
-```
-
-For detailed instructions, see [`wene-mobile/README.md`](./wene-mobile/README.md).
+→ Full setup: [Development Guide](./docs/DEVELOPMENT.md)
 
 ---
 
-## Security & Disclaimers
+## 📁 Repository Structure
 
-- No KYC / identity verification (wallet-based)
-- Smart contract has not been audited
-- Not intended for production use
-
-**Use only for research and verification purposes.**
+```
+we-ne/
+├── grant_program/           # Solana smart contract (Anchor)
+│   ├── programs/grant_program/src/lib.rs   # Core logic
+│   └── tests/               # Integration tests
+│
+├── wene-mobile/             # Mobile app (React Native + Expo)
+│   ├── app/                 # Screens (Expo Router)
+│   ├── src/solana/          # Blockchain client
+│   ├── src/wallet/          # Phantom adapter
+│   └── src/utils/phantom.ts # Deep link encryption
+│
+├── docs/                    # Documentation
+│   ├── ARCHITECTURE.md      # System design
+│   ├── SECURITY.md          # Threat model
+│   ├── PHANTOM_FLOW.md      # Wallet integration
+│   ├── DEVELOPMENT.md       # Dev setup
+│   └── ROADMAP.md           # Future plans
+│
+├── .github/workflows/       # CI/CD
+├── LICENSE                  # MIT
+├── CONTRIBUTING.md          # Contribution guide
+└── SECURITY.md              # Vulnerability reporting
+```
 
 ---
 
-## Status
+## 🔐 Security Model
 
-- Anchor build: ✅
-- Anchor test: ✅
-- SPL fixed-rate periodic grant (MVP): ✅
-- Mobile app (React Native + Expo): ✅
-- Wallet integration (Phantom): ✅
-- Deep Link support: ✅
+| Aspect | Implementation |
+|--------|----------------|
+| **Key custody** | Non-custodial — keys never leave Phantom wallet |
+| **Session tokens** | Encrypted with NaCl box, stored in app sandbox |
+| **Double-claim** | Prevented by on-chain ClaimReceipt PDA |
+| **Deep links** | Encrypted payloads, strict URL validation |
+
+⚠️ **Audit Status**: NOT AUDITED — use at own risk for testing only
+
+→ Full threat model: [Security](./docs/SECURITY.md)
 
 ---
 
-## Contact
+## 🗺️ Roadmap
 
-Feedback via Issues / Discussions is welcome.
+| Phase | Timeline | Deliverables |
+|-------|----------|--------------|
+| **MVP** | ✅ Complete | Basic claim flow, Phantom integration |
+| **Allowlist** | +2 weeks | Merkle-based eligibility |
+| **Admin Dashboard** | +1 month | Web UI for grant creators |
+| **Mainnet Beta** | +3 months | Audit, partners, production deploy |
+
+→ Full roadmap: [Roadmap](./docs/ROADMAP.md)
+
+---
+
+## 💡 Why Solana? Why Now? Why Foundation Grant?
+
+### Why Solana?
+
+- **Speed**: Sub-second finality for real-time support
+- **Cost**: $0.001/tx makes micro-grants viable
+- **Ecosystem**: Phantom, SPL tokens, developer tools
+- **Japan presence**: Growing Solana community in Japan
+
+### Why Now?
+
+- Japan exploring digital benefit distribution
+- Post-COVID interest in efficient aid delivery
+- Mobile wallet adoption accelerating
+
+### Why Foundation Grant?
+
+- **Novel use case**: Public benefit infrastructure (not DeFi/NFT)
+- **Real-world impact**: Designed for actual support programs
+- **Open source**: MIT licensed, reusable components
+- **Japan market**: Local team, local partnerships
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+Priority areas:
+- Testing coverage
+- Documentation translations
+- Security review
+- UI/UX feedback
+
+---
+
+## 📜 License
+
+[MIT License](./LICENSE) — free to use, modify, and distribute.
+
+---
+
+## 📞 Contact
+
+- **Issues**: [GitHub Issues](https://github.com/hk089660/-instant-grant-core/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/hk089660/-instant-grant-core/discussions)
+- **Security**: See [SECURITY.md](./SECURITY.md) for vulnerability reporting
+
+---
+
+<p align="center">
+  <i>Built with ❤️ for public good on Solana</i>
+</p>
