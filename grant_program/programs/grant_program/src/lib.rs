@@ -545,7 +545,7 @@ fn allowlist_leaf(claimer: Pubkey) -> [u8; 32] {
 /// Each step: parent = sha256( min(a,b) || max(a,b) )
 ///
 /// IMPORTANT: Off-chain Merkle tree builder must use the same sorted-pair rule.
-fn verify_merkle_sorted(root: [u8; 32], leaf: [u8; 32], proof: &Vec<[u8; 32]>) -> bool {
+fn verify_merkle_sorted(root: [u8; 32], leaf: [u8; 32], proof: &[[u8; 32]]) -> bool {
     use anchor_lang::solana_program::hash::hashv;
 
     let mut computed = leaf;
