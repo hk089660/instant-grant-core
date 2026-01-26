@@ -86,9 +86,33 @@ we-ne provides:
 
 ## 📱 Demo
 
-> 🎬 **Video demo**: [Coming Soon]
+**Demo Video**:
+
+<div align="center">
+
+**[📹 デモ動画を見る / Watch Demo Video (11MB)](https://github.com/hk089660/-instant-grant-core/raw/main/docs/demo.mp4)**
+
+*Click the link above to watch the demo video*
+
+</div>
+
+**日本語**: 上記のリンクをクリックすると、モバイルアプリからPhantomウォレットを接続し、給付プログラムに接続して受給する一連の流れを確認できるデモ動画が表示されます。
+
+**English**: Click the link above to watch a demo video showing the complete flow of connecting a Phantom wallet from the mobile app, accessing a grant program, and claiming benefits.
+
+**What the demo shows**:
+1. Opening the mobile app and connecting Phantom wallet
+2. Scanning QR code or opening deep link (`wene://r/<campaignId>`)
+3. Viewing grant details (amount, period, eligibility)
+4. Tapping "Claim" → Phantom wallet signing the transaction
+5. SPL tokens being transferred to recipient's wallet within seconds
 
 ### Screenshots
+
+
+---
+
+## Screenshots
 
 | Home | Claim | Success |
 |------|-------|---------|
