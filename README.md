@@ -32,6 +32,10 @@
 
 *Click the link above to watch the demo video*
 
+⚠️ **Note**: The demo link will directly download a short MP4 file (≈11 MB). This is intentional to allow offline review without external video platforms.
+
+⚠️ **注意**: デモリンクは直接MP4ファイル（約11MB）をダウンロードします。これは外部動画プラットフォームを使わずにオフラインで確認できるようにするための意図的な動作です。
+
 </div>
 
 **日本語**: 上記のリンクをクリックすると、モバイルアプリからPhantomウォレットを接続し、給付プログラムに接続して受給する一連の流れを確認できるデモ動画が表示されます。
