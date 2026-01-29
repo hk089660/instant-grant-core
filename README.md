@@ -86,7 +86,7 @@ we-ne provides:
 
 ## 📱 Demo
 
-> 🎬 **Video demo**: [Coming Soon]
+> 🎬 **Video demo**: [https://x.com/Shiki93278/status/2015659939356889450]
 
 ### Screenshots
 

@@ -1,120 +1,151 @@
 # we-ne
 
-> **日本の公的支援を変える、Solana上の即時・透明な給付配布システム**
+> **Instant, transparent benefit distribution on Solana — built for Japan's public support needs**
 
 [![CI](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml/badge.svg)](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-[English README](./README.md) | [アーキテクチャ](./docs/ARCHITECTURE.md) | [開発ガイド](./docs/DEVELOPMENT.md)
+[日本語版 README](./README.ja.md) | [Architecture](./docs/ARCHITECTURE.md) | [Development Guide](./docs/DEVELOPMENT.md)
 
 ---
 
-## 🎯 we-neとは？
+## 🎯 What is we-ne?
 
-we-neは、Solana上に構築された**非カストディアルな給付配布システム**です。支援金を即座に、透明性をもって届けます。
+we-ne is a **non-custodial benefit distribution system** built on Solana, designed to deliver support payments instantly and transparently.
 
-**一言で**: SPLトークンによる定期給付、二重受給防止、モバイルウォレット連携——すべてオンチェーンで検証可能
-
----
-
-## 🚨 解決する課題
-
-### 日本の公的支援の問題
-
-- **遅い**: 申請から受給まで数週間〜数ヶ月
-- **コスト高**: 少額給付ほど事務費が重い
-- **不透明**: 資金が届いたか検証困難
-- **柔軟性がない**: 緊急時に対応できない固定スケジュール
-
-### グローバルな課題
-
-- 届くのが遅すぎる災害支援
-- 手数料負けする少額助成
-- 説明責任を欠く援助プログラム
-
-### we-neのソリューション
-
-- ⚡ **即時配布**: 数秒で決済完了
-- 💰 **低コスト**: 1トランザクション約0.1円
-- 🔍 **完全な透明性**: すべての受給がオンチェーンで検証可能
-- 📱 **モバイルファースト**: スマートフォンで受給
+**One-liner**: SPL token grants with periodic claims, double-claim prevention, and mobile wallet integration — all verifiable on-chain.
 
 ---
 
-## 🏗️ 仕組み
+## 🚨 Problem & Why It Matters
+
+### The Problem (Japan Context)
+
+In Japan, public support programs suffer from:
+- **Slow delivery**: Weeks/months from application to receipt
+- **High overhead**: Administrative costs eat into small grants
+- **Opacity**: Hard to verify if funds reached intended recipients
+- **Inflexibility**: Fixed schedules don't match urgent needs
+
+### Global Relevance
+
+These problems exist worldwide:
+- Disaster relief that arrives too late
+- Micro-grants where fees exceed value
+- Aid programs lacking accountability
+
+### Our Solution
+
+we-ne provides:
+- ⚡ **Instant delivery**: Claims settle in seconds
+- 💰 **Low cost**: ~$0.001 per transaction
+- 🔍 **Full transparency**: Every claim verifiable on-chain
+- 📱 **Mobile-first**: Recipients claim via smartphone
+
+---
+
+## 🏗️ How It Works
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      ハイレベルフロー                        │
+│                      HIGH-LEVEL FLOW                        │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│   給付者                  Solana                  受給者     │
-│   ──────                 ──────                 ─────────   │
+│   GRANTOR                 SOLANA                 RECIPIENT  │
+│   ───────                 ──────                 ─────────  │
 │                                                             │
-│   1. Grant作成 ────────► Grant PDA                          │
-│   2. 資金投入 ─────────► Token Vault                        │
+│   1. Create Grant ──────► Grant PDA                         │
+│   2. Fund Vault ────────► Token Vault                       │
 │                                                             │
 │                           ┌─────────┐                       │
-│                           │ 期間    │◄──── 3. アプリ起動    │
-│                           │ チェック │                       │
+│                           │ Period  │◄──── 3. Open App      │
+│                           │ Check   │                       │
 │                           └────┬────┘                       │
 │                                │                            │
 │                           ┌────▼────┐                       │
-│                           │  受給   │◄──── 4. Phantom       │
-│                           │ 記録    │      で署名           │
+│                           │  Claim  │◄──── 4. Sign in       │
+│                           │ Receipt │      Phantom          │
 │                           └────┬────┘                       │
 │                                │                            │
 │                           ┌────▼────┐                       │
-│   5. Explorerで確認 ◄─────┤ トークン├────► ウォレット       │
-│                           │ 送金    │                       │
+│   5. Verify on Explorer ◄─┤ Tokens  ├────► Wallet           │
+│                           │Transfer │                       │
 │                           └─────────┘                       │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**主要コンポーネント**:
-1. **スマートコントラクト** (`grant_program/`): Grant、Claim、Receiptを管理するAnchorプログラム
-2. **モバイルアプリ** (`wene-mobile/`): 受給者向けReact Nativeアプリ
-3. **Phantom連携**: ディープリンクによる非カストディアル署名
+**Key Components**:
+1. **Smart Contract** (`grant_program/`): Anchor program managing grants, claims, and receipts
+2. **Mobile App** (`wene-mobile/`): React Native app for recipients to claim benefits
+3. **Phantom Integration**: Non-custodial signing via deep links
 
-→ 詳細: [アーキテクチャ](./docs/ARCHITECTURE.md)
-
----
-
-## 📱 デモ
-
-> 🎬 **デモ動画**: [準備中]
-
-### スクリーンショット
-
-| ホーム | 受給 | 完了 |
-|------|------|------|
-| ウォレット接続 | 給付内容確認 | トークン受け取り |
+→ See [Architecture](./docs/ARCHITECTURE.md) for details
 
 ---
 
-## 🚀 クイックスタート
+## 📱 Demo
 
-### 前提条件
-- Node.js v18以上
-- スマートコントラクト: Rust, Solana CLI, Anchor
-- モバイル: Android StudioまたはXcode
+> 🎬 **Video demo**: [https://x.com/Shiki93278/status/2015659939356889450]
 
-### モバイルアプリ起動（開発）
+### Screenshots
+
+| Home | Claim | Success |
+|------|-------|---------|
+| Connect wallet | Review grant details | Tokens received |
+
+---
+
+## 🚀 Quickstart
+
+### Prerequisites
+- Node.js v18+
+- For smart contract: Rust, Solana CLI, Anchor
+- For mobile: Android SDK, Java 17
+
+### Run Mobile App (Development)
 
 ```bash
-# クローンとインストール
+# Clone repository
 git clone https://github.com/hk089660/-instant-grant-core.git
 cd we-ne/wene-mobile
-npm install
 
-# Expo起動
+# One-command setup (recommended)
+npm run setup
+
+# Or manual setup:
+npm install --legacy-peer-deps
+npm run doctor:fix          # Check and fix common issues
+npx expo prebuild --clean   # Generate native projects
+
+# Start Expo dev server
 npm start
-
-# Expo GoアプリでQRスキャン
 ```
 
-### スマートコントラクトビルド
+### Build Android APK
+
+```bash
+cd wene-mobile
+npm run build:apk
+
+# Output: android/app/build/outputs/apk/release/app-release.apk
+```
+
+### Troubleshooting
+
+Use the built-in doctor script to diagnose and fix issues:
+
+```bash
+# Check for issues
+npm run doctor
+
+# Auto-fix issues
+npm run doctor:fix
+```
+
+The doctor checks: dependencies, polyfills, SafeArea configuration, Phantom integration, Android SDK setup, and more.
+
+### Build Smart Contract
 
 ```bash
 cd grant_program
@@ -122,117 +153,117 @@ anchor build
 anchor test
 ```
 
-→ 詳細: [開発ガイド](./docs/DEVELOPMENT.md)
+→ Full setup: [Development Guide](./docs/DEVELOPMENT.md)
 
 ---
 
-## 📁 リポジトリ構成
+## 📁 Repository Structure
 
 ```
 we-ne/
-├── grant_program/           # Solanaスマートコントラクト（Anchor）
-│   ├── programs/grant_program/src/lib.rs   # コアロジック
-│   └── tests/               # 統合テスト
+├── grant_program/           # Solana smart contract (Anchor)
+│   ├── programs/grant_program/src/lib.rs   # Core logic
+│   └── tests/               # Integration tests
 │
-├── wene-mobile/             # モバイルアプリ（React Native + Expo）
-│   ├── app/                 # 画面（Expo Router）
-│   ├── src/solana/          # ブロックチェーンクライアント
-│   ├── src/wallet/          # Phantomアダプター
-│   └── src/utils/phantom.ts # ディープリンク暗号化
+├── wene-mobile/             # Mobile app (React Native + Expo)
+│   ├── app/                 # Screens (Expo Router)
+│   ├── src/solana/          # Blockchain client
+│   ├── src/wallet/          # Phantom adapter
+│   └── src/utils/phantom.ts # Deep link encryption
 │
-├── docs/                    # ドキュメント
-│   ├── ARCHITECTURE.md      # システム設計
-│   ├── SECURITY.md          # 脅威モデル
-│   ├── PHANTOM_FLOW.md      # ウォレット連携
-│   ├── DEVELOPMENT.md       # 開発セットアップ
-│   └── ROADMAP.md           # 将来計画
+├── docs/                    # Documentation
+│   ├── ARCHITECTURE.md      # System design
+│   ├── SECURITY.md          # Threat model
+│   ├── PHANTOM_FLOW.md      # Wallet integration
+│   ├── DEVELOPMENT.md       # Dev setup
+│   └── ROADMAP.md           # Future plans
 │
 ├── .github/workflows/       # CI/CD
 ├── LICENSE                  # MIT
-├── CONTRIBUTING.md          # 貢献ガイド
-└── SECURITY.md              # 脆弱性報告
+├── CONTRIBUTING.md          # Contribution guide
+└── SECURITY.md              # Vulnerability reporting
 ```
 
 ---
 
-## 🔐 セキュリティモデル
+## 🔐 Security Model
 
-| 観点 | 実装 |
-|------|------|
-| **鍵の管理** | 非カストディアル——秘密鍵はPhantomウォレット内のみ |
-| **セッショントークン** | NaCl boxで暗号化、アプリサンドボックス内に保存 |
-| **二重受給防止** | オンチェーンClaimReceipt PDAで防止 |
-| **ディープリンク** | 暗号化ペイロード、厳格なURL検証 |
+| Aspect | Implementation |
+|--------|----------------|
+| **Key custody** | Non-custodial — keys never leave Phantom wallet |
+| **Session tokens** | Encrypted with NaCl box, stored in app sandbox |
+| **Double-claim** | Prevented by on-chain ClaimReceipt PDA |
+| **Deep links** | Encrypted payloads, strict URL validation |
 
-⚠️ **監査状況**: 未監査——テスト目的でのみ使用してください
+⚠️ **Audit Status**: NOT AUDITED — use at own risk for testing only
 
-→ 詳細: [セキュリティ](./docs/SECURITY.md)
-
----
-
-## 🗺️ ロードマップ
-
-| フェーズ | 期間 | 成果物 |
-|---------|------|--------|
-| **MVP** | ✅ 完了 | 基本的な受給フロー、Phantom連携 |
-| **Allowlist** | +2週間 | Merkleベースの受給資格 |
-| **管理ダッシュボード** | +1ヶ月 | 給付者向けWeb UI |
-| **メインネットβ** | +3ヶ月 | 監査、パートナー、本番デプロイ |
-
-→ 詳細: [ロードマップ](./docs/ROADMAP.md)
+→ Full threat model: [Security](./docs/SECURITY.md)
 
 ---
 
-## 💡 なぜSolana？なぜ今？なぜFoundation Grant？
+## 🗺️ Roadmap
 
-### なぜSolana？
+| Phase | Timeline | Deliverables |
+|-------|----------|--------------|
+| **MVP** | ✅ Complete | Basic claim flow, Phantom integration |
+| **Allowlist** | +2 weeks | Merkle-based eligibility |
+| **Admin Dashboard** | +1 month | Web UI for grant creators |
+| **Mainnet Beta** | +3 months | Audit, partners, production deploy |
 
-- **速度**: 1秒以下のファイナリティでリアルタイム支援
-- **コスト**: 1トランザクション約0.1円で少額給付も可能
-- **エコシステム**: Phantom、SPLトークン、開発ツール
-- **日本でのプレゼンス**: 成長するSolanaコミュニティ
-
-### なぜ今？
-
-- 日本でデジタル給付配布の検討が進行中
-- コロナ後、効率的な支援配布への関心増
-- モバイルウォレット普及が加速
-
-### なぜFoundation Grant？
-
-- **新しいユースケース**: 公的支援インフラ（DeFi/NFTではない）
-- **実社会へのインパクト**: 実際の支援プログラム向け設計
-- **オープンソース**: MITライセンス、再利用可能なコンポーネント
-- **日本市場**: ローカルチーム、ローカルパートナーシップ
+→ Full roadmap: [Roadmap](./docs/ROADMAP.md)
 
 ---
 
-## 🤝 コントリビュート
+## 💡 Why Solana? Why Now? Why Foundation Grant?
 
-貢献を歓迎します！[CONTRIBUTING.md](./CONTRIBUTING.md)をご覧ください。
+### Why Solana?
 
-優先領域:
-- テストカバレッジ
-- ドキュメント翻訳
-- セキュリティレビュー
-- UI/UXフィードバック
+- **Speed**: Sub-second finality for real-time support
+- **Cost**: $0.001/tx makes micro-grants viable
+- **Ecosystem**: Phantom, SPL tokens, developer tools
+- **Japan presence**: Growing Solana community in Japan
+
+### Why Now?
+
+- Japan exploring digital benefit distribution
+- Post-COVID interest in efficient aid delivery
+- Mobile wallet adoption accelerating
+
+### Why Foundation Grant?
+
+- **Novel use case**: Public benefit infrastructure (not DeFi/NFT)
+- **Real-world impact**: Designed for actual support programs
+- **Open source**: MIT licensed, reusable components
+- **Japan market**: Local team, local partnerships
 
 ---
 
-## 📜 ライセンス
+## 🤝 Contributing
 
-[MITライセンス](./LICENSE) — 自由に使用、改変、配布可能
+We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+Priority areas:
+- Testing coverage
+- Documentation translations
+- Security review
+- UI/UX feedback
 
 ---
 
-## 📞 連絡先
+## 📜 License
+
+[MIT License](./LICENSE) — free to use, modify, and distribute.
+
+---
+
+## 📞 Contact
 
 - **Issues**: [GitHub Issues](https://github.com/hk089660/-instant-grant-core/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/hk089660/-instant-grant-core/discussions)
-- **セキュリティ**: 脆弱性報告は[SECURITY.md](./SECURITY.md)参照
+- **Security**: See [SECURITY.md](./SECURITY.md) for vulnerability reporting
 
 ---
 
 <p align="center">
-  <i>Solana上で公共のために構築 ❤️</i>
+  <i>Built with ❤️ for public good on Solana</i>
 </p>
