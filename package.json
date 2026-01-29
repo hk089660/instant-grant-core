@@ -1,0 +1,20 @@
+{
+  "name": "we-ne",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Instant, transparent benefit distribution on Solana",
+  "scripts": {
+    "build": "npm run build:contract && npm run build:mobile",
+    "build:contract": "cd grant_program && anchor build",
+    "build:mobile": "cd wene-mobile && npm install && npx tsc --noEmit",
+    "test": "npm run test:contract",
+    "test:contract": "cd grant_program && anchor test",
+    "test:mobile": "cd wene-mobile && npx tsc --noEmit",
+    "setup:mobile": "cd wene-mobile && npm run setup"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/we-ne/we-ne.git"
+  },
+  "license": "MIT"
+}

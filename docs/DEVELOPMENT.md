@@ -1,6 +1,6 @@
 # Development Guide
 
-This guide covers setting up the development environment for we-ne.
+This guide covers setting up the development environment for we-ne. Third-party and contributor builds are supported via root-level scripts and CI.
 
 ## Prerequisites
 
@@ -20,9 +20,33 @@ This guide covers setting up the development environment for we-ne.
 
 ## Quick Start
 
+### Root-level build (recommended for contributors)
+
+From the **repository root** you can build and test without entering each subproject:
+
+```bash
+git clone https://github.com/<owner>/we-ne.git
+cd we-ne
+
+# Using npm (requires Node at root)
+npm run build      # contract build + mobile typecheck
+npm run test       # Anchor tests
+npm run build:contract
+npm run build:mobile
+npm run test:contract
+
+# Using shell script (no root Node required)
+chmod +x scripts/build-all.sh
+./scripts/build-all.sh all    # build + test + mobile typecheck
+./scripts/build-all.sh build  # build only
+./scripts/build-all.sh test   # contract tests only
+```
+
+### Per-component setup
+
 ```bash
 # Clone repository
-git clone https://github.com/hk089660/-instant-grant-core.git
+git clone https://github.com/<owner>/we-ne.git
 cd we-ne
 
 # Install mobile app dependencies
@@ -32,6 +56,15 @@ npm install
 # Start development server
 npm start
 ```
+
+## CI (GitHub Actions)
+
+On every push/PR to `main` or `master`, [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs:
+
+- **Smart contract**: Install Rust, Solana CLI, Anchor → `grant_program`: `yarn install`, `anchor build`, `anchor test`
+- **Mobile app**: Node 20 → `wene-mobile`: `npm ci`, `npx tsc --noEmit`
+
+No secrets required. The README CI badge reflects this workflow once the repo is on GitHub.
 
 ## Repository Structure
 

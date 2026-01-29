@@ -109,9 +109,31 @@ we-ne provides:
 ## 🚀 Quickstart
 
 ### Prerequisites
-- Node.js v18+
-- For smart contract: Rust, Solana CLI, Anchor
-- For mobile: Android SDK, Java 17
+- Node.js v18+（推奨: v20 LTS）
+- スマートコントラクト: Rust, Solana CLI v1.18+, Anchor v0.30+
+- モバイル: Android SDK (API 36), Java 17
+
+### 第三者・コントリビュータ向け：一括ビルド
+
+**リポジトリルート**から、各サブプロジェクトに入らずにビルド・テストできます。
+
+```bash
+git clone https://github.com/<owner>/we-ne.git
+cd we-ne
+
+# 方法A: npm スクリプト（ルートに Node が必要）
+npm install   # 任意: ルートのスクリプトを使う場合のみ
+npm run build      # コントラクトビルド + モバイル型チェック
+npm run test       # Anchor テスト実行
+
+# 方法B: シェルスクリプト（ルートに Node 不要）
+chmod +x scripts/build-all.sh
+./scripts/build-all.sh all    # ビルド + コントラクトテスト + モバイル型チェック
+./scripts/build-all.sh build  # ビルドのみ
+./scripts/build-all.sh test   # コントラクトテストのみ
+```
+
+詳細は [Development Guide](./docs/DEVELOPMENT.md)、[変更内容](#-変更内容第三者ビルド改善) を参照してください。
 
 ### Run Mobile App (Development)
 
@@ -263,6 +285,18 @@ Priority areas:
 ## 📜 License
 
 [MIT License](./LICENSE) — free to use, modify, and distribute.
+
+---
+
+## 📋 変更内容（第三者ビルド改善）
+
+第三者・コントリビュータがビルド・検証しやすいよう、以下を追加・更新しました。
+
+- **ルートスクリプト**: リポジトリルートに `package.json` を追加。`npm run build`（コントラクト + モバイル型チェック）と `npm run test`（Anchor テスト）を実行可能。`npm run build:contract` / `npm run build:mobile` / `npm run test:contract` で個別実行も可能。
+- **一括ビルドスクリプト**: `scripts/build-all.sh` を追加。ルートに Node を入れずに `./scripts/build-all.sh all`（または `build` / `test`）で実行可能。
+- **CI**: `.github/workflows/ci.yml` を追加。push/PR のたびに Anchor のビルド・テストとモバイルのインストール・TypeScript チェックを実行。README の CI バッジはこのワークフローを指します。
+- **ドキュメント**: [Development Guide](./docs/DEVELOPMENT.md) にルートからのビルド・テスト手順と CI の説明を追記。
+- **二重 claim 防止の修正**: `grant_program` で claim 用レシートアカウントを `init_if_needed` から `init` に変更。同一期間での2回目の claim が正しく拒否されるようになった（receipt PDA が既に存在するため `init` が失敗）。Anchor の全テスト（「claimer can claim once per period」含む）がパスする状態です。
 
 ---
 

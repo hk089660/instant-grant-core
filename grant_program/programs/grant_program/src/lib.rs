@@ -340,9 +340,9 @@ pub struct ClaimGrant<'info> {
     )]
     pub claimer_ata: Account<'info, TokenAccount>,
 
-    /// 期間内1回の受給を保証するレシート
+    /// 期間内1回の受給を保証するレシート（同一期間の二重 claim 時は init が失敗する）
     #[account(
-        init_if_needed,
+        init,
         payer = claimer,
         space = 8 + ClaimReceipt::INIT_SPACE,
         seeds = [

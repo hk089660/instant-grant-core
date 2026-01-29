@@ -117,9 +117,31 @@ we-ne provides:
 ## 🚀 Quickstart
 
 ### Prerequisites
-- Node.js v18+
-- For smart contract: Rust, Solana CLI, Anchor
-- For mobile: Android SDK, Java 17
+- Node.js v18+ (recommended: v20 LTS)
+- For smart contract: Rust, Solana CLI v1.18+, Anchor v0.30+
+- For mobile: Android SDK (API 36), Java 17
+
+### One-command build (for contributors / third parties)
+
+From the **repository root** you can build and test everything without entering each subproject:
+
+```bash
+git clone https://github.com/<owner>/we-ne.git
+cd we-ne
+
+# Option A: npm scripts (requires Node at root)
+npm install   # optional: only if you want to run root scripts
+npm run build      # build contract + mobile typecheck
+npm run test       # run Anchor tests
+
+# Option B: shell script (no root Node required)
+chmod +x scripts/build-all.sh
+./scripts/build-all.sh all    # build + test contract + mobile typecheck
+./scripts/build-all.sh build  # build only
+./scripts/build-all.sh test   # contract tests only
+```
+
+See [Development Guide](./docs/DEVELOPMENT.md) for per-component setup and [Recent changes](#-recent-changes) for what was added for third-party builds.
 
 ### Run Mobile App (Development)
 
@@ -271,6 +293,18 @@ Priority areas:
 ## 📜 License
 
 [MIT License](./LICENSE) — free to use, modify, and distribute.
+
+---
+
+## 📋 Recent changes (third-party build improvements)
+
+To make the project easier to build and verify for contributors and third parties:
+
+- **Root-level scripts**: Added `package.json` at repo root with `npm run build` (contract + mobile typecheck) and `npm run test` (Anchor tests). Use `npm run build:contract`, `npm run build:mobile`, `npm run test:contract` for per-component runs.
+- **Unified build script**: Added `scripts/build-all.sh` so you can run `./scripts/build-all.sh all` (or `build` / `test`) without installing Node at root.
+- **CI**: Added `.github/workflows/ci.yml` so every push/PR runs Anchor build & test and mobile install & TypeScript check. The CI badge in this README reflects that workflow once the repo is on GitHub.
+- **Docs**: [Development Guide](./docs/DEVELOPMENT.md) updated with root-level build/test and CI usage.
+- **Double-claim fix**: In `grant_program`, the claim receipt account was changed from `init_if_needed` to `init`. This correctly rejects a second claim in the same period (receipt PDA already exists, so `init` fails). All Anchor tests, including "claimer can claim once per period", now pass.
 
 ---
 
