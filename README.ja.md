@@ -1,330 +1,234 @@
 # we-ne
 
-> **Instant, transparent benefit distribution on Solana — built for Japan's public support needs**
+> **Solana 上の即時・透明な支援配布 — 日本の公的支援ニーズ向けプロトタイプ**
 
 [![CI](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml/badge.svg)](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-[日本語版 README](./README.ja.md) | [Architecture](./docs/ARCHITECTURE.md) | [Development Guide](./docs/DEVELOPMENT.md)
+[英語版 README](./README.md) | [アーキテクチャ](./docs/ARCHITECTURE.md) | [開発ガイド](./docs/DEVELOPMENT.md)
 
 ---
 
-## 🎯 What is we-ne?
+## 概要
 
-we-ne is a **non-custodial benefit distribution system** built on Solana, designed to deliver support payments instantly and transparently.
+we-ne は Solana 上で動作する**非保管型の支援配布システム**のプロトタイプである。現時点では**プロトタイプ段階**にあり、Phantom 連携と基本的な claim フローが実装されている。本番利用は想定していない。
 
-**One-liner**: SPL token grants with periodic claims, double-claim prevention, and mobile wallet integration — all verifiable on-chain.
-
----
-
-## 🚨 Problem & Why It Matters
-
-### The Problem (Japan Context)
-
-In Japan, public support programs suffer from:
-- **Slow delivery**: Weeks/months from application to receipt
-- **High overhead**: Administrative costs eat into small grants
-- **Opacity**: Hard to verify if funds reached intended recipients
-- **Inflexibility**: Fixed schedules don't match urgent needs
-
-### Global Relevance
-
-These problems exist worldwide:
-- Disaster relief that arrives too late
-- Micro-grants where fees exceed value
-- Aid programs lacking accountability
-
-### Our Solution
-
-we-ne provides:
-- ⚡ **Instant delivery**: Claims settle in seconds
-- 💰 **Low cost**: ~$0.001 per transaction
-- 🔍 **Full transparency**: Every claim verifiable on-chain
-- 📱 **Mobile-first**: Recipients claim via smartphone
+- **コア**: 期間ごとの SPL 付与、二重 claim 防止、モバイルウォレット連携（オンチェーンで検証可能）
+- **構成**: スマートコントラクト（`grant_program/`）、モバイルアプリ（`wene-mobile/`）、Phantom ディープリンク連携
 
 ---
 
-## 🏗️ How It Works
+## 現在動作する範囲
+
+- **コントラクト**: Grant 作成・Vault 入金・期間ごとの claim・同一期間の二重 claim 拒否
+- **モバイル**: Phantom 接続、QR/ディープリンク（`wene://r/<campaignId>`）からの付与詳細表示、Claim 時の Phantom 署名とトークン受取
+- **ビルド・テスト**: ルートからの `npm run build` / `npm run test`、および `scripts/build-all.sh` による一括ビルド・型チェック・Anchor テスト
+
+---
+
+## 現在の成功条件
+
+**正常終了が期待されるコマンドと判断基準**
+
+| コマンド | 成功とみなす状態 |
+|----------|------------------|
+| `npm run build` または `./scripts/build-all.sh build` | `grant_program` で `anchor build` が完了し、`wene-mobile` で `npm install` と `npx tsc --noEmit` がエラーなく終了する |
+| `npm run test` または `./scripts/build-all.sh test` | `grant_program` の Anchor テスト（create_grant, fund_grant, claimer can claim once per period）がすべて成功する |
+| `./scripts/build-all.sh all` | 上記ビルド・テスト・モバイル型チェックが一括で完了し、最後に「✅ Done.」が表示される |
+
+**プロトタイプ段階で許容しているもの**
+
+- 環境差（Node/OS/Anchor のバージョンなど）によるビルド・テストの失敗
+- モバイルの `npm install` 時のピア依存警告（`legacy-peer-deps` で回避可能である旨は後述）
+- CI の一時的な失敗（CI はベストエフォートであり、全環境での成功は保証しない）
+
+---
+
+## 既知の制限・未実装
+
+- **監査**: 未実施。本番・金銭的リスクのある利用は想定していない
+- **許可リスト（Allowlist）**: 未実装（Merkle 等による資格制限はロードマップに記載）
+- **管理者 UI**: 未実装（Grant 作成・運用は現状 CLI 等を想定）
+- **モバイル**: React/react-dom のピア依存により、環境によっては `npm install` でエラーになる。`wene-mobile/.npmrc` およびルート/CI では `--legacy-peer-deps` で対応済み
+
+---
+
+## 動作確認環境・CI
+
+**README で想定している動作確認環境**
+
+- コントラクト: Rust（stable）, Solana CLI 1.18 以上, Anchor 0.30 以上（0.31.x 推奨）
+- モバイル: Node.js v18 以上（v20 推奨）, Android の場合は Android SDK (API 36), Java 17
+- その他: [開発ガイド](./docs/DEVELOPMENT.md) を参照
+
+**CI について**
+
+- `.github/workflows/ci.yml` でプッシュ・プルリクエスト時に Anchor のビルド・テストとモバイルのインストール・TypeScript チェックを実行している
+- CI は**ベストエフォート**であり、あらゆる環境でのビルド成功を保証するものではない
+- 目的は、明らかな回帰や環境起因の問題の検出である
+
+---
+
+## we-ne とは
+
+we-ne は Solana 上で動作する**非保管型の支援配布システム**であり、支援金を即時・透明に届けることを目的としている。
+
+**要約**: 期間ごとの SPL 付与、二重 claim 防止、モバイルウォレット連携を備え、いずれもオンチェーンで検証可能。
+
+---
+
+## 課題と解決策
+
+### 日本の文脈での課題
+
+- 申請から受給まで数週間〜数ヶ月、事務コストが大きい、配分の透明性不足、スケジュールが硬直的
+
+### 本プロジェクトの対応
+
+- 即時決済、低コスト（約 $0.001/件）、オンチェーン検証、モバイルでの claim
+
+→ 詳細は [アーキテクチャ](./docs/ARCHITECTURE.md)
+
+---
+
+## 動作の流れ
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      HIGH-LEVEL FLOW                        │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│   GRANTOR                 SOLANA                 RECIPIENT  │
-│   ───────                 ──────                 ─────────  │
-│                                                             │
-│   1. Create Grant ──────► Grant PDA                         │
-│   2. Fund Vault ────────► Token Vault                       │
-│                                                             │
-│                           ┌─────────┐                       │
-│                           │ Period  │◄──── 3. Open App      │
-│                           │ Check   │                       │
-│                           └────┬────┘                       │
-│                                │                            │
-│                           ┌────▼────┐                       │
-│                           │  Claim  │◄──── 4. Sign in       │
-│                           │ Receipt │      Phantom          │
-│                           └────┬────┘                       │
-│                                │                            │
-│                           ┌────▼────┐                       │
-│   5. Verify on Explorer ◄─┤ Tokens  ├────► Wallet           │
-│                           │Transfer │                       │
-│                           └─────────┘                       │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+付与者 → Grant 作成 / Vault 入金 → SOLANA（Grant PDA, Token Vault）
+受給者 → アプリ起動 → 期間チェック → Claim（Phantom 署名）→ トークン送金 → ウォレット
 ```
 
-**Key Components**:
-1. **Smart Contract** (`grant_program/`): Anchor program managing grants, claims, and receipts
-2. **Mobile App** (`wene-mobile/`): React Native app for recipients to claim benefits
-3. **Phantom Integration**: Non-custodial signing via deep links
-
-→ See [Architecture](./docs/ARCHITECTURE.md) for details
+**主要コンポーネント**: スマートコントラクト（`grant_program/`）、モバイルアプリ（`wene-mobile/`）、Phantom 連携
 
 ---
 
-## 📱 Demo
+## デモ
 
-デモ動画は **X（旧Twitter）** の投稿で公開しています。  
-**Demo video** is posted on **X (formerly Twitter)**.
+> 🎬 **デモ動画**: [X で見る](https://x.com/Shiki93278/status/2015659939356889450)
 
-> 🎬 **デモ動画 / Demo video**: [X で見る / Watch on X](https://x.com/Shiki93278/status/2015659939356889450)
-
-**What the demo shows**（動画の内容）:
-1. Opening the mobile app and connecting Phantom wallet
-2. Scanning QR code or opening deep link (`wene://r/<campaignId>`)
-3. Viewing grant details (amount, period, eligibility)
-4. Tapping "Claim" → Phantom wallet signing the transaction
-5. SPL tokens being transferred to recipient's wallet within seconds
-
-### Screenshots
-
-| Home | Claim | Success |
-|------|-------|---------|
-| Connect wallet | Review grant details | Tokens received |
+内容: アプリ起動・Phantom 接続 → QR/ディープリンク → 付与詳細表示 → Claim → Phantom 署名 → トークン受取
 
 ---
 
-## 🚀 Quickstart
+## クイックスタート
 
-### Prerequisites
-- Node.js v18+（推奨: v20 LTS）
-- スマートコントラクト: Rust, Solana CLI v1.18+, Anchor v0.30+
+### 前提環境
+
+- Node.js v18 以上（推奨 v20）
+- コントラクト: Rust, Solana CLI v1.18+, Anchor v0.30+
 - モバイル: Android SDK (API 36), Java 17
 
-### 第三者・コントリビュータ向け：一括ビルド
-
-**リポジトリルート**から、各サブプロジェクトに入らずにビルド・テストできます。以下は第三者環境での検証済み手順です。
+### 一括ビルド（ルートから）
 
 ```bash
 git clone https://github.com/<owner>/we-ne.git
 cd we-ne
 
-# 方法A: npm スクリプト（ルートに Node が必要）
-npm install   # 任意: ルートのスクリプトを使う場合のみ
-npm run build      # コントラクトビルド + モバイル型チェック
-npm run test       # Anchor テスト実行
+# 方法A: npm
+npm install   # ルートで npm スクリプトを使う場合のみ
+npm run build
+npm run test
 
-# 方法B: シェルスクリプト（ルートに Node 不要）
+# 方法B: シェル
 chmod +x scripts/build-all.sh
-./scripts/build-all.sh all    # ビルド + コントラクトテスト + モバイル型チェック
-./scripts/build-all.sh build  # ビルドのみ
-./scripts/build-all.sh test   # コントラクトテストのみ
+./scripts/build-all.sh all
 ```
 
-**成功時の目安**
+- モバイルでピア依存エラーが出る場合は、リポジトリ側で `wene-mobile/.npmrc` およびルート/CI の `--legacy-peer-deps` で対応済み。モバイル単体では `npm install --legacy-peer-deps` を使用する。
 
-| 手順 | 内容 |
-|------|------|
-| `npm run build` / `build-all.sh build` | コントラクトが `anchor build` でビルドされ、モバイルが `npm install` + `tsc --noEmit` で型チェックまで完了する |
-| `npm run test` / `build-all.sh test` | `grant_program` の Anchor テスト（例: create_grant, fund_grant, claimer can claim once per period）が通る |
-| `build-all.sh all` | 上記ビルド・テスト・モバイル型チェックを一括で実行し、最後に「✅ Done.」と表示される |
-
-**依存関係について（モバイル）**  
-モバイルアプリ（`wene-mobile`）では、React と react-dom のバージョン差により npm のピア依存チェックでエラーになる場合があります。リポジトリでは次の対応をしているため、**ルートからのビルドや CI はそのまま実行すれば問題ありません**。
-
-- `wene-mobile/.npmrc` に `legacy-peer-deps=true` を設定
-- ルートの `npm run build` と `scripts/build-all.sh` ではモバイルの install に `--legacy-peer-deps` を付与
-- モバイルのみ手動でセットアップする場合は `npm install --legacy-peer-deps` を使用（README の「Run Mobile App」のとおり）
-
-詳細は [Development Guide](./docs/DEVELOPMENT.md)、[変更内容](#-変更内容第三者ビルド改善) を参照してください。
-
-### Run Mobile App (Development)
+### モバイル開発
 
 ```bash
-# リポジトリをクローン済みの場合（上記「一括ビルド」を参照）
 cd wene-mobile
-
-# One-command setup (recommended)
-npm run setup
-
-# Or manual setup:
-npm install --legacy-peer-deps
-npm run doctor:fix          # Check and fix common issues
-npx expo prebuild --clean   # Generate native projects
-
-# Start Expo dev server
+npm run setup   # または npm install --legacy-peer-deps && npm run doctor:fix && npx expo prebuild --clean
 npm start
 ```
 
-### Build Android APK
+### コントラクト
 
 ```bash
-# リポジトリルートから
-cd wene-mobile
-npm run build:apk
-
-# Output: android/app/build/outputs/apk/release/app-release.apk
-```
-
-### Troubleshooting
-
-Use the built-in doctor script to diagnose and fix issues:
-
-```bash
-# Check for issues
-npm run doctor
-
-# Auto-fix issues
-npm run doctor:fix
-```
-
-The doctor checks: dependencies, polyfills, SafeArea configuration, Phantom integration, Android SDK setup, and more.
-
-### Build Smart Contract
-
-```bash
-# リポジトリルートから
 cd grant_program
 anchor build
 anchor test
 ```
 
-→ Full setup: [Development Guide](./docs/DEVELOPMENT.md)
+### Android APK ビルド
+
+```bash
+cd wene-mobile
+npm run build:apk
+# 出力: android/app/build/outputs/apk/release/app-release.apk
+```
+
+### トラブルシューティング
+
+`npm run doctor` / `npm run doctor:fix` で依存関係・Polyfill・Phantom 設定・Android SDK 等を確認・修正できる。
+
+→ 詳細は [開発ガイド](./docs/DEVELOPMENT.md)
 
 ---
 
-## 📁 Repository Structure
+## リポジトリ構成
 
 ```
 we-ne/
-├── grant_program/           # Solana smart contract (Anchor)
-│   ├── programs/grant_program/src/lib.rs   # Core logic
-│   └── tests/               # Integration tests
-│
-├── wene-mobile/             # Mobile app (React Native + Expo)
-│   ├── app/                 # Screens (Expo Router)
-│   ├── src/solana/          # Blockchain client
-│   ├── src/wallet/          # Phantom adapter
-│   └── src/utils/phantom.ts # Deep link encryption
-│
-├── docs/                    # Documentation
-│   ├── ARCHITECTURE.md      # System design
-│   ├── SECURITY.md          # Threat model
-│   ├── PHANTOM_FLOW.md      # Wallet integration
-│   ├── DEVELOPMENT.md       # Dev setup
-│   └── ROADMAP.md           # Future plans
-│
-├── .github/workflows/       # CI/CD
-├── LICENSE                  # MIT
-├── CONTRIBUTING.md          # Contribution guide
-└── SECURITY.md              # Vulnerability reporting
+├── grant_program/     # Anchor プログラム
+├── wene-mobile/       # React Native (Expo) アプリ
+├── docs/              # アーキテクチャ、セキュリティ、開発ガイド、ロードマップ等
+├── .github/workflows/ # CI
+└── LICENSE, CONTRIBUTING.md, SECURITY.md
 ```
 
 ---
 
-## 🔐 Security Model
+## セキュリティモデル
 
-| Aspect | Implementation |
-|--------|----------------|
-| **Key custody** | Non-custodial — keys never leave Phantom wallet |
-| **Session tokens** | Encrypted with NaCl box, stored in app sandbox |
-| **Double-claim** | Prevented by on-chain ClaimReceipt PDA |
-| **Deep links** | Encrypted payloads, strict URL validation |
+- 鍵は Phantom 側で保持（非保管型）
+- セッショントークンは NaCl で暗号化してアプリサンドボックスに保存
+- 二重 claim は ClaimReceipt PDA で防止
+- **監査**: 未実施。テスト目的での利用を想定
 
-⚠️ **Audit Status**: NOT AUDITED — use at own risk for testing only
-
-→ Full threat model: [Security](./docs/SECURITY.md)
+→ [セキュリティ](./docs/SECURITY.md)
 
 ---
 
-## 🗺️ Roadmap
+## ロードマップ
 
-| Phase | Timeline | Deliverables |
-|-------|----------|--------------|
-| **MVP** | ✅ Complete | Basic claim flow, Phantom integration |
-| **Allowlist** | +2 weeks | Merkle-based eligibility |
-| **Admin Dashboard** | +1 month | Web UI for grant creators |
-| **Mainnet Beta** | +3 months | Audit, partners, production deploy |
+| フェーズ | 状態 | 内容 |
+|-------|------|------|
+| MVP | 完了 | 基本 claim フロー、Phantom 連携 |
+| 許可リスト | 未実装 | Merkle による資格制限 |
+| 管理ダッシュボード | 未実装 | Grant 作成・運用 UI |
+| メインネットベータ | 未実装 | 監査・本番運用 |
 
-→ Full roadmap: [Roadmap](./docs/ROADMAP.md)
-
----
-
-## 💡 Why Solana? Why Now? Why Foundation Grant?
-
-### Why Solana?
-
-- **Speed**: Sub-second finality for real-time support
-- **Cost**: $0.001/tx makes micro-grants viable
-- **Ecosystem**: Phantom, SPL tokens, developer tools
-- **Japan presence**: Growing Solana community in Japan
-
-### Why Now?
-
-- Japan exploring digital benefit distribution
-- Post-COVID interest in efficient aid delivery
-- Mobile wallet adoption accelerating
-
-### Why Foundation Grant?
-
-- **Novel use case**: Public benefit infrastructure (not DeFi/NFT)
-- **Real-world impact**: Designed for actual support programs
-- **Open source**: MIT licensed, reusable components
-- **Japan market**: Local team, local partnerships
+→ [ロードマップ](./docs/ROADMAP.md)
 
 ---
 
-## 🤝 Contributing
+## コントリビューション
 
-We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md).
-
-Priority areas:
-- Testing coverage
-- Documentation translations
-- Security review
-- UI/UX feedback
+[CONTRIBUTING.md](./CONTRIBUTING.md) を参照。テスト拡充、ドキュメント翻訳、セキュリティレビュー、UI/UX フィードバックを歓迎する。
 
 ---
 
-## 📜 License
+## ライセンス
 
-[MIT License](./LICENSE) — free to use, modify, and distribute.
-
----
-
-## 📋 変更内容（第三者ビルド改善）
-
-第三者・コントリビュータがビルド・検証しやすいよう、以下を追加・更新しました。
-
-- **ルートスクリプト**: リポジトリルートに `package.json` を追加。`npm run build`（コントラクト + モバイル型チェック）と `npm run test`（Anchor テスト）を実行可能。`npm run build:contract` / `npm run build:mobile` / `npm run test:contract` で個別実行も可能。
-- **一括ビルドスクリプト**: `scripts/build-all.sh` を追加。ルートに Node を入れずに `./scripts/build-all.sh all`（または `build` / `test`）で実行可能。
-- **第三者ビルドの検証**: 上記手順で第三者環境からビルド・テストが通ることを確認。モバイルの react/react-dom ピア依存対策として `wene-mobile/.npmrc`（`legacy-peer-deps=true`）と、ルート・CI での `--legacy-peer-deps` を導入済み。
-- **CI**: `.github/workflows/ci.yml` を追加。push/PR のたびに Anchor のビルド・テストとモバイルのインストール・TypeScript チェックを実行。README の CI バッジはこのワークフローを指します。
-- **ドキュメント**: [Development Guide](./docs/DEVELOPMENT.md) にルートからのビルド・テスト手順と CI の説明を追記。
-- **二重 claim 防止の修正**: `grant_program` で claim 用レシートアカウントを `init_if_needed` から `init` に変更。同一期間での2回目の claim が正しく拒否されるようになった（receipt PDA が既に存在するため `init` が失敗）。Anchor の全テスト（「claimer can claim once per period」含む）がパスする状態です。
+[MIT License](./LICENSE)
 
 ---
 
-## 📞 Contact
+## 📋 変更内容（第三者ビルドまわり）
 
-- **Issues**: [GitHub Issues](https://github.com/hk089660/-instant-grant-core/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/hk089660/-instant-grant-core/discussions)
-- **Security**: See [SECURITY.md](./SECURITY.md) for vulnerability reporting
+- ルートに `package.json` を追加（`npm run build` / `npm run test`、必要に応じて `build:contract` / `build:mobile` / `test:contract`）
+- `scripts/build-all.sh` で一括ビルド・テスト・モバイル型チェックが可能
+- CI: `.github/workflows/ci.yml` で Anchor ビルド・テストとモバイル install・`tsc --noEmit` を実行（ベストエフォート）
+- モバイル: `wene-mobile/.npmrc` およびルート/CI で `--legacy-peer-deps` を利用
+- 二重 claim 防止: `grant_program` の claim レシートを `init_if_needed` から `init` に変更し、同一期間の再 claim を拒否
 
 ---
 
-<p align="center">
-  <i>Built with ❤️ for public good on Solana</i>
-</p>
+## 連絡先
+
+- **課題・要望**: [GitHub Issues](https://github.com/hk089660/-instant-grant-core/issues)
+- **議論**: [GitHub Discussions](https://github.com/hk089660/-instant-grant-core/discussions)
+- **脆弱性の報告**: [SECURITY.md](./SECURITY.md)
