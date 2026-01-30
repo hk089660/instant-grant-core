@@ -27,7 +27,7 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: grant_program -> target
+          workspaces: grant_program
 
       - name: Install Solana CLI
         run: |
@@ -78,7 +78,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: wene-mobile
-        run: npm ci --legacy-peer-deps
+        run: npm install --legacy-peer-deps
 
       - name: Type check
         working-directory: wene-mobile

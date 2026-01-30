@@ -64,7 +64,7 @@ If you see peer dependency errors in `wene-mobile`, use `npm install --legacy-pe
 On every push/PR to `main` or `master`, [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs:
 
 - **Smart contract**: Install Rust, Solana CLI, Anchor → `grant_program`: `yarn install`, `anchor build`, `anchor test`
-- **Mobile app**: Node 20 → `wene-mobile`: `npm ci --legacy-peer-deps`, `npx tsc --noEmit`
+- **Mobile app**: Node 20 → `wene-mobile`: `npm install --legacy-peer-deps`, `npx tsc --noEmit`
 
 No secrets required. The README CI badge reflects this workflow once the repo is on GitHub.
 
