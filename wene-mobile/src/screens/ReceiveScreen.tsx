@@ -615,7 +615,7 @@ ${st.balanceLamports ?? 'null'}
             if (__DEV__ && isSimulationFailedError(e)) {
               setSimulationFailed(
                 JSON.stringify(e.simErr),
-                e.simLogs,
+                e.simLogs ?? null,
                 e.unitsConsumed
               );
               throw e;
@@ -673,7 +673,7 @@ ${st.balanceLamports ?? 'null'}
         if (__DEV__ && isSimulationFailedError(e)) {
           setSimulationFailed(
             JSON.stringify(e.simErr),
-            e.simLogs,
+            e.simLogs ?? null,
             e.unitsConsumed
           );
           logDevDebugBlock('outer-catch');
@@ -1170,7 +1170,7 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.xs,
   },
   explorerLinkText: {
-    color: theme.colors.primary,
+    color: theme.colors.active,
     textDecorationLine: 'underline',
   },
   doneAtText: {

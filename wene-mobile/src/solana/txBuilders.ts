@@ -64,21 +64,20 @@ export async function buildClaimTx(
   const program = getProgram();
 
   // devnetConfig: DEV+devnet 時は本物の Grant を使用。未設定時は dummy にフォールバック
-  const useDevnetConfig =
-    DEFAULT_CLUSTER === 'devnet' && DEVNET_GRANT_CONFIG !== null;
+  const devnetConfig = DEFAULT_CLUSTER === 'devnet' ? DEVNET_GRANT_CONFIG : null;
 
-  const authority = useDevnetConfig
-    ? DEVNET_GRANT_CONFIG.authority
+  const authority = devnetConfig
+    ? devnetConfig.authority
     : new PublicKey('11111111111111111111111111111111');
-  const mint = useDevnetConfig
-    ? DEVNET_GRANT_CONFIG.mint
+  const mint = devnetConfig
+    ? devnetConfig.mint
     : new PublicKey('So11111111111111111111111111111111111111112');
-  const grantId = useDevnetConfig ? DEVNET_GRANT_CONFIG.grantId : BigInt(1);
-  const startTs = useDevnetConfig
-    ? DEVNET_GRANT_CONFIG.startTs
+  const grantId = devnetConfig ? devnetConfig.grantId : BigInt(1);
+  const startTs = devnetConfig
+    ? devnetConfig.startTs
     : BigInt(Math.floor(Date.now() / 1000) - 86400);
-  const periodSeconds = useDevnetConfig
-    ? DEVNET_GRANT_CONFIG.periodSeconds
+  const periodSeconds = devnetConfig
+    ? devnetConfig.periodSeconds
     : BigInt(2592000);
 
   const [grantPda] = getGrantPda(authority, mint, grantId);
@@ -90,7 +89,7 @@ export async function buildClaimTx(
   // DEV: claim 実行前の事前チェック（1ブロックで状態が分かる）
   let vaultBalanceLog = '';
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    if (useDevnetConfig && DEVNET_GRANT_CONFIG) {
+    if (devnetConfig) {
       try {
         const vaultAcc = await getAccount(connection, vaultPda);
         vaultBalanceLog = vaultAcc.amount.toString();
@@ -102,9 +101,9 @@ export async function buildClaimTx(
       '[DEV_ENV] cluster=' + DEFAULT_CLUSTER +
       ' rpc=' + RPC_URL +
       ' programId=' + GRANT_PROGRAM_ID.toBase58() +
-      ' source=' + (useDevnetConfig ? 'devnetConfig' : 'dummy')
+      ' source=' + (devnetConfig ? 'devnetConfig' : 'dummy')
     );
-    if (useDevnetConfig && DEVNET_GRANT_CONFIG) {
+    if (devnetConfig) {
       console.log(
         '[DEV_GRANT] grantId=' + grantId.toString() +
         ' mint=' + mint.toBase58() +
