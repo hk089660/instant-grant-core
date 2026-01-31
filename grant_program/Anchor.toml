@@ -9,7 +9,8 @@ skip-lint = false
 grant_program = "GZcUoGHk8SfAArTKicL1jiRHZEQa3EuzgYcC2u4yWfSR"
 
 [programs.localnet]
-grant_program = "68L3CePLQ3mzAcSbebu8JBZuB5eYcyELqWqJeCfLkgce"
+# declare_id と一致させる（devnet と同じ ID）
+grant_program = "GZcUoGHk8SfAArTKicL1jiRHZEQa3EuzgYcC2u4yWfSR"
 
 [registry]
 url = "https://api.apr.dev"
@@ -19,7 +20,8 @@ cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+# basic.ts のみ実行（devnet_setup.ts は手動用のため除外）
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/basic.ts"
 
 [test]
 startup_wait = 10000
