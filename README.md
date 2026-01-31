@@ -4,6 +4,22 @@
 This project is currently under **Superteam Japan Grants review**.
 It is in a **PoC / v0** phase, focused on the demo flow below.
 
+### Recent Updates (Stability Improvements)
+
+- Introduced participation state tracking (`started` / `completed`) to ensure accurate "incomplete / completed" views for users
+- Added print-friendly QR layout using CSS print (`@media print`) for reliable offline and backup operations
+- Implemented role-based UI restrictions (viewer / operator / admin) to improve safety on shared school devices
+- Added development-only role switcher for faster testing and demos (not visible in production)
+
+These updates focus on **stability, operational safety, and real-world school usage**.
+
+### Project Status: Claim flow verified on Android (2025)
+
+- **Claim flow is fully verified** on Android (APK) with Phantom wallet: connect → sign → send → confirm → token receipt.
+- Phantom **strictly validates cluster consistency** (devnet / testnet / mainnet). If the transaction is interpreted as mainnet, Phantom may block signing with a warning.
+- **Deep links and RPC endpoints** must explicitly match the target cluster (e.g. `cluster=devnet` in redirect URLs and devnet RPC only).
+- The **current PoC is fixed to devnet** for safety; all RPC and Phantom deeplinks use devnet.
+
 ### What works today (Demo Flow)
 - Scan event QR code
 - View event details
@@ -20,6 +36,14 @@ The first concrete use case of **We-ne** is a **digital participation ticket for
 - Event organizers can verify participation counts via an admin interface
 
 This use case prioritizes **speed, usability, and privacy**, making it suitable for real educational environments.
+
+### Distribution (School PoC)
+
+- **Students: native app**
+  - **Android**: APK distribution (EAS Build or local build; no Play Store).
+  - **iOS**: TestFlight (planned; EAS Build → IPA → App Store Connect).
+- **Web**: Admin & support use only (`/admin/*`, print screens). **Not used for student claim flow**; student participation is app-only.
+- The Expo app is the primary flow for Phantom stability; Web/PWA is not used for the main claim flow.
 
 ### Next Milestone (Short-term)
 - Simplified Scan → Confirm → Success flow
@@ -113,6 +137,10 @@ we-ne provides:
 1. **Smart Contract** (`grant_program/`): Anchor program managing grants, claims, and receipts
 2. **Mobile App** (`wene-mobile/`): React Native app for recipients to claim benefits
 3. **Phantom Integration**: Non-custodial signing via deep links
+
+**Recommended browsers** (student UI /u/* via QR): Safari (iPhone) / Chrome (Android). Phantom connect may be unstable on Firefox.
+
+**Android: use Phantom in-app browser** — On Android, "Phantom → back to browser" can fail, so v0 uses **Phantom browse deeplink** (`https://phantom.app/ul/browse/<url>?ref=<ref>`) as the main student QR content. Print the URL shown on the admin print screen (`/admin/print/:eventId`) as a QR code so students open the app inside Phantom. **Redirect-based connect** (open in browser → connect in Phantom → redirect back) is not the primary flow in v0 due to instability; `/phantom-callback` is provided for manual recovery.
 
 → See [Architecture](./docs/ARCHITECTURE.md) for details
 

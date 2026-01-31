@@ -4,6 +4,22 @@
 本プロジェクトは現在、**Superteam Japan Grants の審査中**です。
 現在は **PoC / v0 フェーズ**で、下記のデモ導線に範囲を絞っています。
 
+### 最近の更新（安定性向上）
+
+- 参加状態（started / completed）を保存し、利用者側の「未完了 / 完了」表示の正確性を向上
+- 印刷運用に備え、CSS print（@media print）によるQR印刷レイアウトを追加
+- viewer / operator / admin の権限によるUI制御を明確化し、学校端末での誤操作リスクを低減
+- 開発・デモ効率向上のため、開発環境限定のロール切替UIを追加（本番非表示）
+
+これらの更新は、**学校での実運用を想定した安定性と安全性の向上**を目的としています。
+
+### 受け取り成功までの動作確認（2025年）
+
+- **Android 実機（APK）**で Phantom 署名 → 送信 → **受け取り完了**まで一連のフローを動作確認済みです。
+- モバイルでは Phantom のセキュリティ仕様により、**cluster（devnet）の明示が必須**です。
+- RPC / トランザクション / deeplink のクラスタ不一致は Phantom によりブロックされます（「メインネットで有効な取引」等の警告）。
+- 本 PoC では **devnet 固定**で動作させています（RPC・Phantom deeplinkともに `cluster=devnet` を明示）。
+
 ### 現在動作しているデモ導線
 - イベントQRコードの読み取り
 - イベント内容の確認
@@ -21,6 +37,14 @@
 - 運営側は参加人数や発行状況を管理画面で確認可能
 
 このユースケースは、**速さ・使いやすさ・プライバシー**を最優先に設計されています。
+
+### 配布方針（学校PoC向け）
+
+- **生徒用：専用アプリ**
+  - **Android**: APK 配布（EAS Build またはローカルビルドで APK を生成。Play Store 公開は行わない前提）。
+  - **iOS**: TestFlight で配布（予定。EAS Build で IPA を生成し、App Store Connect へ提出）。
+- **Web**: 管理者・補助用（`/admin/*` や印刷画面など）。**生徒の受け取り用途では使用しない**。生徒の参加フローはアプリで完結する想定です。
+- 上記のとおり、生徒用は Web/PWA を主導線にせず Expo アプリを主導線とし、Phantom 連携の安定性を最優先しています。
 
 ### 直近のマイルストーン
 - Scan → Confirm → Success の簡潔な参加フロー
@@ -50,6 +74,7 @@ we-ne は Solana 上で動作する**非保管型の支援配布システム**�
 - **コントラクト**: Grant 作成・Vault 入金・期間ごとの claim・同一期間の二重 claim 拒否
 - **モバイル**: Phantom 接続、QR/ディープリンク（`wene://r/<campaignId>`）からの付与詳細表示、Claim 時の Phantom 署名とトークン受取
 - **ビルド・テスト**: ルートからの `npm run build` / `npm run test`、および `scripts/build-all.sh` による一括ビルド・型チェック・Anchor テスト
+- **devnet E2E**: Phantom(devnet) での claim フロー（simulate 通過 → 署名 → 送信）が動作。手順は [docs/DEVNET_SETUP.md](./docs/DEVNET_SETUP.md) を参照
 
 ---
 
@@ -77,6 +102,16 @@ we-ne は Solana 上で動作する**非保管型の支援配布システム**�
 - **許可リスト（Allowlist）**: 未実装（Merkle 等による資格制限はロードマップに記載）
 - **管理者 UI**: 未実装（Grant 作成・運用は現状 CLI 等を想定）
 - **モバイル**: React/react-dom のピア依存により、環境によっては `npm install` でエラーになる。`wene-mobile/.npmrc` およびルート/CI では `--legacy-peer-deps` で対応済み
+
+**QR・Web 検証時の注意（README 追記候補）**
+
+- **Web 起動**: `wene-mobile` で `expo start --web` するには `react-dom` と `react-native-web` が必要。未導入の場合は `npx expo install react-dom react-native-web` を実行する。
+- **QR は「URLに飛ばす」方式**: 今回のテストは「QRを読む」のではなく「QRからURLに遷移できるか」の確認。`/u/scan` 画面のカメラはモックのため、実機でカメラを使う場合は別途実装が必要。
+- **HTTPS**: 実機でカメラ（getUserMedia）を使う場合、Safari では HTTPS が必須となることがある。ローカル開発では同一 Wi‑Fi の PC の IP（例: `http://192.168.x.x:8081/u/scan`）や Expo tunnel でスマホからアクセスして確認できる。
+- **推奨ブラウザ**: QR から生徒 UI（/u/*）を開く際は Safari(iPhone)/Chrome(Android) を推奨。Firefox 等では Phantom 接続が不安定になる場合があります。
+- **Android は Phantom 内ブラウザでの参加を推奨**: Android では「Phantom → 外部ブラウザへ戻れない」問題があるため、v0 では**生徒用QRの内容を Phantom browse deeplink**（`https://phantom.app/ul/browse/<url>?ref=<ref>`）にし、Phantom の in-app browser で開く導線を主としています。管理者印刷画面（`/admin/print/:eventId`）で表示される URL を QR コード化して印刷してください。
+- **redirect-based connect**: 従来の「ブラウザで開く → Phantom で接続 → ブラウザへリダイレクト」は、環境によっては不安定なため v0 では主導線にしていません。手動復帰用に `/phantom-callback` リンクを用意しています。
+- **生徒用は専用アプリ**: 学校PoC では生徒に iOS（TestFlight）または Android（APK）の専用アプリを配布し、Phantom 接続後にアプリへ確実に復帰する導線を主としています。Web は管理者・補助用です。
 
 ---
 

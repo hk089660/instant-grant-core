@@ -336,22 +336,50 @@ npm run build:ios
 
 **If terminal closes / retrying:** Open a new terminal and re-run the commands above.
 
-### Without Xcode Installed
+### Without Xcode Installed / EAS Build (iOS TestFlight & Android APK)
 
-**Use EAS Build (cloud build):**
+**Distribution (school PoC):** Students use the dedicated app — iOS via TestFlight, Android via APK. Web is for admin/auxiliary use only.
+
+**EAS Build:**
 ```bash
 # 1. Install EAS CLI and login
 npm install -g eas-cli
 eas login
 
-# 2. Initialize EAS project (first time only)
-eas init
+# 2. iOS: Production build for TestFlight (first run may prompt for credentials)
+eas build --platform ios --profile production
+# Then submit: eas submit --platform ios --profile production
 
-# 3. Build for iOS Simulator
-eas build --platform ios --profile development
+# 3. Android: APK build (no Play Store)
+eas build --platform android --profile production
+# Output: APK download from EAS dashboard
 ```
 
-See the "iOS Simulator Support" section in `DEBUG_REPORT.md` for details.
+- **iOS**: `production` profile uses `distribution: "store"`. Run `eas build --platform ios --profile production` in **interactive** mode once to set up credentials; after that, builds work with `--non-interactive`. Submit via `eas submit --platform ios --profile production`.
+- **Android**: `production` profile outputs APK; download from EAS dashboard and distribute (no Play Store).
+- Project is linked via `app.config.ts` → `extra.eas.projectId`.
+
+## Notes: Phantom & devnet (claim flow)
+
+- **Phantom mobile blocks signing** if the transaction is interpreted as mainnet (e.g. warning: "valid transaction found on mainnet").
+- **Always ensure:**
+  - RPC endpoint = **devnet** (e.g. `https://api.devnet.solana.com`).
+  - Phantom deeplink includes **`cluster=devnet`** (both in the Phantom API URL and in the redirect URL, e.g. `wene://phantom/sign?cluster=devnet`).
+- **Android APK build verified end-to-end:** build → Phantom connect → Phantom sign → transaction send & confirm → token receipt (claim success).
+
+### Build & install (quick reference)
+
+```bash
+# Clean rebuild (if needed)
+npm run android:clean-rebuild
+
+# Build APK
+npm run build:apk
+
+# Install to device (USB debugging)
+adb install android/app/build/outputs/apk/release/app-release.apk
+# Or use: npm run deploy:adb (build + install) / npm run deploy:adb:clean (uninstall + install)
+```
 
 ## Troubleshooting
 
