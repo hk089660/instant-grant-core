@@ -116,6 +116,8 @@ we-ne is designed with a **non-custodial** security model. The mobile app never 
 | wene-mobile | ❌ No | Use at own risk |
 | Dependencies | Partial | Major deps are audited |
 
+**監査前の改善提案・タスク一覧**: [SECURITY_REVIEW.md](./SECURITY_REVIEW.md) を参照。
+
 ## Recommendations for Production
 
 1. **Smart Contract Audit**: Mandatory before mainnet
@@ -123,3 +125,4 @@ we-ne is designed with a **non-custodial** security model. The mobile app never 
 3. **Bug Bounty**: Establish responsible disclosure program
 4. **Monitoring**: On-chain event monitoring for anomalies
 5. **Rate Limiting**: RPC endpoint protection
+6. **RPC Redundancy**: Consider multiple RPC endpoints or proxy for availability

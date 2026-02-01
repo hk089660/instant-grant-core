@@ -320,4 +320,175 @@ describe("grant_program (PDA)", () => {
     }
     assert.equal(threw, true);
   });
+
+  // SECURITY_REVIEW P1: set_paused 後の claim 拒否
+  it("claim_grant fails when grant is paused", async () => {
+    const authority = provider.wallet as anchor.Wallet;
+    const claimer = anchor.web3.Keypair.generate();
+    const sig = await provider.connection.requestAirdrop(
+      claimer.publicKey,
+      2 * anchor.web3.LAMPORTS_PER_SOL
+    );
+    await provider.connection.confirmTransaction(sig, "confirmed");
+
+    const mint = await createMint(
+      provider.connection,
+      authority.payer,
+      authority.publicKey,
+      null,
+      6
+    );
+
+    const grantId = new anchor.BN(4);
+    const amountPerPeriod = new anchor.BN(1_000);
+    const periodSeconds = new anchor.BN(60);
+    const startTs = new anchor.BN(Math.floor(Date.now() / 1000) - 5);
+    const expiresAt = new anchor.BN(0);
+
+    const [grantPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("grant"),
+        authority.publicKey.toBuffer(),
+        mint.toBuffer(),
+        u64LE(grantId),
+      ],
+      program.programId
+    );
+
+    const [vaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), grantPda.toBuffer()],
+      program.programId
+    );
+
+    await program.methods
+      .createGrant(grantId, amountPerPeriod, periodSeconds, startTs, expiresAt)
+      .accounts({
+        grant: grantPda,
+        mint,
+        vault: vaultPda,
+        authority: authority.publicKey,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      } as any)
+      .rpc();
+
+    await program.methods
+      .setPaused(true)
+      .accounts({
+        grant: grantPda,
+        mint,
+        authority: authority.publicKey,
+      } as any)
+      .rpc();
+
+    const claimerAta = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      authority.payer,
+      mint,
+      claimer.publicKey
+    );
+
+    const periodIndex = new anchor.BN(0);
+    const [receiptPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("receipt"),
+        grantPda.toBuffer(),
+        claimer.publicKey.toBuffer(),
+        u64LE(periodIndex),
+      ],
+      program.programId
+    );
+
+    let threw = false;
+    try {
+      await program.methods
+        .claimGrant(periodIndex)
+        .accounts({
+          grant: grantPda,
+          mint,
+          vault: vaultPda,
+          claimer: claimer.publicKey,
+          claimerAta: claimerAta.address,
+          receipt: receiptPda,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+        } as any)
+        .signers([claimer])
+        .rpc();
+    } catch (_) {
+      threw = true;
+    }
+    assert.equal(threw, true, "claim_grant must fail when paused");
+  });
+
+  // SECURITY_REVIEW P1: authority 以外は set_paused 不可
+  it("set_paused rejects when signer is not grant authority", async () => {
+    const authority = provider.wallet as anchor.Wallet;
+    const other = anchor.web3.Keypair.generate();
+    const sig = await provider.connection.requestAirdrop(
+      other.publicKey,
+      2 * anchor.web3.LAMPORTS_PER_SOL
+    );
+    await provider.connection.confirmTransaction(sig, "confirmed");
+
+    const mint = await createMint(
+      provider.connection,
+      authority.payer,
+      authority.publicKey,
+      null,
+      6
+    );
+
+    const grantId = new anchor.BN(5);
+    const amountPerPeriod = new anchor.BN(1_000);
+    const periodSeconds = new anchor.BN(60);
+    const startTs = new anchor.BN(Math.floor(Date.now() / 1000) - 5);
+    const expiresAt = new anchor.BN(0);
+
+    const [grantPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("grant"),
+        authority.publicKey.toBuffer(),
+        mint.toBuffer(),
+        u64LE(grantId),
+      ],
+      program.programId
+    );
+
+    const [vaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), grantPda.toBuffer()],
+      program.programId
+    );
+
+    await program.methods
+      .createGrant(grantId, amountPerPeriod, periodSeconds, startTs, expiresAt)
+      .accounts({
+        grant: grantPda,
+        mint,
+        vault: vaultPda,
+        authority: authority.publicKey,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      } as any)
+      .rpc();
+
+    let threw = false;
+    try {
+      await program.methods
+        .setPaused(true)
+        .accounts({
+          grant: grantPda,
+          mint,
+          authority: other.publicKey,
+        } as any)
+        .signers([other])
+        .rpc();
+    } catch (_) {
+      threw = true;
+    }
+    assert.equal(threw, true, "set_paused must fail when signer is not grant authority");
+  });
 });

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nacl from 'tweetnacl';
+import { devLog, devError } from '../utils/devLog';
 
 // Base64エンコード（React Native用）
 const base64Encode = (bytes: Uint8Array): string => {
@@ -106,7 +107,7 @@ export const usePhantomStore = create<PhantomStore>((set, get) => ({
       phantomPublicKey,
     };
     await AsyncStorage.setItem(STORAGE_KEY_CONNECT_RESULT, JSON.stringify(data));
-    console.log('[phantomStore] savePhantomConnectResult success:', publicKey.substring(0, 8) + '...');
+    devLog('[phantomStore] savePhantomConnectResult success:', publicKey.substring(0, 8) + '...');
   },
 
   loadPhantomConnectResult: async () => {
@@ -122,7 +123,7 @@ export const usePhantomStore = create<PhantomStore>((set, get) => ({
         phantomPublicKey: data.phantomPublicKey,
       } as PhantomConnectResult;
     } catch (e) {
-      console.error('[phantomStore] loadPhantomConnectResult error:', e);
+      devError('[phantomStore] loadPhantomConnectResult error:', e);
       return null;
     }
   },
@@ -130,7 +131,7 @@ export const usePhantomStore = create<PhantomStore>((set, get) => ({
   clearConnectResult: async () => {
     await AsyncStorage.removeItem(STORAGE_KEY_CONNECT_RESULT);
     set({ phantomEncryptionPublicKey: null });
-    console.log('[phantomStore] clearConnectResult done');
+    devLog('[phantomStore] clearConnectResult done');
   },
 
   clearPhantomKeys: async () => {
@@ -142,6 +143,6 @@ export const usePhantomStore = create<PhantomStore>((set, get) => ({
       dappSecretKey: null,
       phantomEncryptionPublicKey: null,
     });
-    console.log('[phantomStore] clearPhantomKeys done');
+    devLog('[phantomStore] clearPhantomKeys done');
   },
 }));

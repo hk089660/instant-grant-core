@@ -4,6 +4,8 @@
 This project is currently under **Superteam Japan Grants review**.
 It is in a **PoC / v0** phase, focused on the demo flow below.
 
+**Disclaimer**: This project has not undergone a formal security audit. Use at your own risk. See [docs/SECURITY.md](docs/SECURITY.md) and [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md) for details.
+
 ### Recent Updates (Stability Improvements)
 
 - Introduced participation state tracking (`started` / `completed`) to ensure accurate "incomplete / completed" views for users

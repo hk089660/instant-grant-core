@@ -210,6 +210,10 @@ pub mod grant_program {
         // allowlist が無効なら通常の claim を使えばよい
         require!(grant.merkle_root != [0u8; 32], ErrorCode::AllowlistNotEnabled);
 
+        // SECURITY_REVIEW M2: Merkle proof の最大深度を制限（CU DoS 防止）
+        const MAX_MERKLE_PROOF_DEPTH: usize = 32;
+        require!(proof.len() <= MAX_MERKLE_PROOF_DEPTH, ErrorCode::InvalidProof);
+
         // Merkle allowlist verify
         let leaf = allowlist_leaf(ctx.accounts.claimer.key());
         require!(
@@ -589,4 +593,6 @@ pub enum ErrorCode {
     AllowlistNotEnabled,
     #[msg("Claimer is not in allowlist")]
     NotInAllowlist,
+    #[msg("Merkle proof exceeds maximum depth")]
+    InvalidProof,
 }

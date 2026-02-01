@@ -4,6 +4,8 @@
 本プロジェクトは現在、**Superteam Japan Grants の審査中**です。
 現在は **PoC / v0 フェーズ**で、下記のデモ導線に範囲を絞っています。
 
+**注意**: 本プロジェクトは正式なセキュリティ監査を受けておらず、自己責任でご利用ください。詳細は [docs/SECURITY.md](docs/SECURITY.md) および [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md) を参照してください。
+
 ### 最近の更新（安定性向上）
 
 - 参加状態（started / completed）を保存し、利用者側の「未完了 / 完了」表示の正確性を向上

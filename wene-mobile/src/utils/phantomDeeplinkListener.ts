@@ -7,7 +7,8 @@ import { Linking, Platform, AppState, AppStateStatus } from 'react-native';
 import { ToastAndroid } from 'react-native';
 import { usePhantomStore } from '../store/phantomStore';
 import { useRecipientStore } from '../store/recipientStore';
-import { handlePhantomConnectRedirect, handleRedirect } from './phantom';
+import { handlePhantomConnectRedirect, handleRedirect, isAllowedPhantomRedirectUrl } from './phantom';
+import { devLog, devWarn, devError } from './devLog';
 
 async function waitForDappSecretKey(timeoutMs: number): Promise<boolean> {
   const startTime = Date.now();
@@ -23,8 +24,8 @@ async function waitForDappSecretKey(timeoutMs: number): Promise<boolean> {
 }
 
 export async function processPhantomUrl(url: string, source: 'event' | 'initial'): Promise<void> {
-  if (!url.startsWith('wene://phantom/')) return;
-  console.log(`[DEEPLINK] ${source} received, URL全文:`, url);
+  if (!isAllowedPhantomRedirectUrl(url)) return;
+  devLog('[DEEPLINK]', source, 'received, URL (dev only)');
 
   const phantomStore = usePhantomStore.getState();
   const recipientStore = useRecipientStore.getState();
@@ -56,7 +57,7 @@ export async function processPhantomUrl(url: string, source: 'event' | 'initial'
         recipientStore.setWalletPubkey(result.result.publicKey);
         recipientStore.setPhantomSession(result.result.session);
         recipientStore.setState('Connected');
-        console.log('[PhantomDeeplink] connect success');
+        devLog('[PhantomDeeplink] connect success');
         if (Platform.OS === 'android') ToastAndroid.show('Phantomに接続しました', ToastAndroid.SHORT);
       } else {
         const msg = `[${result.stage}] ${result.error}`;
@@ -64,29 +65,29 @@ export async function processPhantomUrl(url: string, source: 'event' | 'initial'
         if (Platform.OS === 'android') ToastAndroid.show(`接続エラー: ${msg}`, ToastAndroid.LONG);
       }
     } else if (url.includes('/phantom/sign')) {
-      console.log('[PhantomDeeplink] sign callback');
+      devLog('[PhantomDeeplink] sign callback');
       const phantomPk = usePhantomStore.getState().phantomEncryptionPublicKey;
       const result = handleRedirect(url, dappSecretKey, phantomPk ?? undefined);
       if (result.ok) {
-        console.log('[PhantomDeeplink] sign resolvePendingSignTx done');
+        devLog('[PhantomDeeplink] sign resolvePendingSignTx done');
       } else {
-        console.error('[PhantomDeeplink] sign failed:', result.error);
+        devError('[PhantomDeeplink] sign failed:', result.error);
         recipientStore.setError(result.error);
         if (Platform.OS === 'android') ToastAndroid.show(`署名エラー: ${result.error}`, ToastAndroid.LONG);
       }
     } else {
-      console.warn('[PhantomDeeplink] unknown path:', url.substring(0, 80));
+      devWarn('[PhantomDeeplink] unknown path');
       recipientStore.setError('不明なリダイレクトです');
     }
   } catch (e) {
     const msg = (e as Error)?.message ?? String(e);
-    console.error('[PhantomDeeplink] exception:', msg);
+    devError('[PhantomDeeplink] exception:', msg);
     recipientStore.setError(msg);
     if (Platform.OS === 'android') ToastAndroid.show(`エラー: ${msg.substring(0, 50)}`, ToastAndroid.LONG);
   } finally {
     const current = useRecipientStore.getState().state;
     if (current === 'Connecting') {
-      console.log('[PhantomDeeplink] finally: clearing Connecting state');
+      devLog('[PhantomDeeplink] finally: clearing Connecting state');
       useRecipientStore.getState().setState('Idle');
     }
   }
@@ -102,29 +103,28 @@ export function setupPhantomDeeplinkListener(): void {
   };
 
   Linking.addEventListener('url', (event: { url: string }) => {
-    console.log('[DEEPLINK] event received, URL全文:', event.url);
+    devLog('[DEEPLINK] event received');
     handleUrl(event.url, 'event');
   });
-  console.log('[PhantomDeeplink] event listener registered (persistent, no remove)');
+  devLog('[PhantomDeeplink] event listener registered (persistent, no remove)');
 
   // AppState active 時に getInitialURL を確認（event で届かない場合のフォールバック）
   AppState.addEventListener('change', (state: AppStateStatus) => {
     if (state === 'active') {
       Linking.getInitialURL()
         .then((url) => {
-          console.log('[DEEPLINK] initial (AppState active):', url ?? '(null)');
-          if (url && url.startsWith('wene://phantom/')) {
+          devLog('[DEEPLINK] initial (AppState active):', url ? 'present' : '(null)');
+          if (url && isAllowedPhantomRedirectUrl(url)) {
             handleUrl(url, 'initial');
           }
         })
-        .catch((e) => console.warn('[DEEPLINK] getInitialURL error:', e));
+        .catch((e) => devWarn('[DEEPLINK] getInitialURL error:', e));
     }
   });
 
-  // DEV: wene:// が開けるか自己テスト
-  if (__DEV__) {
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
     Linking.canOpenURL('wene://ping')
-      .then((r) => console.log('[DEEPLINK] canOpenURL(wene://ping):', r))
-      .catch((e) => console.warn('[DEEPLINK] canOpenURL error:', e));
+      .then((r) => devLog('[DEEPLINK] canOpenURL(wene://ping):', r))
+      .catch((e) => devWarn('[DEEPLINK] canOpenURL error:', e));
   }
 }

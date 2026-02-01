@@ -6,6 +6,7 @@ import * as LinkingExpo from 'expo-linking';
 import { setPendingSignTx, resolvePendingSignTx, rejectPendingSignTx } from './phantomSignTxPending';
 import { openPhantomConnect } from '../wallet/openPhantom';
 import { setLastPhantomConnect, setLastPhantomSign } from './phantomUrlDebug';
+import { devLog, devWarn, devError } from './devLog';
 
 export interface PhantomConnectParams {
   dappEncryptionPublicKey: string;
@@ -54,9 +55,9 @@ export const buildPhantomConnectUrl = (params: PhantomConnectParams): string => 
   try {
     const decoded = base64Decode(dappEncryptionPublicKey);
     dappKeyBase58 = bs58.encode(decoded);
-    console.log('[buildPhantomConnectUrl] dapp_encryption_public_key converted to base58, length:', dappKeyBase58.length);
+    devLog('[buildPhantomConnectUrl] dapp_encryption_public_key converted to base58, length:', dappKeyBase58.length);
   } catch (e) {
-    console.warn('[buildPhantomConnectUrl] Failed to convert to base58, using as-is');
+    devWarn('[buildPhantomConnectUrl] Failed to convert to base58, using as-is');
     dappKeyBase58 = dappEncryptionPublicKey;
   }
   
@@ -65,7 +66,7 @@ export const buildPhantomConnectUrl = (params: PhantomConnectParams): string => 
   const redirectEncoded = encodeURIComponent(redirectRaw);
   try {
     if (redirectRaw.includes('%') && redirectRaw !== decodeURIComponent(redirectRaw)) {
-      console.warn('[PHANTOM] connect redirect_link 二重エンコード検知?: rawに%含む', redirectRaw);
+      devWarn('[PHANTOM] connect redirect_link 二重エンコード検知?: rawに%含む', redirectRaw);
     }
   } catch {
     /* ignore */
@@ -78,12 +79,10 @@ export const buildPhantomConnectUrl = (params: PhantomConnectParams): string => 
   url.searchParams.set('cluster', cluster);
 
   const fullUrl = url.toString();
-  console.log('[PHANTOM] connect redirect_link raw:', redirectRaw);
-  console.log('[PHANTOM] connect redirect_link encoded(1回):', redirectEncoded);
-  console.log('[PHANTOM] connect URL全文(1行):', fullUrl);
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.log('[PHANTOM] connect cluster=devnet 確認:', fullUrl.includes('cluster=devnet') ? 'OK' : 'NG', fullUrl);
-  }
+  devLog('[PHANTOM] connect redirect_link raw:', redirectRaw);
+  devLog('[PHANTOM] connect redirect_link encoded(1回):', redirectEncoded);
+  devLog('[PHANTOM] connect URL全文(1行):', fullUrl);
+  devLog('[PHANTOM] connect cluster=devnet 確認:', fullUrl.includes('cluster=devnet') ? 'OK' : 'NG', fullUrl);
   setLastPhantomConnect(fullUrl, redirectRaw, redirectEncoded);
   return fullUrl;
 };
@@ -103,6 +102,21 @@ export const buildPhantomBrowseUrl = (appBaseUrl: string, path: string): string 
   const browseUrl = `https://phantom.app/ul/browse/${encodeURIComponent(fullPageUrl)}?ref=${encodeURIComponent(base)}`;
   return browseUrl;
 };
+
+/**
+ * Phantom リダイレクトとして許可する URL かどうか（SECURITY_REVIEW M4: スキーム検証）
+ * scheme が wene かつ hostname が phantom の場合のみ true。
+ */
+export function isAllowedPhantomRedirectUrl(url: string): boolean {
+  try {
+    const parsed = LinkingExpo.parse(url);
+    const scheme = (parsed as { scheme?: string }).scheme ?? '';
+    const hostname = (parsed as { hostname?: string }).hostname ?? '';
+    return scheme === 'wene' && hostname === 'phantom';
+  } catch {
+    return false;
+  }
+}
 
 /**
  * クエリパラメータを安全にURLデコード（Phantom仕様: base58のため + 等がエンコードされている場合あり）
@@ -166,7 +180,7 @@ export const decryptPhantomResponse = (
       session: result.session,
     };
   } catch (error) {
-    console.error('Failed to decrypt Phantom response:', error);
+    devError('Failed to decrypt Phantom response:', error);
     return null;
   }
 };
@@ -202,7 +216,7 @@ export const handlePhantomConnectRedirect = (
   dappSecretKey: Uint8Array
 ): { ok: true; result: PhantomConnectResult; phantomPublicKey: string } | { ok: false; error: string; stage: string } => {
   try {
-    console.log('[handlePhantomConnectRedirect] stage=start, url (trunc):', url.substring(0, 120) + (url.length > 120 ? '...' : ''));
+    devLog('[handlePhantomConnectRedirect] stage=start, url (trunc):', url.substring(0, 120) + (url.length > 120 ? '...' : ''));
     
     const urlParsed = LinkingExpo.parse(url);
     const qp = urlParsed.queryParams ?? {};
@@ -216,7 +230,7 @@ export const handlePhantomConnectRedirect = (
     const phantomPublicKey = decodeParam(qp.phantom_encryption_public_key);
     
     if (!data || !nonce || !phantomPublicKey) {
-      console.warn('[handlePhantomConnectRedirect] stage=check_params, missing params', {
+      devWarn('[handlePhantomConnectRedirect] stage=check_params, missing params', {
         dataLen: data?.length ?? 0,
         nonceLen: nonce?.length ?? 0,
         phantomPkLen: phantomPublicKey?.length ?? 0,
@@ -234,7 +248,7 @@ export const handlePhantomConnectRedirect = (
       phantomPubkeyBytes = bs58.decode(phantomPublicKey);
     } catch (decodeErr) {
       const msg = (decodeErr as Error)?.message ?? String(decodeErr);
-      console.warn('[handlePhantomConnectRedirect] stage=decode_fail', {
+      devWarn('[handlePhantomConnectRedirect] stage=decode_fail', {
         phantom_encryption_public_key_strLen: phantomPublicKey.length,
         nonce_strLen: nonce.length,
         data_strLen: data.length,
@@ -244,7 +258,7 @@ export const handlePhantomConnectRedirect = (
     }
     
     if (nonceBytes.length !== NACL_NONCE_BYTES) {
-      console.warn('[handlePhantomConnectRedirect] stage=nonce_length', {
+      devWarn('[handlePhantomConnectRedirect] stage=nonce_length', {
         nonce_strLen: nonce.length,
         nonce_byteLen: nonceBytes.length,
         required: NACL_NONCE_BYTES,
@@ -260,7 +274,7 @@ export const handlePhantomConnectRedirect = (
     } catch {
       dappPublicKeyBase58 = '(fromSecretKey failed)';
     }
-    console.log('[handlePhantomConnectRedirect] stage=decrypt', {
+    devLog('[handlePhantomConnectRedirect] stage=decrypt', {
       phantom_encryption_public_key_strLen: phantomPublicKey.length,
       phantom_encryption_public_key_byteLen: phantomPubkeyBytes.length,
       nonce_strLen: nonce.length,
@@ -275,16 +289,16 @@ export const handlePhantomConnectRedirect = (
     const decrypted = nacl.box.open(encrypted, nonceBytes, phantomPubkeyBytes, dappSecretKey);
     
     if (!decrypted) {
-      console.warn('[handlePhantomConnectRedirect] stage=decrypt_failed (nacl.box.open returned null)');
+      devWarn('[handlePhantomConnectRedirect] stage=decrypt_failed (nacl.box.open returned null)');
       return { ok: false, error: 'Decryption failed', stage: 'decrypt' };
     }
     
-    console.log('[handlePhantomConnectRedirect] stage=decrypt_ok, decrypted length:', decrypted.length);
+    devLog('[handlePhantomConnectRedirect] stage=decrypt_ok, decrypted length:', decrypted.length);
     
     const jsonString = new TextDecoder().decode(decrypted);
     const result = JSON.parse(jsonString);
     
-    console.log('[handlePhantomConnectRedirect] stage=json_parse, success, keys:', Object.keys(result));
+    devLog('[handlePhantomConnectRedirect] stage=json_parse, success, keys:', Object.keys(result));
     
     return {
       ok: true,
@@ -296,7 +310,7 @@ export const handlePhantomConnectRedirect = (
     };
   } catch (e) {
     const errorMsg = (e as Error)?.message ?? String(e);
-    console.error('[handlePhantomConnectRedirect] exception:', errorMsg);
+    devError('[handlePhantomConnectRedirect] exception:', errorMsg);
     return { ok: false, error: errorMsg, stage: 'exception' };
   }
 };
@@ -366,7 +380,7 @@ export const buildPhantomSignTransactionUrl = (params: PhantomSignTransactionPar
   const redirectEncoded = encodeURIComponent(redirectRaw);
   try {
     if (redirectRaw.includes('%') && redirectRaw !== decodeURIComponent(redirectRaw)) {
-      console.warn('[PHANTOM] sign redirect_link 二重エンコード検知?: rawに%含む', redirectRaw);
+      devWarn('[PHANTOM] sign redirect_link 二重エンコード検知?: rawに%含む', redirectRaw);
     }
   } catch {
     /* ignore */
@@ -381,12 +395,10 @@ export const buildPhantomSignTransactionUrl = (params: PhantomSignTransactionPar
   url.searchParams.set('cluster', cluster);
 
   const fullUrl = url.toString();
-  console.log('[PHANTOM] sign redirect_link raw:', redirectRaw);
-  console.log('[PHANTOM] sign redirect_link encoded(1回):', redirectEncoded);
-  console.log('[PHANTOM] sign URL全文(1行):', fullUrl);
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.log('[PHANTOM] sign cluster=devnet 確認:', fullUrl.includes('cluster=devnet') ? 'OK' : 'NG', fullUrl);
-  }
+  devLog('[PHANTOM] sign redirect_link raw:', redirectRaw);
+  devLog('[PHANTOM] sign redirect_link encoded(1回):', redirectEncoded);
+  devLog('[PHANTOM] sign URL全文(1行):', fullUrl);
+  devLog('[PHANTOM] sign cluster=devnet 確認:', fullUrl.includes('cluster=devnet') ? 'OK' : 'NG', fullUrl);
   setLastPhantomSign(fullUrl, redirectRaw, redirectEncoded);
   return fullUrl;
 };
@@ -422,7 +434,7 @@ export const decryptPhantomSignTransactionResponse = (
     const signedBuf = bs58.decode(signedEncoded);
     return Transaction.from(signedBuf);
   } catch (error) {
-    console.error('Failed to decrypt signTransaction response:', error);
+    devError('Failed to decrypt signTransaction response:', error);
     return null;
   }
 };
@@ -438,13 +450,13 @@ export const signTransaction = async (
   return new Promise<Transaction>((resolve, reject) => {
     setPendingSignTx(resolve, reject);
 
-    console.log('[CLAIM] signTransaction: before openPhantomConnect');
+    devLog('[CLAIM] signTransaction: before openPhantomConnect');
     openPhantomConnect(url)
       .then(() => {
-        console.log('[CLAIM] signTransaction: openPhantomConnect done, waiting for Phantom redirect');
+        devLog('[CLAIM] signTransaction: openPhantomConnect done, waiting for Phantom redirect');
       })
       .catch((err) => {
-        console.error('[CLAIM] signTransaction: openPhantomConnect failed:', err);
+        devError('[CLAIM] signTransaction: openPhantomConnect failed:', err);
         rejectPendingSignTx(err instanceof Error ? err : new Error(String(err)));
       });
   });
@@ -493,7 +505,7 @@ export const handleRedirect = (
     return { ok: false, error: 'Invalid nonce' };
   }
   if (nonceBytes.length !== NACL_NONCE_BYTES) {
-    console.warn('[handleRedirect] signTransaction nonce length:', nonceBytes.length, 'expected:', NACL_NONCE_BYTES);
+    devWarn('[handleRedirect] signTransaction nonce length:', nonceBytes.length, 'expected:', NACL_NONCE_BYTES);
     rejectPendingSignTx(new Error(`Invalid nonce length: ${nonceBytes.length}`));
     return { ok: false, error: `Invalid nonce length: ${nonceBytes.length}` };
   }

@@ -36,13 +36,15 @@ export default function PhantomCallbackScreen() {
     const errCode = params?.get('errorCode') ?? '';
     const errMsg = params?.get('errorMessage') ?? '';
 
-    console.log('[phantom-callback] received query lengths:', {
-      dataLen,
-      nonceLen,
-      phantom_encryption_public_keyLen: pkLen,
-      errorCode: errCode?.length ?? 0,
-      errorMessage: errMsg?.length ?? 0,
-    });
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log('[phantom-callback] received query lengths:', {
+        dataLen,
+        nonceLen,
+        phantom_encryption_public_keyLen: pkLen,
+        errorCode: errCode?.length ?? 0,
+        errorMessage: errMsg?.length ?? 0,
+      });
+    }
 
     if (!url || !params?.toString()) {
       setStatus('error');

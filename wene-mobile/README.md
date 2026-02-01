@@ -26,6 +26,21 @@ npx expo prebuild --clean
 | `npm run build:apk` | Build Android APK |
 | `npm run deploy:adb` | Build and install via ADB |
 | `npm start` | Start Expo dev server |
+| `npm test` | Run unit tests (phantom redirect / scheme validation) |
+
+## Devnet Grant Config (optional)
+
+For production or custom devnet deployments, override the built-in grant config via **environment variables** (Expo: `EXPO_PUBLIC_*` is exposed to the client):
+
+| Variable | Description |
+|----------|-------------|
+| `EXPO_PUBLIC_WENE_DEVNET_AUTHORITY` | Grant authority pubkey |
+| `EXPO_PUBLIC_WENE_DEVNET_MINT` | SPL mint pubkey |
+| `EXPO_PUBLIC_WENE_DEVNET_GRANT_ID` | Grant ID (default: 1) |
+| `EXPO_PUBLIC_WENE_DEVNET_START_TS` | start_ts (unix) |
+| `EXPO_PUBLIC_WENE_DEVNET_PERIOD_SECONDS` | period_seconds |
+
+If unset, the app falls back to the values in `src/solana/devnetConfig.ts`. See [docs/SECURITY_REVIEW.md](../docs/SECURITY_REVIEW.md) (H2).
 
 ## Doctor Script
 

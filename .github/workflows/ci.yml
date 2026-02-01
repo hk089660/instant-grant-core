@@ -17,8 +17,12 @@ jobs:
   contract:
     name: Smart contract (Anchor)
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify grant_program layout
+        run: test -f grant_program/Anchor.toml && test -f grant_program/Cargo.toml
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -53,8 +57,12 @@ jobs:
     name: Mobile app (Expo / TypeScript)
     runs-on: ubuntu-latest
     # School claim flow (useSchoolClaim, schoolRoutes, eventId, Result types) validated via tsc
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify wene-mobile layout
+        run: test -f wene-mobile/package.json && test -f wene-mobile/tsconfig.json
 
       - name: Setup Node
         uses: actions/setup-node@v4

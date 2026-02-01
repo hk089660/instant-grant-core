@@ -50,6 +50,7 @@ Enable instant, transparent, and low-cost benefit distribution for public suppor
 - [ ] Bulk allowlist management
 
 ### Security
+- [ ] Pre-audit improvements (see [SECURITY_REVIEW.md](./SECURITY_REVIEW.md) for P0/P1/P2 tasks)
 - [ ] Smart contract audit (external)
 - [ ] Mobile app security review
 - [ ] Bug bounty program launch
