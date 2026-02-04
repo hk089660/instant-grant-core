@@ -18,7 +18,7 @@ import { signTransaction, initiatePhantomConnect, buildPhantomConnectUrl } from 
 import { rejectPendingSignTx } from '../utils/phantomSignTxPending';
 import { getLastPhantomDebug } from '../utils/phantomUrlDebug';
 import { sendSignedTx, isBlockhashExpiredError, isSimulationFailedError } from '../solana/sendTx';
-import { getConnection } from '../solana/anchorClient';
+import { getConnection } from '../solana/singleton';
 import { RPC_URL } from '../solana/singleton';
 import { fetchSplBalance, fetchAnyPositiveSplBalance, formatAmountForDisplay, SPL_USDC_MINT } from '../solana/wallet';
 

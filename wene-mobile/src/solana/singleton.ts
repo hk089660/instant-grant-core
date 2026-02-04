@@ -7,7 +7,7 @@
  * 【安定性のポイント】
  * - モジュールスコープでインスタンスを保持
  * - 一度生成したら再利用（lazy singleton）
- * - cluster は cluster.ts の DEFAULT_CLUSTER に集約（DEV=devnet, 本番=mainnet-beta）
+ * - cluster は cluster.ts の DEFAULT_CLUSTER に集約（現状は devnet 固定）
  */
 
 import { Connection, Keypair } from '@solana/web3.js';

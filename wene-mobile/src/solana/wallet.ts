@@ -4,7 +4,7 @@
  */
 
 import { Connection, PublicKey } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress, getAccount } from "@solana/spl-token";
+import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress, getAccount, getMint } from "@solana/spl-token";
 
 // --- changed ---
 // Devnet: set this to a mint you actually care about (or leave TODO and rely on fallback elsewhere)
@@ -109,9 +109,12 @@ export async function fetchSplBalance(
 ): Promise<FetchSplBalanceResult> {
   try {
     const ata = await getAssociatedTokenAddress(mintPubkey, ownerPubkey);
-    const acc = await getAccount(connection, ata);
+    const [acc, mint] = await Promise.all([
+      getAccount(connection, ata),
+      getMint(connection, mintPubkey),
+    ]);
     // acc.amount is bigint
-    return { amount: acc.amount.toString(), decimals: 6 };
+    return { amount: acc.amount.toString(), decimals: mint.decimals };
   } catch {
     // Fail-soft: no ATA / no balance / RPC issues => 0
     return { amount: "0", decimals: 6 };

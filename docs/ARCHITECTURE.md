@@ -40,9 +40,9 @@ This document describes the high-level architecture of we-ne.
 **Key Accounts (PDAs)**:
 | Account | Seeds | Description |
 |---------|-------|-------------|
-| Grant | `["grant", authority, mint, nonce]` | Stores grant configuration |
+| Grant | `["grant", authority, mint, grant_id]` | Stores grant configuration |
 | ClaimReceipt | `["receipt", grant, claimer, period_index]` | Prevents double-claims |
-| Vault | `[grant_pubkey]` (Token Account) | Holds SPL tokens for distribution |
+| Vault | `["vault", grant_pubkey]` (Token Account) | Holds SPL tokens for distribution |
 
 **Instructions**:
 - `create_grant` - Initialize a new grant with period settings
