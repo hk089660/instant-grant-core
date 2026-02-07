@@ -6,12 +6,16 @@
  * - evt-002: 既参加 (alreadyJoined)
  * - evt-003: リトライ可能エラー (retryable)
  * - その他: 通常の成功/既参加判定
+ *
+ * 同一端末での二回目以降の「再ログイン」: isJoined(eventId) のとき
+ * success + alreadyJoined を返し、onSuccess で完了画面へ遷移させる（そのまま通す）。
  */
 
 import type { SchoolClaimClient } from './schoolClaimClient';
 import type { SchoolClaimResult } from '../types/school';
 import type { SchoolEventProvider } from './schoolClaimClient';
 import { useRecipientTicketStore } from '../store/recipientTicketStore';
+import { addSharedParticipation } from '../data/adminMock';
 
 let _deviceId: string | null = null;
 
@@ -27,9 +31,10 @@ async function getDeviceId(storage: { getItem: (k: string) => Promise<string | n
   return value;
 }
 
+/** addTicket / setCompleted は呼び出し元（JoinScreen 等）で行う。mock は addSharedParticipation のみ（API 無効時の管理者ログ用）。 */
 export function createMockSchoolClaimClient(eventProvider: SchoolEventProvider): SchoolClaimClient {
   return {
-    async submit(eventId: string): Promise<SchoolClaimResult> {
+    async submit(eventId: string, _token?: string): Promise<SchoolClaimResult> {
       const event = eventProvider.getById(eventId);
       if (!event) {
         return {
@@ -61,16 +66,12 @@ export function createMockSchoolClaimClient(eventProvider: SchoolEventProvider):
       const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
       await getDeviceId(AsyncStorage);
 
-      const { isJoined, addTicket } = useRecipientTicketStore.getState();
+      const { isJoined } = useRecipientTicketStore.getState();
       if (isJoined(eventId)) {
         return { success: true, eventName: event.title, alreadyJoined: true };
       }
 
-      await addTicket({
-        eventId,
-        eventName: event.title,
-        joinedAt: Date.now(),
-      });
+      addSharedParticipation({ eventId, eventName: event.title });
 
       return { success: true, eventName: event.title };
     },

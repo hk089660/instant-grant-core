@@ -92,8 +92,8 @@ android {
         applicationId 'jp.wene.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 130818
-        versionName "1.0.0-130818"
+        versionCode 324323
+        versionName "1.0.0-324323"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

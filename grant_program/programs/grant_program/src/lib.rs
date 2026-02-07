@@ -50,6 +50,34 @@ pub mod grant_program {
         require!(start_ts <= now + 365_i64 * 24 * 60 * 60, ErrorCode::InvalidStartTs);
 
         let grant = &mut ctx.accounts.grant;
+
+        // init_if_needed によって "既に存在する Grant" が渡されるケースがある。
+        // ここで上書きしてしまうと、fund 済みのキャンペーン設定が改竄できてしまうため危険。
+        //
+        // 方針:
+        // - 既存なら「同一設定の再実行」は OK（冪等）。
+        // - 既存と設定が違う場合はエラー（上書き禁止）。
+        if grant.authority != Pubkey::default() {
+            require!(
+                grant.authority == ctx.accounts.authority.key(),
+                ErrorCode::GrantConfigMismatch
+            );
+            require!(grant.mint == ctx.accounts.mint.key(), ErrorCode::GrantConfigMismatch);
+            require!(grant.vault == ctx.accounts.vault.key(), ErrorCode::GrantConfigMismatch);
+            require!(grant.grant_id == grant_id, ErrorCode::GrantConfigMismatch);
+            require!(
+                grant.amount_per_period == amount_per_period,
+                ErrorCode::GrantConfigMismatch
+            );
+            require!(
+                grant.period_seconds == period_seconds,
+                ErrorCode::GrantConfigMismatch
+            );
+            require!(grant.start_ts == start_ts, ErrorCode::GrantConfigMismatch);
+            require!(grant.expires_at == expires_at, ErrorCode::GrantConfigMismatch);
+            return Ok(());
+        }
+
         grant.authority = ctx.accounts.authority.key();
         grant.mint = ctx.accounts.mint.key();
         grant.vault = ctx.accounts.vault.key();
@@ -589,4 +617,6 @@ pub enum ErrorCode {
     AllowlistNotEnabled,
     #[msg("Claimer is not in allowlist")]
     NotInAllowlist,
+    #[msg("Grant already exists with a different config")]
+    GrantConfigMismatch,
 }

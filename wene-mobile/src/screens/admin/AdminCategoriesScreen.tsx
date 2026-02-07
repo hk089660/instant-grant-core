@@ -3,11 +3,19 @@ import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AppText, Button, Card, AdminShell } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
-import { getMockAdminRole, setMockAdminRole, mockCategories } from '../../data/adminMock';
+import { getCategories } from '../../data/adminMock';
+import { useAdminRole } from '../../hooks/useAdminRole';
 
 export const AdminCategoriesScreen: React.FC = () => {
   const router = useRouter();
-  const [role, setRole] = React.useState(getMockAdminRole());
+  const { role, setRole, loading } = useAdminRole();
+  if (loading || role == null) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <AppText variant="caption" style={{ color: adminTheme.colors.textSecondary }}>読み込み中…</AppText>
+      </View>
+    );
+  }
   const isAdmin = role === 'admin';
 
   return (
@@ -16,7 +24,7 @@ export const AdminCategoriesScreen: React.FC = () => {
       role={role}
       onRoleChange={(nextRole) => {
         setRole(nextRole);
-        setMockAdminRole(nextRole);
+        setRole(nextRole);
       }}
     >
       <ScrollView contentContainerStyle={styles.content}>
@@ -24,7 +32,7 @@ export const AdminCategoriesScreen: React.FC = () => {
           <AppText variant="h2" style={styles.title}>
             カテゴリ管理
           </AppText>
-          <Button title="戻る" variant="secondary" onPress={() => router.back()} />
+          <Button title="戻る" variant="secondary" onPress={() => router.back()} tone="dark" />
         </View>
 
         {!isAdmin ? (
@@ -39,11 +47,11 @@ export const AdminCategoriesScreen: React.FC = () => {
         ) : (
           <>
             <AppText variant="caption" style={styles.note}>
-              削除したカテゴリのイベントは「未分類（Other）」に移動します
+              削除したカテゴリのイベントは「未分類」に移動します
             </AppText>
 
             <Card style={styles.card}>
-              {mockCategories.map((category, index) => (
+              {getCategories().map((category, index) => (
                 <View key={category.id} style={styles.row}>
                   <AppText variant="bodyLarge" style={styles.cardText}>
                     {category.label}
@@ -69,7 +77,7 @@ export const AdminCategoriesScreen: React.FC = () => {
               ))}
             </Card>
 
-            <Button title="カテゴリを追加" variant="secondary" onPress={() => {}} />
+            <Button title="カテゴリを追加" variant="secondary" onPress={() => {}} tone="dark" />
           </>
         )}
       </ScrollView>

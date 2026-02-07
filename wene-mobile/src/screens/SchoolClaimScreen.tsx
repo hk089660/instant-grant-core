@@ -26,7 +26,17 @@ export const SchoolClaimScreen: React.FC = () => {
     loadTickets().catch(() => {});
   }, [loadTickets]);
 
-  if (!isValid) return null;
+  if (!isValid) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <View style={styles.centerContent}>
+          <AppText variant="body" style={styles.secondaryText}>
+            リダイレクト中…
+          </AppText>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (!eventId || !event) {
     return (

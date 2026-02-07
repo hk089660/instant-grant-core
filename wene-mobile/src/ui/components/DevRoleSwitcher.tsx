@@ -3,6 +3,7 @@ import { View, StyleSheet, TouchableOpacity, TextStyle } from 'react-native';
 import { AppText } from './AppText';
 import { adminTheme } from '../adminTheme';
 import type { Role } from '../../types/ui';
+import { roleLabel } from '../../types/ui';
 
 interface DevRoleSwitcherProps {
   value: Role;
@@ -17,7 +18,7 @@ export const DevRoleSwitcher: React.FC<DevRoleSwitcherProps> = ({ value, onChang
   return (
     <View style={styles.container}>
       <AppText variant="small" style={styles.label}>
-        Dev Role
+        開発用ロール
       </AppText>
       <View style={styles.buttons}>
         {roles.map((role) => (
@@ -30,7 +31,7 @@ export const DevRoleSwitcher: React.FC<DevRoleSwitcherProps> = ({ value, onChang
               variant="small"
               style={[styles.buttonText, value === role && styles.buttonTextActive] as unknown as TextStyle}
             >
-              {role}
+              {roleLabel[role]}
             </AppText>
           </TouchableOpacity>
         ))}
@@ -44,7 +45,7 @@ const styles = StyleSheet.create({
     marginTop: adminTheme.spacing.md,
   },
   label: {
-    color: adminTheme.colors.textTertiary,
+    color: adminTheme.colors.textSecondary,
     marginBottom: adminTheme.spacing.xs,
   },
   buttons: {

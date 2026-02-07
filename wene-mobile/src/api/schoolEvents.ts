@@ -1,17 +1,17 @@
 /**
  * 学校向けイベント取得 API
  *
- * PoC: mock データ。将来は server API に差し替え。
+ * PoC: adminEventsStore の同期キャッシュを参照。loadEvents() が事前に呼ばれていること。
  * SchoolEventProvider を実装し、schoolClaimClient から利用。
  */
 
-import { mockEvents } from '../data/adminMock';
+import { getEventsSync } from '../data/adminEventsStore';
 import type { SchoolEvent } from '../types/school';
 import type { SchoolEventProvider } from './schoolClaimClient';
 
 export type { SchoolEvent } from '../types/school';
 
-const toSchoolEvent = (e: (typeof mockEvents)[0]): SchoolEvent => ({
+const toSchoolEvent = (e: { id: string; title: string; datetime: string; host: string }): SchoolEvent => ({
   id: e.id,
   title: e.title,
   datetime: e.datetime,
@@ -20,11 +20,12 @@ const toSchoolEvent = (e: (typeof mockEvents)[0]): SchoolEvent => ({
 
 export const schoolEventProvider: SchoolEventProvider = {
   getById(eventId: string): SchoolEvent | null {
-    const event = mockEvents.find((e) => e.id === eventId);
+    const events = getEventsSync();
+    const event = events.find((e) => e.id === eventId);
     return event ? toSchoolEvent(event) : null;
   },
   getAll(): SchoolEvent[] {
-    return mockEvents.map(toSchoolEvent);
+    return getEventsSync().map(toSchoolEvent);
   },
 };
 

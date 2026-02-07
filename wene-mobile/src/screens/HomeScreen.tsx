@@ -1,15 +1,40 @@
-import React from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { getClaimMode } from '../config/claimMode';
 import { schoolRoutes } from '../lib/schoolRoutes';
+import { getStudentSession } from '../utils/studentSession';
 
+/** 学校モード時: 初回起動（未登録）なら登録フローへリダイレクト。登録済み・再起動後はログイン情報を反映してホームを表示。 */
 export const HomeScreen: React.FC = () => {
   const router = useRouter();
   const isSchoolMode = getClaimMode() === 'school';
+  const [registrationCheck, setRegistrationCheck] = useState<'pending' | 'redirect_to_register' | 'registered'>(
+    isSchoolMode ? 'pending' : 'registered'
+  );
+
+  useEffect(() => {
+    if (!isSchoolMode) {
+      setRegistrationCheck('registered');
+      return;
+    }
+    let cancelled = false;
+    getStudentSession().then((session) => {
+      if (cancelled) return;
+      setRegistrationCheck(session ? 'registered' : 'redirect_to_register');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSchoolMode]);
+
+  useEffect(() => {
+    if (registrationCheck !== 'redirect_to_register') return;
+    router.replace(schoolRoutes.register as any);
+  }, [registrationCheck, router]);
 
   const handleStartReceive = () => {
     if (isSchoolMode) {
@@ -26,6 +51,32 @@ export const HomeScreen: React.FC = () => {
       router.push('/r/demo-campaign?code=demo-invite');
     }
   };
+
+  if (isSchoolMode && registrationCheck === 'pending') {
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <View style={[styles.content, styles.loadingContent]}>
+          <ActivityIndicator size="large" color={theme.colors.active} />
+          <AppText variant="caption" style={styles.loadingText}>
+            読み込み中…
+          </AppText>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (isSchoolMode && registrationCheck === 'redirect_to_register') {
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <View style={[styles.content, styles.loadingContent]}>
+          <ActivityIndicator size="large" color={theme.colors.active} />
+          <AppText variant="caption" style={styles.loadingText}>
+            登録画面へ…
+          </AppText>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -83,5 +134,12 @@ const styles = StyleSheet.create({
   demoLinkText: {
     color: theme.colors.textTertiary,
     textDecorationLine: 'underline',
+  },
+  loadingContent: {
+    justifyContent: 'center',
+  },
+  loadingText: {
+    marginTop: theme.spacing.md,
+    color: theme.colors.textSecondary,
   },
 });

@@ -1,0 +1,35 @@
+[
+  {
+    "id": "evt-001",
+    "title": "地域清掃ボランティア",
+    "datetime": "2026/02/02 09:00-10:30",
+    "host": "生徒会",
+    "status": "active",
+    "rtCount": 23,
+    "totalCount": 58,
+    "createdAt": "2026-02-07T10:01:19.954Z",
+    "updatedAt": "2026-02-07T10:01:19.954Z"
+  },
+  {
+    "id": "evt-002",
+    "title": "進路説明会",
+    "datetime": "2026/02/10 15:00-16:00",
+    "host": "進路指導室",
+    "status": "draft",
+    "rtCount": 8,
+    "totalCount": 8,
+    "createdAt": "2026-02-07T10:01:19.954Z",
+    "updatedAt": "2026-02-07T10:01:19.954Z"
+  },
+  {
+    "id": "evt-003",
+    "title": "体育祭",
+    "datetime": "2026/02/15 09:00-15:00",
+    "host": "体育委員会",
+    "status": "active",
+    "rtCount": 0,
+    "totalCount": 120,
+    "createdAt": "2026-02-07T10:01:19.954Z",
+    "updatedAt": "2026-02-07T10:01:19.954Z"
+  }
+]

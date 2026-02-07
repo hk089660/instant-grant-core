@@ -325,6 +325,19 @@ npx expo prebuild --clean   # Generate native projects
 npm start
 ```
 
+### School API server (optional)
+
+For the school participation flow with admin Web and join/claim API (QR with join-token, participations, persistence):
+
+```bash
+cd wene-mobile/server
+# Set env: SCHOOL_ADMIN_PASSCODE, SCHOOL_ADMIN_WEB_ORIGIN, SCHOOL_JOIN_TOKEN_SECRET, SCHOOL_REQUIRE_JOIN_TOKEN (see server/README.md)
+npm install && npm start
+```
+
+- API base: `http://localhost:3000/school`. Set `EXPO_PUBLIC_SCHOOL_API_URL` in the app to use it.
+- See [wene-mobile/README_SCHOOL.md](./wene-mobile/README_SCHOOL.md) and [wene-mobile/docs/SCHOOL_POC_LAN_SETUP.md](./wene-mobile/docs/SCHOOL_POC_LAN_SETUP.md) for LAN setup and join-token verification.
+
 ### Build Android APK
 
 ```bash
@@ -372,6 +385,7 @@ we-ne/
 │
 ├── wene-mobile/             # Mobile app (React Native + Expo)
 │   ├── app/                 # Screens (Expo Router)
+│   ├── server/              # School API (auth, events, participations, claim, join-token; JSON persistence)
 │   ├── src/solana/          # Blockchain client
 │   ├── src/wallet/          # Phantom adapter
 │   └── src/utils/phantom.ts # Deep link encryption

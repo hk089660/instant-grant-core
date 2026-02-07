@@ -3,23 +3,18 @@ import { View, StyleSheet, ViewStyle } from 'react-native';
 import { AppText } from './AppText';
 import { adminTheme } from '../adminTheme';
 import type { EventState } from '../../types/ui';
+import { eventStateLabel } from '../../types/ui';
 
 interface StatusBadgeProps {
   state: EventState;
   style?: ViewStyle;
 }
 
-const labelMap: Record<EventState, string> = {
-  draft: 'Draft',
-  published: 'Published',
-  ended: 'Ended',
-};
-
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ state, style }) => {
   return (
     <View style={[styles.badge, style]}>
       <AppText variant="small" style={styles.text}>
-        {labelMap[state]}
+        {eventStateLabel[state]}
       </AppText>
     </View>
   );

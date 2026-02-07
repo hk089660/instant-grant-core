@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 /**
  * We-ne Mobile Doctor Script
- * 
- * 一般的な問題を自動検出・修正するスクリプト
- * 
+ *
+ * 一般的な問題を自動検出・修正するスクリプト。
+ * ビルド時は --build で利用者UI・管理者UIの必須/禁止パターンのみチェックし、
+ * アイコン・Android設定はスキップして「UIが壊れていない」ことを保証する。
+ *
  * 使い方:
- *   node scripts/doctor.js        # 問題を検出
- *   node scripts/doctor.js --fix  # 問題を自動修正
+ *   node scripts/doctor.js          # 全チェック（完成形保護・Android含む）
+ *   node scripts/doctor.js --fix    # 問題を自動修正
+ *   node scripts/doctor.js --build  # ビルド用（UI保護＋依存関係のみ）
  */
 
 const fs = require('fs');
@@ -16,6 +19,8 @@ const { execSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const FIX_MODE = process.argv.includes('--fix');
+/** ビルド時のみ: UI必須/禁止パターンと依存関係だけチェック（アイコン・Androidはスキップ） */
+const BUILD_MODE = process.argv.includes('--build');
 
 const colors = {
   red: '\x1b[31m',
@@ -47,6 +52,7 @@ const LOCKED_FILES = {
 };
 
 // 必須パターン (これらが含まれていないとエラー)
+// 利用者UI・管理者UIが壊れないように必須の契約をチェック
 const REQUIRED_PATTERNS = {
   'src/polyfills.ts': [
     "react-native-get-random-values",
@@ -60,9 +66,16 @@ const REQUIRED_PATTERNS = {
   'app/_layout.tsx': [
     "SafeAreaProvider",
     "polyfills",
+    'name="u"',
+    'name="register"',
+    'name="admin"',
   ],
   'src/screens/HomeScreen.tsx': [
     "SafeAreaView",
+    "schoolRoutes",
+    "参加を開始",
+    "getStudentSession",
+    "redirect_to_register",
   ],
   'src/screens/ReceiveScreen.tsx': [
     "SafeAreaView",
@@ -70,9 +83,147 @@ const REQUIRED_PATTERNS = {
   'src/screens/WalletScreen.tsx': [
     "SafeAreaView",
   ],
+  // 利用者UI: 学校申込・ユーザー画面
+  'src/screens/SchoolClaimScreen.tsx': [
+    "SafeAreaView",
+    "useSchoolClaim",
+    "schoolRoutes.home",
+  ],
+  'src/screens/user/UserScanScreen.tsx': [
+    "SafeAreaView",
+    "schoolRoutes",
+    "Platform.OS",
+    "handleContinueWithoutScan",
+    "CameraView",
+    "useCameraPermissions",
+  ],
+  'src/screens/user/UserEventsScreen.tsx': [
+    "SafeAreaView",
+    "schoolRoutes",
+    "getParticipations",
+    "addSharedParticipation",
+  ],
+  'src/screens/user/UserConfirmScreen.tsx': [
+    "SafeAreaView",
+    "useSchoolClaim",
+    "schoolRoutes.success",
+    "handleClaim",
+    "完了画面へ",
+    "参加済み",
+  ],
+  'src/screens/user/UserSuccessScreen.tsx': [
+    "SafeAreaView",
+    "schoolRoutes",
+    "setCompleted",
+    "リダイレクト中",
+  ],
+  'src/screens/user/JoinScreen.tsx': [
+    "getStudentSession",
+    "recordParticipation",
+    "addSharedParticipation",
+  ],
+  // 管理者UI: 共通ラベル（日本語）の一元管理
+  'src/types/ui.ts': [
+    "roleLabel",
+    "eventStateLabel",
+  ],
+  'src/ui/components/StatusBadge.tsx': [
+    "eventStateLabel",
+  ],
+  'src/ui/components/AdminShell.tsx': [
+    "roleLabel",
+    "管理画面",
+  ],
+  // 利用者登録フロー: eventId とルートの契約
+  'src/hooks/useEventIdFromParams.ts': [
+    "parseEventId",
+    "schoolRoutes.events",
+  ],
+  'src/lib/schoolRoutes.ts': [
+    "confirm",
+    "success",
+    "scan",
+  ],
+  'src/lib/eventId.ts': [
+    "parseEventId",
+  ],
+  'src/api/schoolClaim.ts': [
+    "submitSchoolClaim",
+  ],
+  'src/api/schoolClaimClient.mock.ts': [
+    "alreadyJoined",
+    "isJoined",
+    "addSharedParticipation",
+  ],
+  // 利用者・管理者連携: adminEventsStore の getEventsSync を単一ソースに、参加反映は adminMock
+  'src/api/schoolEvents.ts': [
+    "getEventsSync",
+    "adminEventsStore",
+    "getEventById",
+    "getAllSchoolEvents",
+  ],
+  'src/data/adminMock.ts': [
+    "mockEvents",
+    "addSharedParticipation",
+    "getDisplayRtCount",
+    "getSharedParticipationsByEventId",
+    "getSharedParticipations",
+  ],
+  'src/screens/admin/AdminEventsScreen.tsx': [
+    "getDisplayRtCount",
+    "tone=\"dark\"",
+    "EventRow",
+    "#ffffff",
+  ],
+  'src/ui/components/EventRow.tsx': [
+    "tone",
+    "#ffffff",
+    "textStyle",
+  ],
+  'src/ui/components/Button.tsx': [
+    "tone",
+    "textDark",
+  ],
+  'src/screens/admin/AdminEventDetailScreen.tsx': [
+    "eventStateLabel",
+    "getDisplayRtCount",
+    "getSharedParticipationsByEventId",
+    "getEventScanUrl",
+    "QRCode",
+    "participantText",
+  ],
+  'src/screens/admin/AdminPrintScreen.tsx': [
+    "getEventScanUrl",
+    "QRCode",
+  ],
+  'src/utils/appUrl.ts': [
+    "getBaseUrl",
+    "getEventScanUrl",
+  ],
+  'src/screens/admin/AdminParticipantsScreen.tsx': [
+    "getSharedParticipations",
+  ],
+  'src/store/recipientTicketStore.ts': [
+    "isJoined",
+    "addTicket",
+  ],
+  'src/config/claimMode.ts': [
+    "getClaimMode",
+  ],
+  'app/u/_layout.tsx': [
+    "Stack",
+  ],
+  'app/admin/_layout.tsx': [
+    "Stack",
+    "headerShown: false",
+  ],
+  'src/data/participationStore.ts': [
+    "setStarted",
+    "setCompleted",
+  ],
 };
 
-// 禁止パターン (これらが含まれているとエラー)
+// 禁止パターン (これらが含まれているとエラー) — デバッグ用・英語UIの混入防止
 const FORBIDDEN_PATTERNS = {
   'src/polyfills.ts': [
     '/ingest/',
@@ -91,6 +242,26 @@ const FORBIDDEN_PATTERNS = {
   ],
   'src/screens/WalletScreen.tsx': [
     '/ingest/',
+  ],
+  // 管理者UI: 英語ラベルの直書きを防ぎ eventStateLabel/roleLabel を使う設計を維持
+  'src/ui/components/StatusBadge.tsx': [
+    "draft: 'Draft'",
+    "published: 'Published'",
+    "ended: 'Ended'",
+  ],
+  'src/ui/components/AdminShell.tsx': [
+    'we-ne Admin',
+    'Events</AppText>',
+    'Participants</AppText>',
+    'Categories</AppText>',
+    'Logout</AppText>',
+  ],
+  // 利用者UI: 無効時の白画面を防ぐ（リダイレクト表示必須）
+  'src/screens/user/UserSuccessScreen.tsx': [
+    'if (!isValid) return null',
+  ],
+  'src/screens/user/UserConfirmScreen.tsx': [
+    'if (!isValid) return null',
   ],
 };
 
@@ -222,6 +393,8 @@ function checkDependencies() {
     'buffer',
     'bs58',
     'tweetnacl',
+    'expo-camera',
+    'react-native-qrcode-svg',
   ];
   
   const missing = [];
@@ -359,12 +532,13 @@ function checkAssets() {
 // Main
 // ========================================
 console.log('\n🏥 We-ne Mobile Doctor\n');
-console.log(`Mode: ${FIX_MODE ? 'FIX' : 'CHECK'}\n`);
+console.log(`Mode: ${FIX_MODE ? 'FIX' : BUILD_MODE ? 'BUILD (UI保護)' : 'CHECK'}\n`);
 console.log('─'.repeat(50));
 
-// Critical checks first
-checkLockedFiles();
-console.log('');
+if (!BUILD_MODE) {
+  checkLockedFiles();
+  console.log('');
+}
 
 checkNodeModules();
 console.log('');
@@ -378,10 +552,12 @@ console.log('');
 checkForbiddenPatterns();
 console.log('');
 
-checkAndroidConfig();
-console.log('');
+if (!BUILD_MODE) {
+  checkAndroidConfig();
+  console.log('');
 
-checkAssets();
+  checkAssets();
+}
 
 console.log('\n' + '─'.repeat(50));
 console.log(`\n📊 Summary: ${issues} issue(s) found`);

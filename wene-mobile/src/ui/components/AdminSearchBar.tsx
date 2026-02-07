@@ -5,22 +5,33 @@ import { adminTheme } from '../adminTheme';
 
 interface AdminSearchBarProps {
   value: string;
+  /** ラベル（例: 「アカウント情報で絞り込み」） */
+  label?: string;
   placeholder?: string;
+  /** ラベル下の補足テキスト */
+  hint?: string;
   onChange: (text: string) => void;
   style?: ViewStyle;
 }
 
 export const AdminSearchBar: React.FC<AdminSearchBarProps> = ({
   value,
+  label = '検索',
   placeholder = 'ID / 表示名 / 確認コードで検索',
+  hint,
   onChange,
   style,
 }) => {
   return (
     <View style={[styles.container, style]}>
       <AppText variant="caption" style={styles.label}>
-        検索
+        {label}
       </AppText>
+      {hint ? (
+        <AppText variant="small" style={styles.hint}>
+          {hint}
+        </AppText>
+      ) : null}
       <TextInput
         style={styles.input}
         placeholder={placeholder}
@@ -37,6 +48,10 @@ const styles = StyleSheet.create({
     marginBottom: adminTheme.spacing.md,
   },
   label: {
+    color: adminTheme.colors.text,
+    marginBottom: adminTheme.spacing.xs,
+  },
+  hint: {
     color: adminTheme.colors.textSecondary,
     marginBottom: adminTheme.spacing.xs,
   },
