@@ -95,10 +95,32 @@ School参加フローのロジック・型・エラー処理を整理し、差�
 - **Web**: 管理者・補助用（`/admin/*` や印刷画面など）。**生徒の受け取り用途では使用しない**。生徒の参加フローはアプリで完結する想定です。
 - 上記のとおり、生徒用は Web/PWA を主導線にせず Expo アプリを主導線とし、Phantom 連携の安定性を最優先しています。
 
-### 直近のマイルストーン
-- Scan → Confirm → Success の簡潔な参加フロー
-- 最小限の運営ダッシュボード（発行数・完了数）
-- デモ動画の作成・公開
+### 提供物（PoC）
+Android 実機での devnet claim フロー。完了条件: Phantom 接続 → 署名 → 送信 → 受け取り表示まで完走し、devnet 固定であることを確認。検証: デモ動画と DEVNET_SETUP.md の手順。
+リポジトリ一括ビルド/テスト。完了条件: npm run build と npm run test（または scripts/build-all.sh build/test）が所定環境で成功。検証: CI と DEVELOPMENT.md の手順。
+School 参加 UI フロー（モック）。完了条件: /u → /u/scan → /u/confirm → /u/success の遷移と evt-001/002/003 の状態遷移が仕様通り。検証: STATIC_VERIFICATION_REPORT.md。
+印刷用 QR とロール制御。完了条件: /admin/print/:eventId の印刷レイアウトと viewer/operator/admin の UI 制御が反映。検証: アプリ内表示と印刷プレビュー。
+
+### 直近のマイルストーン（PoC）
+Scan → Confirm → Success の簡潔化。完了条件: 参加導線を1本化し、ルートと画面構成が README と一致。検証: デモ動画更新と導線図の更新。
+最小限の運営ダッシュボード（発行数・完了数）。完了条件: /admin にカウント表示を実装し、school API から取得できること。検証: wene-mobile/server の起動手順と短いデモ。
+短いデモ動画。完了条件: 接続→スキャン→claim→受け取りまでの 1〜2 分動画を公開し README に記載。検証: README のリンク。
+
+### 不正・資格管理（PoC）
+実装済み: 同一期間の二重 claim 防止（ClaimReceipt PDA）。
+未実装: Allowlist/Merkle、FairScale レピュテーション連携、強い本人性/資格確認。
+School PoC では join-token を任意で使えるが、強い本人性ではなく、運用での配布管理を前提とする。
+
+### 運用上の制約（QR/Phantom）
+devnet 固定。RPC と deeplink は cluster=devnet を明示しないと Phantom でブロックされる。
+Android では「Phantom → 外部ブラウザへ戻る」動作が不安定。主導線は Phantom in-app browser の browse deeplink と印刷 QR。
+redirect-based connect は主導線にせず、/phantom-callback は手動復帰用。
+/u/* は Safari(iOS)/Chrome(Android) 推奨。その他ブラウザは不安定な場合がある。
+
+### 学校運用とデータ整合性（PoC）
+管理画面のカウントは school API サーバの JSON 永続化データに基づく。改ざん耐性や監査証跡はない。
+参加記録は PoC 範囲では暗号学的に署名/検証されない。
+想定は「限定された学校イベントでの運用」と「QR 配布の管理・端末の役割分離」を前提とした管理である。
 
 > **Solana 上の即時・透明な支援配布 — 日本の公的支援ニーズ向けプロトタイプ**
 
@@ -111,10 +133,10 @@ School参加フローのロジック・型・エラー処理を整理し、差�
 
 ## 概要
 
-we-ne は Solana 上で動作する**非保管型の支援配布システム**のプロトタイプである。現時点では**プロトタイプ段階**にあり、Phantom 連携と基本的な claim フローが実装されている。本番利用は想定していない。**給付・クーポン・参加券・ブロックチェーン資産**を単一の「残高一覧」として統合表示するプロトタイプであり、利用者はオンチェーン / オフチェーンを意識せず**「今日使える価値」**を直感的に確認できる。
+we-ne は Solana 上で動作する非保管型の支援配布システムの PoC です。現在はプロトタイプ段階で、Phantom 連携と基本的な claim フローが動作しています。本 PoC は devnet 固定で、本番利用は想定していません。不正・資格管理は PoC で限定的で、オンチェーンの二重 claim 防止が中心です。FairScale 連携や許可リスト（Allowlist）は計画段階で未実装です。
 
-- **コア**: 期間ごとの SPL 付与、二重 claim 防止、モバイルウォレット連携（オンチェーンで検証可能）
-- **構成**: スマートコントラクト（`grant_program/`）、モバイルアプリ（`wene-mobile/`）、Phantom ディープリンク連携
+コア: 期間ごとの SPL 付与、二重 claim 防止、モバイルウォレット連携（オンチェーンで検証可能）
+構成: スマートコントラクト（grant_program/）、モバイルアプリ（wene-mobile/）、Phantom ディープリンク連携
 
 ---
 

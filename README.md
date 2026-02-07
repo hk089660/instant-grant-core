@@ -94,10 +94,32 @@ This use case prioritizes **speed, usability, and privacy**, making it suitable 
 - **Web**: Admin & support use only (`/admin/*`, print screens). **Not used for student claim flow**; student participation is app-only.
 - The Expo app is the primary flow for Phantom stability; Web/PWA is not used for the main claim flow.
 
-### Next Milestone (Short-term)
-- Simplified Scan → Confirm → Success flow
-- Basic admin dashboard (issued / completed counts)
-- Short demo video showcasing the full flow
+### Deliverables (PoC)
+Devnet claim flow on Android with Phantom. Completion: connect → sign → send → receipt and success screen; devnet-only. Verification: demo video and steps in DEVNET_SETUP.md.
+Reproducible build/test from repo root. Completion: npm run build and npm run test (or scripts/build-all.sh build/test) succeed in the supported environment. Verification: CI and DEVELOPMENT.md.
+School participation UI flow with mock claim states. Completion: /u → /u/scan → /u/confirm → /u/success and mock cases evt-001/002/003 behave as specified. Verification: STATIC_VERIFICATION_REPORT.md.
+Print-ready QR and role-restricted admin UI for school devices. Completion: /admin/print/:eventId renders CSS print layout and viewer/operator/admin restrictions are enforced. Verification: manual check in app and print preview.
+
+### Next Milestones (PoC)
+Simplify Scan → Confirm → Success flow. Completion: a single linear flow is implemented and routes/screens match the README. Verification: updated demo video and flow section.
+Basic admin dashboard (issued / completed counts). Completion: /admin shows counts sourced from the school API server; no advanced management. Verification: local run of wene-mobile/server and a short demo.
+Short demo video. Completion: 1–2 minute walkthrough covering connect, scan, claim, and receipt. Verification: link in README.
+
+### Abuse Prevention & Eligibility (PoC)
+Implemented: on-chain double-claim prevention per period using ClaimReceipt PDA.
+Not implemented: allowlist/Merkle eligibility, FairScale reputation, and production-grade identity checks.
+School PoC: optional join-token on the school server can gate participation, but it is not a strong identity system and is out-of-scope for production security.
+
+### Operational Constraints (QR + Phantom) (PoC)
+Devnet-only; cluster mismatch is blocked by Phantom. All RPC and deeplinks must explicitly use devnet.
+Android limitation: “Phantom → back to browser” is unreliable. Primary flow uses Phantom in-app browser browse deeplink and a printed QR from /admin/print/:eventId.
+Redirect-based connect is not the primary flow; /phantom-callback exists only for manual recovery.
+Recommended browsers for /u/*: Safari (iOS) / Chrome (Android). Other browsers may be unstable.
+
+### School Admin & Off-chain Data Integrity (PoC)
+Admin views and counts are derived from the school API server and its JSON persistence. This is suitable for demos but not tamper-evident.
+Participation records are not cryptographically signed or independently verifiable in this PoC.
+Operational assumption: controlled distribution of QR codes and trusted local operators during the school event.
 
 > **Instant, transparent benefit distribution on Solana — built for Japan's public support needs**
 
@@ -110,9 +132,8 @@ This use case prioritizes **speed, usability, and privacy**, making it suitable 
 
 ## Overview
 
-**日本語**: We-neは、Solana上で「即時に配布・即時に利用できる」支援クレジット基盤です。FairScaleのレピュテーションを用いて、不正や濫用を抑えつつ、モバイルから誰でもアクセスできます。現在はプロトタイプ段階で、Phantom連携と基本フローが動作しています。給付・クーポン・参加券・ブロックチェーン資産を単一の「残高一覧」として統合表示するプロトタイプであり、利用者は on-chain / off-chain を意識せず「今日使える価値」を直感的に確認できます。
-
-**English**: We-ne is an instant distribution and instant usage support credit infrastructure built on Solana. Using FairScale's reputation system, it prevents fraud and abuse while enabling mobile access for everyone. Currently in prototype stage, with Phantom integration and basic flow operational. We-ne unifies **grants, coupons, participation tickets, and blockchain assets** into a single **balance list**; users see "value I can use today" at a glance without thinking about where it comes from (on-chain or off-chain).
+日本語: We-neは、Solana上で動作する非保管型の支援配布システムのPoCです。現在はプロトタイプ段階で、Phantom連携と基本的なclaimフローが動作しています。本PoCはdevnet固定で、本番利用は想定していません。不正・濫用対策はPoCで限定的で、オンチェーンの二重claim防止が中心です。FairScaleや許可リスト（Allowlist）の連携は計画段階で未実装です。
+English: We-ne is a non-custodial benefit distribution PoC built on Solana. It is prototype-stage with Phantom integration and a working basic claim flow. This PoC is devnet-only and not intended for production use. Abuse prevention is limited, centered on on-chain double-claim prevention. FairScale and allowlist-based eligibility are planned but not implemented.
 
 ---
 
