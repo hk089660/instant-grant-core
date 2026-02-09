@@ -10,12 +10,12 @@ import { submitSchoolClaim } from '../api/schoolClaim';
 import { getEventById } from '../api/schoolEvents';
 import { useRecipientTicketStore } from '../store/recipientTicketStore';
 import type { SchoolEvent } from '../types/school';
-import type { SchoolClaimErrorInfo } from '../types/school';
+import type { SchoolClaimErrorInfo, SchoolClaimResultSuccess } from '../types/school';
 
 export type SchoolClaimStatus = 'idle' | 'loading' | 'success' | 'already' | 'error';
 
 export interface UseSchoolClaimOptions {
-  onSuccess?: () => void;
+  onSuccess?: (result: SchoolClaimResultSuccess) => void;
 }
 
 export interface UseSchoolClaimResult {
@@ -56,7 +56,8 @@ export function useSchoolClaim(
       } else {
         setStatus('success');
       }
-      onSuccess?.();
+      // alreadyJoined の場合も success 遷移に通す
+      onSuccess?.(result);
     } else {
       setStatus('error');
       setErrorInfo(result.error);

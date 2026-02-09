@@ -15,7 +15,16 @@ export const UserConfirmScreen: React.FC = () => {
   const { eventId: targetEventId, isValid } = useEventIdFromParams({ redirectOnInvalid: true });
   const isSchoolMode = getClaimMode() === 'school';
   const onClaimSuccess = useCallback(
-    () => targetEventId && router.push(schoolRoutes.success(targetEventId) as any),
+    (result: { txSignature?: string; receiptPubkey?: string; alreadyJoined?: boolean }) => {
+      if (!targetEventId) return;
+      router.push(
+        schoolRoutes.success(targetEventId, {
+          tx: result.txSignature,
+          receipt: result.receiptPubkey,
+          already: result.alreadyJoined,
+        }) as any
+      );
+    },
     [router, targetEventId]
   );
   const { status, error, isRetryable, event, handleClaim } = useSchoolClaim(targetEventId ?? undefined, {

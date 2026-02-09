@@ -8,14 +8,16 @@ export interface SchoolEvent {
   title: string;
   datetime: string;
   host: string;
+  state?: 'draft' | 'published' | 'ended';
 }
 
 /** エラー種別（ロジック側で判別） */
 export type SchoolClaimErrorCode =
-  | 'retryable'     // ネットワーク等、再試行可能
-  | 'invalid_input' // eventId 不正
+  | 'invalid'       // eventId 不正
   | 'not_found'     // イベントが見つからない
-  | 'unknown';      // その他
+  | 'eligibility'   // 参加資格なし（event.state が published 以外等）
+  | 'retryable'     // ネットワーク等、再試行可能
+  | 'user_cancel';  // Phantom署名キャンセル
 
 export interface SchoolClaimErrorInfo {
   code: SchoolClaimErrorCode;
@@ -27,6 +29,14 @@ export interface SchoolClaimResultSuccess {
   eventName: string;
   /** 既に参加済みで成功扱い（success 遷移と同等） */
   alreadyJoined?: boolean;
+  /** トランザクション署名（成功時） */
+  txSignature?: string;
+  /** Receipt の Pubkey（成功時） */
+  receiptPubkey?: string;
+  /** Explorer のトランザクションURL（devnet） */
+  explorerTxUrl?: string;
+  /** Explorer の Receipt URL（devnet） */
+  explorerReceiptUrl?: string;
 }
 
 export interface SchoolClaimResultFailure {

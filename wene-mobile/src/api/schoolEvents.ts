@@ -16,6 +16,7 @@ const toSchoolEvent = (e: (typeof mockEvents)[0]): SchoolEvent => ({
   title: e.title,
   datetime: e.datetime,
   host: e.host,
+  state: e.state,
 });
 
 export const schoolEventProvider: SchoolEventProvider = {
