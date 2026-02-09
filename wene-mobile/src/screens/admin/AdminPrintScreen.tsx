@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo } from 'react';
-import { View, StyleSheet, Platform } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, StyleSheet, Platform, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as QRCode from 'qrcode';
 import { AppText, Button, Card } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
 import { getMockAdminRole } from '../../data/adminMock';
@@ -17,11 +18,28 @@ export const AdminPrintScreen: React.FC = () => {
   const printCardProps = { 'data-print-card': 'true' } as any;
   const printQrProps = { 'data-print-qr': 'true' } as any;
 
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+
   const browseQrUrl = useMemo(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return '';
+    if (!eventId) return '';
     const base = window.location.origin;
-    return buildPhantomBrowseUrl(base, '/u/scan');
-  }, []);
+    const scanPath = `/u/scan?eventId=${encodeURIComponent(eventId)}`;
+    return buildPhantomBrowseUrl(base, scanPath);
+  }, [eventId]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !browseQrUrl) {
+      setQrDataUrl(null);
+      return;
+    }
+    QRCode.toDataURL(browseQrUrl, { width: 300, margin: 2 })
+      .then((url: string) => setQrDataUrl(url))
+      .catch((err: unknown) => {
+        console.error('QR生成エラー:', err);
+        setQrDataUrl(null);
+      });
+  }, [browseQrUrl]);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -94,15 +112,24 @@ export const AdminPrintScreen: React.FC = () => {
                 ID: {eventId}
               </AppText>
               <View style={styles.qrBox} {...printQrProps}>
-                <AppText variant="caption" style={styles.cardMuted}>
-                  QRプレビュー（印刷用）
-                </AppText>
-                {browseQrUrl ? (
-                  <AppText variant="small" style={[styles.cardMuted, styles.qrUrl]} selectable>
-                    {browseQrUrl}
+                {qrDataUrl ? (
+                  Platform.OS === 'web' ? (
+                    // @ts-ignore - web only
+                    <img src={qrDataUrl} alt="QR Code" style={{ width: 300, height: 300 }} />
+                  ) : (
+                    <Image source={{ uri: qrDataUrl }} style={styles.qrImage} />
+                  )
+                ) : (
+                  <AppText variant="caption" style={styles.cardMuted}>
+                    QR生成中...
                   </AppText>
-                ) : null}
+                )}
               </View>
+              {browseQrUrl ? (
+                <AppText variant="small" style={[styles.cardMuted, styles.qrUrl]} selectable>
+                  {browseQrUrl}
+                </AppText>
+              ) : null}
               <AppText variant="small" style={styles.cardMuted}>
                 参加用QR（Phantom内ブラウザで開く・Android推奨）
               </AppText>
@@ -171,5 +198,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: adminTheme.spacing.sm,
     fontSize: 10,
     maxWidth: '100%',
+  },
+  qrImage: {
+    width: 300,
+    height: 300,
   },
 });

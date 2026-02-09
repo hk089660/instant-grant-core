@@ -124,7 +124,7 @@ redirect-based connect は主導線にせず、/phantom-callback は手動復帰
 
 > **Solana 上の即時・透明な支援配布 — 日本の公的支援ニーズ向けプロトタイプ**
 
-[![CI](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml/badge.svg)](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml)
+[![CI](https://github.com/hk089660/instant-grant-core/actions/workflows/ci.yml/badge.svg)](https://github.com/hk089660/instant-grant-core/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 [英語版 README](./README.md) | [アーキテクチャ](./docs/ARCHITECTURE.md) | [開発ガイド](./docs/DEVELOPMENT.md) | [静的検証レポート](./wene-mobile/docs/STATIC_VERIFICATION_REPORT.md) | [エミュレータ開発](./wene-mobile/docs/EMULATOR_DEVELOPMENT.md)
@@ -308,7 +308,7 @@ we-ne は Solana 上で動作する**非保管型の支援配布システム**�
 ### 一括ビルド（ルートから）
 
 ```bash
-git clone https://github.com/<owner>/we-ne.git
+git clone https://github.com/hk089660/instant-grant-core.git
 cd we-ne
 
 # 方法A: npm
@@ -416,6 +416,12 @@ we-ne/
 
 ## 連絡先
 
-- **課題・要望**: [GitHub Issues](https://github.com/hk089660/-instant-grant-core/issues)
-- **議論**: [GitHub Discussions](https://github.com/hk089660/-instant-grant-core/discussions)
+- **課題・要望**: [GitHub Issues](https://github.com/hk089660/instant-grant-core/issues)
+- **議論**: [GitHub Discussions](https://github.com/hk089660/instant-grant-core/discussions)
 - **脆弱性の報告**: [SECURITY.md](./SECURITY.md)
+
+---
+
+[English README](./README.md)
+
+<p align="center"><i>Solana 上の公共性を目的に開発</i></p>

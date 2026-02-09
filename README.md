@@ -123,7 +123,7 @@ Operational assumption: controlled distribution of QR codes and trusted local op
 
 > **Instant, transparent benefit distribution on Solana — built for Japan's public support needs**
 
-[![CI](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml/badge.svg)](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml)
+[![CI](https://github.com/hk089660/instant-grant-core/actions/workflows/ci.yml/badge.svg)](https://github.com/hk089660/instant-grant-core/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 [日本語版 README](./README.ja.md) | [Architecture](./docs/ARCHITECTURE.md) | [Development Guide](./docs/DEVELOPMENT.md) | [Static Verification Report](./wene-mobile/docs/STATIC_VERIFICATION_REPORT.md) | [Emulator Development](./wene-mobile/docs/EMULATOR_DEVELOPMENT.md)
@@ -497,8 +497,8 @@ To make the project easier to build and verify for contributors and third partie
 
 ## 📞 Contact
 
-- **Issues**: [GitHub Issues](https://github.com/hk089660/-instant-grant-core/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/hk089660/-instant-grant-core/discussions)
+- **Issues**: [GitHub Issues](https://github.com/hk089660/instant-grant-core/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/hk089660/instant-grant-core/discussions)
 - **Security**: See [SECURITY.md](./SECURITY.md) for vulnerability reporting
 
 ---

@@ -38,6 +38,14 @@ export function createMockSchoolClaimClient(eventProvider: SchoolEventProvider):
         };
       }
 
+      // eligibility チェック: event.state が published 以外はエラー
+      if (event.state && event.state !== 'published') {
+        return {
+          success: false,
+          error: { code: 'eligibility', message: 'このイベントは参加できません' },
+        };
+      }
+
       // evt-003: リトライ可能エラー（ネットワーク想定）
       if (eventId === 'evt-003') {
         return {
