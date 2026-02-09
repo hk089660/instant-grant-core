@@ -25,7 +25,7 @@ This guide covers setting up the development environment for we-ne. Third-party 
 From the **repository root** you can build and test without entering each subproject:
 
 ```bash
-git clone https://github.com/<owner>/we-ne.git
+git clone https://github.com/hk089660/instant-grant-core.git
 cd we-ne
 
 # Using npm (requires Node at root)
@@ -46,7 +46,11 @@ chmod +x scripts/build-all.sh
 
 ```bash
 # Clone repository
+<<<<<<< HEAD
 git clone https://github.com/<owner>/we-ne.git
+=======
+git clone https://github.com/hk089660/instant-grant-core.git
+>>>>>>> a533063 (docs: replace old repo slug links)
 cd we-ne
 
 # Install mobile app dependencies (uses wene-mobile/.npmrc for legacy-peer-deps)

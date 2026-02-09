@@ -6,7 +6,7 @@
 
 If you discover a security vulnerability, please report it privately:
 
-1. **Email**: [Create a private security advisory](https://github.com/hk089660/-instant-grant-core/security/advisories/new) on GitHub
+1. **Email**: [Create a private security advisory](https://github.com/hk089660/instant-grant-core/security/advisories/new) on GitHub
 2. **Include**:
    - Description of the vulnerability
    - Steps to reproduce

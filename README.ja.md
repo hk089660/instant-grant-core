@@ -124,7 +124,7 @@ redirect-based connect は主導線にせず、/phantom-callback は手動復帰
 
 > **Solana 上の即時・透明な支援配布 — 日本の公的支援ニーズ向けプロトタイプ**
 
-[![CI](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml/badge.svg)](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml)
+[![CI](https://github.com/hk089660/instant-grant-core/actions/workflows/ci.yml/badge.svg)](https://github.com/hk089660/instant-grant-core/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 [英語版 README](./README.md) | [アーキテクチャ](./docs/ARCHITECTURE.md) | [開発ガイド](./docs/DEVELOPMENT.md) | [静的検証レポート](./wene-mobile/docs/STATIC_VERIFICATION_REPORT.md) | [エミュレータ開発](./wene-mobile/docs/EMULATOR_DEVELOPMENT.md)
@@ -293,7 +293,16 @@ we-ne は Solana 上で動作する**非保管型の支援配布システム**�
 
 内容: アプリ起動・Phantom 接続 → QR/ディープリンク → 付与詳細表示 → Claim → Phantom 署名 → トークン受取
 
+<<<<<<< HEAD
 *統合残高一覧（クレジット・参加券・SPL）は受け取り画面の付与カード下に表示される。スクリーンショットはプレースホルダー。*
+=======
+## 重要リンク
+
+- **GitHub**: https://github.com/hk089660/instant-grant-core
+- **Demo（X 投稿）**: https://x.com/Shiki93278/status/2015659939356889450
+- **Superteam Earn profile**: TBD（公開URL未反映）
+- **Grant page**: TBD（公開URL未反映）
+>>>>>>> a533063 (docs: replace old repo slug links)
 
 ---
 
@@ -308,7 +317,11 @@ we-ne は Solana 上で動作する**非保管型の支援配布システム**�
 ### 一括ビルド（ルートから）
 
 ```bash
+<<<<<<< HEAD
 git clone https://github.com/<owner>/we-ne.git
+=======
+git clone https://github.com/hk089660/instant-grant-core.git
+>>>>>>> a533063 (docs: replace old repo slug links)
 cd we-ne
 
 # 方法A: npm
@@ -416,6 +429,13 @@ we-ne/
 
 ## 連絡先
 
-- **課題・要望**: [GitHub Issues](https://github.com/hk089660/-instant-grant-core/issues)
-- **議論**: [GitHub Discussions](https://github.com/hk089660/-instant-grant-core/discussions)
+- **課題・要望**: [GitHub Issues](https://github.com/hk089660/instant-grant-core/issues)
+- **議論**: [GitHub Discussions](https://github.com/hk089660/instant-grant-core/discussions)
 - **脆弱性の報告**: [SECURITY.md](./SECURITY.md)
+
+---
+
+[English README](./README.md)
+
+<p align="center"><i>Solana 上の公共性を目的に開発</i></p>
+>>>>>>> a533063 (docs: replace old repo slug links)
