@@ -207,7 +207,6 @@ we-ne provides:
 
 ## 🏗️ How It Works
 
-<<<<<<< HEAD
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      HIGH-LEVEL FLOW                        │
@@ -235,39 +234,6 @@ we-ne provides:
 │                           └─────────┘                       │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
-=======
-- **Demo video**: [X (Twitter)](https://x.com/Shiki93278/status/2015659939356889450)  
-- **School flow**: `/u` → `/u/scan` → `/u/confirm` → Participate → `/u/success`. Mock events: evt-001 (success), evt-002 (already joined), evt-003 (retryable error).  
-- **Admin**: `/admin` (event list), `/admin/events/[eventId]` (detail + participants), `/admin/print/[eventId]` (print layout).
-
----
-
-## Key links
-
-- **GitHub**: https://github.com/hk089660/instant-grant-core
-- **Demo (X post)**: https://x.com/Shiki93278/status/2015659939356889450
-- **Superteam Earn profile**: TBD (public URL not added yet)
-- **Grant page**: TBD (public URL not added yet)
-
----
-
-## Quick start
-
-**Prerequisites**: Node.js v18+ (v20 LTS recommended), npm. For contract: Rust, Solana CLI, Anchor. For mobile: Android SDK (e.g. API 36), Java 17 (see [Development Guide](./docs/DEVELOPMENT.md)).
-
-```bash
-git clone https://github.com/hk089660/instant-grant-core.git
-cd we-ne
-
-# Build contract + mobile typecheck
-npm run build
-
-# Run contract tests
-npm run test
-
-# Or use the shell script (no root npm required)
-./scripts/build-all.sh all
->>>>>>> a533063 (docs: replace old repo slug links)
 ```
 
 **Key Components**:
@@ -476,7 +442,6 @@ we-ne/
 
 ## 💡 Why Solana? Why Now? Why Foundation Grant?
 
-<<<<<<< HEAD
 ### Why Solana?
 
 - **Speed**: Sub-second finality for real-time support
@@ -500,15 +465,6 @@ we-ne/
 ---
 
 ## 🤝 Contributing
-=======
-- **Issues**: [GitHub Issues](https://github.com/hk089660/instant-grant-core/issues)  
-- **Discussions**: [GitHub Discussions](https://github.com/hk089660/instant-grant-core/discussions)  
-- **Security**: [SECURITY.md](./SECURITY.md)
-
----
-
-[Japanese README](./README.ja.md)
->>>>>>> a533063 (docs: replace old repo slug links)
 
 We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md).
 

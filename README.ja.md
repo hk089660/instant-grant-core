@@ -293,16 +293,7 @@ we-ne は Solana 上で動作する**非保管型の支援配布システム**�
 
 内容: アプリ起動・Phantom 接続 → QR/ディープリンク → 付与詳細表示 → Claim → Phantom 署名 → トークン受取
 
-<<<<<<< HEAD
 *統合残高一覧（クレジット・参加券・SPL）は受け取り画面の付与カード下に表示される。スクリーンショットはプレースホルダー。*
-=======
-## 重要リンク
-
-- **GitHub**: https://github.com/hk089660/instant-grant-core
-- **Demo（X 投稿）**: https://x.com/Shiki93278/status/2015659939356889450
-- **Superteam Earn profile**: TBD（公開URL未反映）
-- **Grant page**: TBD（公開URL未反映）
->>>>>>> a533063 (docs: replace old repo slug links)
 
 ---
 
@@ -317,11 +308,7 @@ we-ne は Solana 上で動作する**非保管型の支援配布システム**�
 ### 一括ビルド（ルートから）
 
 ```bash
-<<<<<<< HEAD
-git clone https://github.com/<owner>/we-ne.git
-=======
 git clone https://github.com/hk089660/instant-grant-core.git
->>>>>>> a533063 (docs: replace old repo slug links)
 cd we-ne
 
 # 方法A: npm
@@ -438,4 +425,3 @@ we-ne/
 [English README](./README.md)
 
 <p align="center"><i>Solana 上の公共性を目的に開発</i></p>
->>>>>>> a533063 (docs: replace old repo slug links)
