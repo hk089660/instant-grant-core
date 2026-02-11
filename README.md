@@ -19,6 +19,39 @@ We-ne is an open-source prototype/evaluation kit for non-custodial support distr
 - Success screen can show tx signature + receipt pubkey + Explorer links (devnet).
 - Re-claim is handled as operational completion (`already joined`) with no double payout.
 
+## Trust Layer: FairScale Eligibility Gating
+
+Status: Planned
+
+- FairScale is planned as a trust-signal layer for abuse resistance (Sybil pressure), not a cosmetic label.
+- Planned gating point: enforce eligibility before accepting `POST /v1/school/claims` and before server-side issuance/validation of participation identity token.
+- Current enforced gating in code is event-state eligibility (`published` only) plus subject deduplication (`walletAddress` or `joinToken`) that returns `alreadyJoined` instead of duplicate payout.
+- FairScale runtime integration is not implemented yet; milestone is tracked in `./docs/ROADMAP.md` (`FairScale Integration`) and referenced in `./docs/SECURITY.md`.
+- Abuse impact: combining on-chain receipt controls with off-chain eligibility gates reduces repeat-claim paths while preserving non-custodial onboarding.
+- Review verification now: run `cd wene-mobile && npm run test:server` and `cd api-worker && npm test` to confirm `eligibility` and `alreadyJoined` behaviors on `/v1/school/claims`.
+
+Reviewer shortcut: check `./wene-mobile/server/routes/v1School.ts`, `./api-worker/src/claimLogic.ts`, `./docs/SECURITY.md`, and `./docs/ROADMAP.md`.
+
+Why it matters for Solana Foundation / Instagrant: this is the path to stronger abuse resistance with auditable, permissionless onboarding.
+
+## Camera / QR Scan Implementation Status
+
+Status: In progress
+
+- Working today: admin print page (`/admin/print/<eventId>`) generates a QR for `/u/scan?eventId=<eventId>` and supports print/PDF export.
+- Working today: reviewers can complete the user flow by opening the QR URL (phone camera/QR reader or direct browser open).
+- Current limitation: in-app `/u/scan` camera preview is a mock UI; QR decode inside the app is not implemented yet.
+- Current limitation: scan fallback is URL-driven (`default evt-001` when `eventId` is missing) for deterministic PoC demos.
+- Why this scope: the PoC prioritized reproducible end-to-end routing and claim verification across Pages/devnet before camera-device integration.
+- Reviewer test now: run the Demo steps as-is and verify `/u/confirm -> /u/success` plus Explorer links; camera behavior is mock by design.
+
+Reviewer shortcut: check `./wene-mobile/src/screens/user/UserScanScreen.tsx` and `./wene-mobile/src/screens/admin/AdminPrintScreen.tsx`.
+
+### Roadmap (PoC Completion)
+
+- Milestone 1 (`Status: In progress`): replace mock scan view with real QR decode + permission handling in `/u/scan`.
+- Milestone 2 (`Status: Planned`): add fallback manual `eventId` entry + expired/invalid QR messaging, then cover with UI/API tests.
+
 ## Quickstart (Local)
 
 ```bash

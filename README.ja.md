@@ -19,6 +19,39 @@ We-ne は、Solana 上で非保管型の支援配布と参加券運用を検証�
 - Success 画面で tx signature + receipt pubkey + Explorer リンク（devnet）を確認できる。
 - 再申請は `already joined` の運用完了として扱われ、二重支払いはしない。
 
+## 信頼レイヤー：FairScaleによる参加・受給資格ゲート
+
+状態：予定
+
+- FairScale は濫用耐性（Sybil 圧力対策）のための信頼シグナルとして導入予定であり、見た目だけのラベルではない。
+- 予定している資格ゲート適用点は、`POST /v1/school/claims` のクレーム受理前と、参加者識別トークンのサーバー側発行/検証前。
+- 現在コードで強制している資格ゲートは、イベント状態の資格判定（`published` のみ）と、`walletAddress` / `joinToken` による重複主体判定（重複時は二重支払いではなく `alreadyJoined` を返す）。
+- FairScale のランタイム統合は未実装で、マイルストーンは `./docs/ROADMAP.md`（`FairScale Integration`）に記載し、`./docs/SECURITY.md` でも planned として参照している。
+- 濫用抑止の効果として、オンチェーン receipt 制御とオフチェーン資格ゲートを組み合わせることで、非保管型オンボーディングを維持しながら重複クレーム経路を減らせる。
+- 現時点のレビュー検証は、`cd wene-mobile && npm run test:server` と `cd api-worker && npm test` を実行し、`/v1/school/claims` の `eligibility` / `alreadyJoined` 挙動を確認する。
+
+Reviewer shortcut: `./wene-mobile/server/routes/v1School.ts`、`./api-worker/src/claimLogic.ts`、`./docs/SECURITY.md`、`./docs/ROADMAP.md` を確認してください。
+
+Why it matters for Solana Foundation / Instagrant: 監査可能性を維持した permissionless onboarding と、より強い濫用耐性を両立するための要素です。
+
+## カメラ/QRスキャン実装状況
+
+状態：開発中
+
+- 現在動作している点: 管理者の印刷画面（`/admin/print/<eventId>`）で `/u/scan?eventId=<eventId>` の QR を生成し、印刷/PDF出力できる。
+- 現在動作している点: レビュアーは QR URL を開くことで利用者フローを完走できる（スマホのカメラ/QRリーダー、またはブラウザ直開き）。
+- 現在の制限: アプリ内 `/u/scan` のカメラプレビューはモック UI で、アプリ内 QR デコードは未実装。
+- 現在の制限: スキャンのフォールバックは URL ベース（`eventId` 未指定時は `evt-001`）で、PoC デモの再現性を優先している。
+- このスコープにしている理由: カメラ端末統合より先に、Pages/devnet での end-to-end ルーティングとクレーム検証の再現性を優先したため。
+- 現時点のレビュアーテスト: 現行の Demo 手順どおりに `/u/confirm -> /u/success` と Explorer リンクを確認し、カメラ挙動は仕様どおりモックとして扱う。
+
+Reviewer shortcut: `./wene-mobile/src/screens/user/UserScanScreen.tsx` と `./wene-mobile/src/screens/admin/AdminPrintScreen.tsx` を確認してください。
+
+### ロードマップ（PoC完了まで）
+
+- マイルストーン1（`状態：開発中`）: `/u/scan` に実スキャン処理（QRデコード + 権限ハンドリング）を実装する。
+- マイルストーン2（`状態：予定`）: `eventId` 手入力フォールバック + 期限切れ/無効QRメッセージを追加し、UI/API テストで固定する。
+
 ## クイックスタート（ローカル）
 
 ```bash
