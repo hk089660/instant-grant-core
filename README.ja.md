@@ -1,16 +1,16 @@
 # We-ne (instant-grant-core)
 
-We-ne は、Solana 上で非保管型の支援配布と参加券運用を検証するための、オープンソースのプロトタイプ/評価キットです。receipt 記録を使った第三者検証性と重複受取防止を重視しています。
+We-ne は、Solana 上で非保管型の支援配布と参加券運用を検証するための、オープンソースのプロトタイプ/評価キットです。receipt 記録を用いた第三者検証性と重複受取防止を重視しています。
 
-> ステータス（2026年2月11日時点）: **PoC / devnet-first**。本番 mainnet 運用ではなく、再現性と審査向け検証を目的にしています。
+> ステータス（2026年2月11日時点）: **PoC / devnet-first**。本番 mainnet 運用ではなく、再現性と審査向け検証を目的としています。
 
 [English README](./README.md) | [Architecture](./docs/ARCHITECTURE.md) | [Devnet Setup](./docs/DEVNET_SETUP.md) | [Security](./docs/SECURITY.md)
 
 ## このプロトタイプが解決すること
 
-- 非保管型配布: 受取者が自分のウォレットで署名し、アプリは秘密鍵を保持しない。
-- 監査可能性: tx/receipt を Solana Explorer で独立に検証できる。
-- 重複受取対策: receipt ロジックで 1 回受取を強制し、学校フローの再申請は二重支払いではなく `already joined` 完了扱いになる。
+- 非保管型配布: 受取者は自分のウォレットで署名し、アプリは秘密鍵を保持しない。
+- 監査可能性: tx/receipt 記録は Solana Explorer で独立して検証できる。
+- 重複受取防止: receipt ロジックで 1 回受取を強制し、学校フローでの再申請は二重支払いではなく `already joined` の運用完了扱いになる。
 
 ## 現在の PoC ステータス
 
@@ -23,10 +23,10 @@ We-ne は、Solana 上で非保管型の支援配布と参加券運用を検証�
 
 状態：予定
 
-- FairScale は濫用耐性（Sybil 圧力対策）のための信頼シグナルとして導入予定であり、見た目だけのラベルではない。
+- FairScale は、濫用耐性（Sybil 圧力対策）のための信頼シグナルとして導入予定であり、見た目だけのラベルではない。
 - 予定している資格ゲート適用点は、`POST /v1/school/claims` のクレーム受理前と、参加者識別トークンのサーバー側発行/検証前。
 - 現在コードで強制している資格ゲートは、イベント状態の資格判定（`published` のみ）と、`walletAddress` / `joinToken` による重複主体判定（重複時は二重支払いではなく `alreadyJoined` を返す）。
-- FairScale のランタイム統合は未実装で、マイルストーンは `./docs/ROADMAP.md`（`FairScale Integration`）に記載し、`./docs/SECURITY.md` でも planned として参照している。
+- FairScale のランタイム統合は未実装で、マイルストーンは `./docs/ROADMAP.md`（`FairScale Integration`）に記載され、`./docs/SECURITY.md` でも planned として参照している。
 - 濫用抑止の効果として、オンチェーン receipt 制御とオフチェーン資格ゲートを組み合わせることで、非保管型オンボーディングを維持しながら重複クレーム経路を減らせる。
 - 現時点のレビュー検証は、`cd wene-mobile && npm run test:server` と `cd api-worker && npm test` を実行し、`/v1/school/claims` の `eligibility` / `alreadyJoined` 挙動を確認する。
 
@@ -42,7 +42,7 @@ Why it matters for Solana Foundation / Instagrant: 監査可能性を維持し�
 - 現在動作している点: 利用者画面 `/u/scan` でカメラ権限ハンドリング付きの QR 読み取りを実装（in-app decode）。
 - 現在動作している点: QR 文字列から `eventId` を抽出し、`/u/confirm?eventId=...` へ遷移できる。
 - 現在動作している点: Web は `@zxing/browser` で読み取り（BarcodeDetector 非対応ブラウザでもフォールバック）。
-- 現在の制限: スキャンのフォールバックは URL ベース（`eventId` 未指定時は `evt-001`）で、PoC デモ再現性を優先している。
+- 現在の制限: スキャンのフォールバックは URL ベース（`eventId` が未指定の場合は `evt-001`）で、PoC デモ再現性を優先している。
 - 現時点のレビュアーテスト: 現行の Demo 手順どおりに `/u/scan -> /u/confirm -> /u/success` と Explorer リンクを確認する。
 
 Reviewer shortcut: `./wene-mobile/src/screens/user/UserScanScreen.tsx` と `./wene-mobile/src/screens/admin/AdminPrintScreen.tsx` を確認してください。
@@ -50,7 +50,7 @@ Reviewer shortcut: `./wene-mobile/src/screens/user/UserScanScreen.tsx` と `./we
 ### ロードマップ（PoC完了まで）
 
 - マイルストーン1（`状態：完了`）: `/u/scan` に実スキャン処理（QRデコード + 権限ハンドリング）を実装。
-- マイルストーン2（`状態：予定`）: `eventId` 手入力フォールバック + 期限切れ/無効QRメッセージを追加し、UI/API テストで固定する。
+- マイルストーン2（`状態：予定`）: `eventId` 手入力フォールバック + 期限切れ/無効 QR メッセージを追加し、UI/API テストで固定する。
 
 ## クイックスタート（ローカル）
 
@@ -76,7 +76,7 @@ npm run dev:full
 `export:web` の必須条件:
 
 - `EXPO_PUBLIC_API_BASE_URL`（または `EXPO_PUBLIC_SCHOOL_API_BASE_URL`）に Worker URL を設定する。
-- 未設定だと `scripts/gen-redirects.js` が失敗する。proxy 用リダイレクトが生成されない場合、`/api/*` と `/v1/*` が Pages に直接当たり `405` や HTML を返すことがある。
+- 未設定の場合、`scripts/gen-redirects.js` が失敗する。proxy 用リダイレクトが生成されないと、`/api/*` と `/v1/*` が Pages に直接当たり `405` や HTML を返す場合がある。
 
 コピペ用デプロイコマンド:
 
@@ -131,7 +131,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
 ## トラブルシューティング / 既知の挙動
 
 - `/v1/school/events` が HTML を返す: `_redirects` proxy が未適用、または誤った成果物をデプロイしている。
-- `/_redirects` を直 fetch して 404: Pages では正常な場合がある。`/v1` が JSON か、`/api` が非 405 かで実行時挙動を確認する。
+- `/_redirects` を直接 fetch して 404: Pages では正常な場合がある。`/v1` が JSON か、`/api` が非 405 かで実行時挙動を確認する。
 - ログイン/利用者状態はブラウザや端末ストレージに保持される想定。共用端末テストではプライベートブラウズ推奨。
 - Web の `/u/scan` カメラスキャンは実装済み（PoC）だが、ブラウザ/端末の権限や互換性によって失敗する場合がある。デモ再現性を最大化するには、印刷 QR をスマホカメラ/QR リーダーで読み取り `/u/scan?eventId=...` を開くことを推奨する。
 
