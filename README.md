@@ -40,7 +40,7 @@ Status: Implemented (PoC)
 
 - Currently working: the admin print page (`/admin/print/<eventId>`) generates a QR for `/u/scan?eventId=<eventId>`, and supports print/PDF output.
 - Currently working: the user page `/u/scan` implements QR reading with camera permission handling (in-app decode).
-- Currently working: `eventId` is extracted from QR text and can navigate to `/u/confirm?eventId=...`.
+- Currently working: `eventId` is extracted from QR text and can navigate to `/u/confirm?eventId=<eventId>`.
 - Currently working: web uses `@zxing/browser` for reading (fallback for browsers without BarcodeDetector support).
 - Current limitation: scan fallback is URL-based (`evt-001` when `eventId` is unspecified), prioritizing PoC demo reproducibility.
 - Current reviewer test: follow the current Demo steps and verify `/u/scan -> /u/confirm -> /u/success` and Explorer links.
@@ -133,7 +133,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
 - `/v1/school/events` returns HTML: `_redirects` proxy is not applied, or the wrong artifact was deployed.
 - Directly fetching `/_redirects` returns 404: this can be normal on Pages. Check runtime behavior by confirming `/v1` is JSON and `/api` is non-405.
 - Login/user state is expected to persist in browser or device storage. Private browsing is recommended for shared-device testing.
-- Web `/u/scan` camera scan is implemented (PoC), but may fail depending on browser/device permissions or compatibility. For maximum demo reproducibility, scan the printed QR using a smartphone camera/QR reader to open `/u/scan?eventId=...`.
+- Web `/u/scan` camera scan is implemented (PoC), but may fail depending on browser/device permissions or compatibility. For maximum demo reproducibility, scan the printed QR using a smartphone camera/QR reader to open `/u/scan?eventId=<eventId>`.
 
 ## Detailed Docs
 

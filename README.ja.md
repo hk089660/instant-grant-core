@@ -40,7 +40,7 @@ Why it matters for Solana Foundation / Instagrant: 監査可能性を維持し�
 
 - 現在動作している点: 管理者の印刷画面（`/admin/print/<eventId>`）で `/u/scan?eventId=<eventId>` の QR を生成し、印刷/PDF出力できる。
 - 現在動作している点: 利用者画面 `/u/scan` でカメラ権限ハンドリング付きの QR 読み取りを実装（in-app decode）。
-- 現在動作している点: QR 文字列から `eventId` を抽出し、`/u/confirm?eventId=...` へ遷移できる。
+- 現在動作している点: QR 文字列から `eventId` を抽出し、`/u/confirm?eventId=<eventId>` へ遷移できる。
 - 現在動作している点: Web は `@zxing/browser` で読み取り（BarcodeDetector 非対応ブラウザでもフォールバック）。
 - 現在の制限: スキャンのフォールバックは URL ベース（`eventId` が未指定の場合は `evt-001`）で、PoC デモ再現性を優先している。
 - 現時点のレビュアーテスト: 現行の Demo 手順どおりに `/u/scan -> /u/confirm -> /u/success` と Explorer リンクを確認する。
@@ -133,7 +133,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
 - `/v1/school/events` が HTML を返す: `_redirects` proxy が未適用、または誤った成果物をデプロイしている。
 - `/_redirects` を直接 fetch して 404: Pages では正常な場合がある。`/v1` が JSON か、`/api` が非 405 かで実行時挙動を確認する。
 - ログイン/利用者状態はブラウザや端末ストレージに保持される想定。共用端末テストではプライベートブラウズ推奨。
-- Web の `/u/scan` カメラスキャンは実装済み（PoC）だが、ブラウザ/端末の権限や互換性によって失敗する場合がある。デモ再現性を最大化するには、印刷 QR をスマホカメラ/QR リーダーで読み取り `/u/scan?eventId=...` を開くことを推奨する。
+- Web の `/u/scan` カメラスキャンは実装済み（PoC）だが、ブラウザ/端末の権限や互換性によって失敗する場合がある。デモ再現性を最大化するには、印刷 QR をスマホカメラ/QR リーダーで読み取り `/u/scan?eventId=<eventId>` を開くことを推奨する。
 
 ## 詳細ドキュメント
 
