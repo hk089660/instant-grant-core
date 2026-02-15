@@ -75,18 +75,17 @@
 ### 結果: ✅ 矛盾なし
 
 - **adminMock.ts**:
-  - evt-001, evt-002, evt-003 が `mockEvents` に定義
+  - evt-001, evt-002 が `mockEvents` に定義
   - `schoolEvents.ts` の `schoolEventProvider.getAll()` / `getById()` 経由で一覧・詳細取得
 
 - **schoolClaimClient.mock.ts と Result 型**:
   - evt-001: `{ success: true, eventName }`（Success）
   - evt-002: `{ success: true, eventName, alreadyJoined: true }`（Success）
-  - evt-003: `{ success: false, error: { code: 'retryable', message } }`（Failure）
   - not_found: `{ success: false, error: { code: 'not_found', message } }`（Failure）
   - その他既参加: `{ success: true, eventName, alreadyJoined: true }`（Success）
 
 - **想定フローとの整合**:
-  - 一覧 → 遷移 → claim が evt-001〜003 で一貫して動作する構造
+  - 一覧 → 遷移 → claim が evt-001〜002 で一貫して動作する構造
 
 ---
 

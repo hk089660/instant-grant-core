@@ -8,48 +8,6 @@ export const setMockAdminRole = (role: Role): void => {
 };
 
 export const mockCategories = [
-  { id: 'all', label: 'すべて' },
-  { id: 'volunteer', label: 'ボランティア' },
-  { id: 'school', label: '学校行事' },
-  { id: 'other', label: '未分類（Other）' },
-];
-
-export const mockEvents: Array<{
-  id: string;
-  title: string;
-  datetime: string;
-  host: string;
-  state: EventState;
-  rtCount: number;
-  totalCount: number;
-}> = [
-  {
-    id: 'evt-001',
-    title: '地域清掃ボランティア',
-    datetime: '2026/02/02 09:00-10:30',
-    host: '生徒会',
-    state: 'published',
-    rtCount: 23,
-    totalCount: 58,
-  },
-  {
-    id: 'evt-002',
-    title: '進路説明会',
-    datetime: '2026/02/10 15:00-16:00',
-    host: '進路指導室',
-    state: 'draft',
-    rtCount: 8,
-    totalCount: 8,
-  },
-  {
-    id: 'evt-003',
-    title: '体育祭',
-    datetime: '2026/02/15 09:00-15:00',
-    host: '体育委員会',
-    state: 'published',
-    rtCount: 0,
-    totalCount: 120,
-  },
 ];
 
 export const mockParticipants = [
