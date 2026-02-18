@@ -2,6 +2,7 @@ import React from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { AppText, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { getClaimMode } from '../config/claimMode';
@@ -29,6 +30,16 @@ export const HomeScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <View style={styles.header}>
+        <TouchableOpacity
+          onPress={() => router.push('/wallet')}
+          style={styles.settingsButton}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="settings-outline" size={24} color={theme.colors.text} />
+        </TouchableOpacity>
+      </View>
+
       <View style={styles.content}>
         <AppText variant="h1" style={styles.title}>
           We-ne
@@ -60,11 +71,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
+  header: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.sm,
+    zIndex: 10,
+  },
+  settingsButton: {
+    padding: theme.spacing.xs,
+  },
   content: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: theme.spacing.lg,
+    // ヘッダー分だけ上にずらす調整（任意だが、中央寄せを維持したければマイナスマージンなどで調整も可。今回は自然な配置でいく）
   },
   title: {
     marginBottom: theme.spacing.md,
