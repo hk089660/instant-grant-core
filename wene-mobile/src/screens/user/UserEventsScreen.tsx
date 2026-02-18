@@ -5,23 +5,21 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { AppText, Button, EventRow, StatusDot } from '../../ui/components';
 import { theme } from '../../ui/theme';
-import { getParticipations } from '../../data/participationStore';
 import { useRecipientTicketStore } from '../../store/recipientTicketStore';
-import { getClaimMode } from '../../config/claimMode';
 import { getSchoolDeps } from '../../api/createSchoolDeps';
 import { schoolRoutes } from '../../lib/schoolRoutes';
 import type { SchoolEvent } from '../../types/school';
 
 export const UserEventsScreen: React.FC = () => {
   const router = useRouter();
-  const [startedIds, setStartedIds] = useState<string[]>([]);
-  const [completedIds, setCompletedIds] = useState<string[]>([]);
   const [events, setEvents] = useState<SchoolEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
   const { tickets, loadTickets, isJoined } = useRecipientTicketStore();
-  const isSchoolMode = getClaimMode() === 'school';
 
+  // イベント一覧を API から取得
   useEffect(() => {
     let cancelled = false;
+    setEventsLoading(true);
     getSchoolDeps()
       .eventProvider.getAll()
       .then((items) => {
@@ -29,33 +27,27 @@ export const UserEventsScreen: React.FC = () => {
       })
       .catch(() => {
         if (!cancelled) setEvents([]);
+      })
+      .finally(() => {
+        if (!cancelled) setEventsLoading(false);
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const loadParticipations = useCallback(async () => {
-    if (isSchoolMode) {
-      await loadTickets();
-    }
-    const records = await getParticipations();
-    setStartedIds(records.filter((r) => r.state === 'started').map((r) => r.eventId));
-    if (!isSchoolMode) {
-      setCompletedIds(records.filter((r) => r.state === 'completed').map((r) => r.eventId));
-    }
-  }, [isSchoolMode, loadTickets]);
-
+  // フォーカス時にローカルチケットを再読み込み
   useFocusEffect(
     useCallback(() => {
-      loadParticipations().catch(() => {});
-    }, [loadParticipations])
+      loadTickets().catch(() => { });
+    }, [loadTickets])
   );
-  const pendingEvents = events.filter(
-    (event) => startedIds.includes(event.id) && !(isSchoolMode && isJoined(event.id))
-  );
-  const completedEvents = events.filter(
-    (event) => (isSchoolMode ? isJoined(event.id) : completedIds.includes(event.id))
+
+  // 参加済みイベント
+  const joinedEvents = events.filter((event) => isJoined(event.id));
+  // 未参加のイベント
+  const availableEvents = events.filter(
+    (event) => !isJoined(event.id) && event.state === 'published'
   );
 
   return (
@@ -68,44 +60,25 @@ export const UserEventsScreen: React.FC = () => {
           参加券
         </AppText>
         <AppText variant="caption" style={styles.subtitle}>
-          未完了と完了済みを分けて表示
+          参加済みと受付中のイベントを表示しています
         </AppText>
 
         <Button
-          title="参加する"
+          title="QRを読み取って参加"
           onPress={() => router.push(schoolRoutes.scan as any)}
           variant="primary"
           style={styles.mainButton}
         />
 
+        {/* 参加済み */}
         <View style={styles.section}>
-          <AppText variant="h3">未完了</AppText>
-          {pendingEvents.length === 0 ? (
+          <AppText variant="h3">参加済み（{joinedEvents.length}件）</AppText>
+          {joinedEvents.length === 0 ? (
             <AppText variant="caption" style={styles.emptyText}>
-              未完了の参加券はありません
+              参加済みのイベントはありません
             </AppText>
           ) : (
-            pendingEvents.map((event) => (
-              <EventRow
-                key={event.id}
-                title={event.title}
-                datetime={event.datetime}
-                host={event.host}
-                leftSlot={<StatusDot color="#f5c542" />}
-                onPress={() => router.push(schoolRoutes.confirm(event.id) as any)}
-              />
-            ))
-          )}
-        </View>
-
-        <View style={styles.section}>
-          <AppText variant="h3">完了済み</AppText>
-          {completedEvents.length === 0 ? (
-            <AppText variant="caption" style={styles.emptyText}>
-              完了済みの参加券はありません
-            </AppText>
-          ) : (
-            completedEvents.map((event) => (
+            joinedEvents.map((event) => (
               <EventRow
                 key={event.id}
                 title={event.title}
@@ -118,8 +91,33 @@ export const UserEventsScreen: React.FC = () => {
           )}
         </View>
 
+        {/* 受付中のイベント */}
+        <View style={styles.section}>
+          <AppText variant="h3">受付中（{availableEvents.length}件）</AppText>
+          {eventsLoading ? (
+            <AppText variant="caption" style={styles.emptyText}>
+              読み込み中…
+            </AppText>
+          ) : availableEvents.length === 0 ? (
+            <AppText variant="caption" style={styles.emptyText}>
+              受付中のイベントはありません
+            </AppText>
+          ) : (
+            availableEvents.map((event) => (
+              <EventRow
+                key={event.id}
+                title={event.title}
+                datetime={event.datetime}
+                host={event.host}
+                leftSlot={<StatusDot color="#f5c542" />}
+                onPress={() => router.push(schoolRoutes.confirm(event.id) as any)}
+              />
+            ))
+          )}
+        </View>
+
         <AppText variant="small" style={styles.helper}>
-          黄色の・は未完了、緑の・は完了済みです
+          🟢 参加済み　🟡 受付中
         </AppText>
       </ScrollView>
     </SafeAreaView>

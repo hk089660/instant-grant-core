@@ -1,7 +1,7 @@
 /**
  * 学校参加券 API
  *
- * 実装は createSchoolDeps() で切り替え（mock | http）。
+ * 実装は createSchoolDeps() で HTTP クライアントを使用。
  * UI の分岐は SchoolClaimResult.error.code のみに依存する。
  */
 

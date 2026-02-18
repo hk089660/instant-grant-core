@@ -1,17 +1,14 @@
 import React, { useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter, useNavigation } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { AppText, Button } from '../ui/components';
 import { theme } from '../ui/theme';
-import { getClaimMode } from '../config/claimMode';
 import { schoolRoutes } from '../lib/schoolRoutes';
 
 export const HomeScreen: React.FC = () => {
   const router = useRouter();
   const navigation = useNavigation();
-  const isSchoolMode = getClaimMode() === 'school';
 
   useEffect(() => {
     navigation.setOptions({
@@ -27,20 +24,12 @@ export const HomeScreen: React.FC = () => {
     });
   }, [navigation, router]);
 
-  const handleStartReceive = () => {
-    if (isSchoolMode) {
-      router.push(schoolRoutes.events as any);
-    } else {
-      router.push('/r/demo-campaign?code=demo-invite');
-    }
+  const handleGoToEvents = () => {
+    router.push(schoolRoutes.events as any);
   };
 
-  const handleDemoLink = () => {
-    if (isSchoolMode) {
-      router.push(schoolRoutes.scan as any);
-    } else {
-      router.push('/r/demo-campaign?code=demo-invite');
-    }
+  const handleScanQR = () => {
+    router.push(schoolRoutes.scan as any);
   };
 
   return (
@@ -50,20 +39,21 @@ export const HomeScreen: React.FC = () => {
           We-ne
         </AppText>
         <AppText variant="bodyLarge" style={styles.description}>
-          {isSchoolMode ? 'イベントに参加する' : '支援クレジットを受け取る'}
+          学校イベントの参加を記録するアプリ
         </AppText>
 
         <Button
-          title={isSchoolMode ? '参加を開始' : '受け取りを開始'}
-          onPress={handleStartReceive}
+          title="参加券を見る"
+          onPress={handleGoToEvents}
           variant="primary"
           disabled={false}
           style={styles.mainButton}
         />
 
-        <TouchableOpacity onPress={handleDemoLink} style={styles.demoLink}>
-          <AppText variant="small" style={styles.demoLinkText}>
-            {isSchoolMode ? 'QRを読み取る' : 'デモリンクを開く'}
+        <TouchableOpacity onPress={handleScanQR} style={styles.scanLink}>
+          <Ionicons name="qr-code-outline" size={18} color={theme.colors.textSecondary} />
+          <AppText variant="small" style={styles.scanLinkText}>
+            QRを読み取って参加する
           </AppText>
         </TouchableOpacity>
       </View>
@@ -96,12 +86,13 @@ const styles = StyleSheet.create({
   mainButton: {
     marginBottom: theme.spacing.md,
   },
-  demoLink: {
+  scanLink: {
     padding: theme.spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
-  demoLinkText: {
-    color: theme.colors.textTertiary,
-    textDecorationLine: 'underline',
+  scanLinkText: {
+    color: theme.colors.textSecondary,
   },
 });
-

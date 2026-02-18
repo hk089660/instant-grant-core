@@ -48,7 +48,7 @@ function getWebCameraErrorMessage(error: unknown): string {
 export const UserScanScreen: React.FC = () => {
   const router = useRouter();
   const isWeb = Platform.OS === 'web';
-  const { eventId: targetEventId } = useEventIdFromParams({ defaultValue: 'evt-001' });
+  const { eventId: targetEventId } = useEventIdFromParams();
   const [permission, requestPermission] = useCameraPermissions();
   const [scannedEventId, setScannedEventId] = useState<string | null>(targetEventId);
   const [isScanning, setIsScanning] = useState(true);
@@ -212,7 +212,7 @@ export const UserScanScreen: React.FC = () => {
       return;
     }
     if (permissionBlocked && Platform.OS !== 'web') {
-      await Linking.openSettings().catch(() => {});
+      await Linking.openSettings().catch(() => { });
       return;
     }
     await requestPermission();
@@ -242,10 +242,10 @@ export const UserScanScreen: React.FC = () => {
   const statusText = scanError
     ? scanError
     : scanLocked
-    ? `読み取り完了: ${activeEventId ?? 'eventId不明'}`
-    : webConnecting
-    ? 'カメラ接続中...'
-    : '読み取り中...枠内にQRを合わせてください';
+      ? `読み取り完了: ${activeEventId ?? 'eventId不明'}`
+      : webConnecting
+        ? 'カメラ接続中...'
+        : '読み取り中...枠内にQRを合わせてください';
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
