@@ -6,10 +6,13 @@
 import { httpPost } from './http/httpClient';
 
 export function getBaseUrl(): string {
+  // Web: _redirects で /api/* → Workers プロキシされるため、同一オリジンを使う（CORS回避）
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+  // Native: 環境変数で指定された Workers URL へ直接アクセス
   const base = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
-  if (base) return base;
-  if (typeof window !== 'undefined') return window.location.origin;
-  return '';
+  return base;
 }
 
 export interface RegisterResponse {

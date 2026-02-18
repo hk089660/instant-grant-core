@@ -8,7 +8,7 @@ import {
   Modal,
   Platform,
 } from 'react-native';
-import { useRouter, Stack } from 'expo-router';
+import { useRouter, useNavigation } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PublicKey } from '@solana/web3.js';
 import { Feather } from '@expo/vector-icons';
@@ -30,6 +30,7 @@ const LAMPORTS_PER_SOL = 1e9;
 
 export const WalletScreen: React.FC = () => {
   const router = useRouter();
+  const navigation = useNavigation();
   const { walletPubkey } = useRecipientStore();
   const { initializeKeyPair, saveKeyPair } = usePhantomStore();
   const [solBalance, setSolBalance] = useState<number | null>(null);
@@ -77,6 +78,19 @@ export const WalletScreen: React.FC = () => {
     fetchBalances(false);
   }, [fetchBalances]);
 
+  useEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={() => setIsSettingsVisible(true)}
+          style={styles.headerButton}
+        >
+          <Feather name="settings" size={24} color={theme.colors.text} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation]);
+
   const onRefresh = useCallback(() => {
     fetchBalances(true);
   }, [fetchBalances]);
@@ -108,20 +122,7 @@ export const WalletScreen: React.FC = () => {
   const showLoading = !showNoWallet && loading && !refreshing;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <Stack.Screen
-        options={{
-          headerRight: () => (
-            <TouchableOpacity
-              onPress={() => setIsSettingsVisible(true)}
-              style={styles.headerButton}
-            >
-              <Feather name="settings" size={24} color={theme.colors.text} />
-            </TouchableOpacity>
-          ),
-        }}
-      />
-
+    <View style={styles.container}>
       <Modal
         visible={isSettingsVisible}
         animationType="slide"
@@ -265,7 +266,7 @@ export const WalletScreen: React.FC = () => {
           />
         </>
       )}
-    </SafeAreaView>
+    </View>
   );
 };
 

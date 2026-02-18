@@ -1,11 +1,9 @@
 /**
  * 依存注入ファクトリ
- * EXPO_PUBLIC_API_MODE=mock|http で切り替え。screens/hooks は deps 経由のみ使用する。
+ * 常に HTTP 実装を使用する。screens/hooks は deps 経由のみ使用する。
  */
 
 import type { SchoolClaimClient, SchoolEventProvider } from './schoolClaimClient';
-import { createMockSchoolClaimClient } from './schoolClaimClient.mock';
-import { mockSchoolEventProvider } from './schoolEvents';
 import { createHttpSchoolEventProvider } from './http/HttpSchoolEventProvider';
 import { createHttpSchoolClaimClient } from './http/HttpSchoolClaimClient';
 
@@ -16,20 +14,22 @@ export interface SchoolDeps {
 
 let cached: SchoolDeps | null = null;
 
-export function createSchoolDeps(): SchoolDeps {
-  const mode = (process.env.EXPO_PUBLIC_API_MODE ?? 'mock').toLowerCase();
-  const baseUrl = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim();
-
-  if (mode === 'http' && baseUrl) {
-    return {
-      eventProvider: createHttpSchoolEventProvider({ baseUrl }),
-      claimClient: createHttpSchoolClaimClient({ baseUrl }),
-    };
+function resolveBaseUrl(): string {
+  // Web: _redirects で /v1/* → Workers プロキシされるため同一オリジンを使用
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
   }
+  // Native: 環境変数から取得
+  const envBase = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
+  if (envBase) return envBase;
+  throw new Error('EXPO_PUBLIC_API_BASE_URL is required for native builds');
+}
 
+export function createSchoolDeps(): SchoolDeps {
+  const baseUrl = resolveBaseUrl();
   return {
-    eventProvider: mockSchoolEventProvider,
-    claimClient: createMockSchoolClaimClient(mockSchoolEventProvider),
+    eventProvider: createHttpSchoolEventProvider({ baseUrl }),
+    claimClient: createHttpSchoolClaimClient({ baseUrl }),
   };
 }
 

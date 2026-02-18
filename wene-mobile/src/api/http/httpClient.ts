@@ -11,7 +11,13 @@ export async function httpGet<T>(url: string, options?: { timeoutMs?: number }):
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      }
+    });
     clearTimeout(timeoutId);
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
@@ -33,7 +39,10 @@ export async function httpPost<T>(url: string, body: unknown, options?: { timeou
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
       body: JSON.stringify(body),
       signal: controller.signal,
     });

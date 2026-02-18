@@ -16,7 +16,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (initRef.current) return;
     initRef.current = true;
-    
+
     const loadSavedConnection = async () => {
       await loadKeyPair();
       const saved = await loadPhantomConnectResult();
@@ -54,10 +54,9 @@ export default function RootLayout() {
           headerShown: false,
         }}
       >
-        <Stack.Screen name="index" />
+        <Stack.Screen name="(drawer)" />
         <Stack.Screen name="r/[campaignId]" />
         <Stack.Screen name="r/school/[eventId]" />
-        <Stack.Screen name="wallet" />
         <Stack.Screen name="use/[campaignId]" />
         <Stack.Screen name="phantom/[action]" />
         <Stack.Screen name="phantom-callback" />

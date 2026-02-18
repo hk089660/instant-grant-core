@@ -5,9 +5,6 @@ import { AppText, Button, CountBadge, EventRow, AdminShell, StatusBadge } from '
 import { adminTheme } from '../../ui/adminTheme';
 import { getSchoolDeps } from '../../api/createSchoolDeps';
 import type { SchoolEvent } from '../../types/school';
-import type { Role } from '../../types/ui';
-
-const FIXED_ROLE: Role = 'admin';
 
 export const AdminEventsScreen: React.FC = () => {
   const router = useRouter();
@@ -64,12 +61,17 @@ export const AdminEventsScreen: React.FC = () => {
   };
 
   return (
-    <AdminShell title="イベント一覧" role={FIXED_ROLE}>
+    <AdminShell title="イベント一覧" role="admin">
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <AppText variant="h2" style={styles.title}>
             イベント一覧
           </AppText>
+          <Button
+            title="＋ 新規発行"
+            variant="primary"
+            onPress={() => router.push('/admin/create' as any)}
+          />
         </View>
 
         <View style={styles.teacherMessage}>

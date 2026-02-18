@@ -1,24 +1,25 @@
+/**
+ * Admin カテゴリ管理画面
+ * 将来的に API で管理。現在はプレースホルダー。
+ */
 import React from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AppText, Button, Card, AdminShell } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
-import { getMockAdminRole, setMockAdminRole, mockCategories } from '../../data/adminMock';
+
+const CATEGORIES = [
+  { id: 'all', label: 'すべて' },
+  { id: 'volunteer', label: 'ボランティア' },
+  { id: 'school', label: '学校行事' },
+  { id: 'other', label: '未分類（Other）' },
+];
 
 export const AdminCategoriesScreen: React.FC = () => {
   const router = useRouter();
-  const [role, setRole] = React.useState(getMockAdminRole());
-  const isAdmin = role === 'admin';
 
   return (
-    <AdminShell
-      title="カテゴリ管理"
-      role={role}
-      onRoleChange={(nextRole) => {
-        setRole(nextRole);
-        setMockAdminRole(nextRole);
-      }}
-    >
+    <AdminShell title="カテゴリ管理" role="admin">
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <AppText variant="h2" style={styles.title}>
@@ -27,68 +28,36 @@ export const AdminCategoriesScreen: React.FC = () => {
           <Button title="戻る" variant="secondary" onPress={() => router.back()} />
         </View>
 
-        {!isAdmin ? (
-          <Card style={styles.card}>
-            <AppText variant="bodyLarge" style={styles.cardText}>
-              管理者のみ操作できます
-            </AppText>
-            <AppText variant="caption" style={styles.note}>
-              閲覧モードでは編集できません
-            </AppText>
-          </Card>
-        ) : (
-          <>
-            <AppText variant="caption" style={styles.note}>
-              削除したカテゴリのイベントは「未分類（Other）」に移動します
-            </AppText>
+        <AppText variant="caption" style={styles.note}>
+          カテゴリの追加・編集・削除は今後のアップデートで実装予定です
+        </AppText>
 
-            <Card style={styles.card}>
-              {mockCategories.map((category, index) => (
-                <View key={category.id} style={styles.row}>
-                  <AppText variant="bodyLarge" style={styles.cardText}>
-                    {category.label}
-                  </AppText>
-                  <View style={styles.actions}>
-                    <TouchableOpacity style={styles.actionButton}>
-                      <AppText variant="caption" style={styles.actionText}>
-                        編集
-                      </AppText>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.actionButton}>
-                      <AppText variant="caption" style={styles.actionText}>
-                        削除
-                      </AppText>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.actionButton}>
-                      <AppText variant="caption" style={styles.actionText}>
-                        {index === 0 ? '上へ' : '下へ'}
-                      </AppText>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
-            </Card>
-
-            <Button title="カテゴリを追加" variant="secondary" onPress={() => {}} />
-          </>
-        )}
+        <Card style={styles.card}>
+          {CATEGORIES.map((category) => (
+            <View key={category.id} style={styles.row}>
+              <AppText variant="body" style={styles.cardText}>
+                {category.label}
+              </AppText>
+              <AppText variant="small" style={styles.cardDim}>
+                {category.id}
+              </AppText>
+            </View>
+          ))}
+        </Card>
       </ScrollView>
     </AdminShell>
   );
 };
 
 const styles = StyleSheet.create({
-  content: {
-  },
+  content: {},
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: adminTheme.spacing.md,
   },
-  title: {
-    color: adminTheme.colors.text,
-  },
+  title: { color: adminTheme.colors.text },
   note: {
     color: adminTheme.colors.textSecondary,
     marginBottom: adminTheme.spacing.md,
@@ -96,6 +65,9 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: adminTheme.colors.surface,
     borderColor: adminTheme.colors.border,
+    borderWidth: 1,
+    borderRadius: adminTheme.radius.md,
+    padding: adminTheme.spacing.md,
     marginBottom: adminTheme.spacing.lg,
   },
   row: {
@@ -103,17 +75,6 @@ const styles = StyleSheet.create({
     borderBottomColor: adminTheme.colors.border,
     paddingVertical: adminTheme.spacing.sm,
   },
-  cardText: {
-    color: adminTheme.colors.text,
-  },
-  actions: {
-    flexDirection: 'row',
-    marginTop: adminTheme.spacing.xs,
-  },
-  actionButton: {
-    marginRight: adminTheme.spacing.sm,
-  },
-  actionText: {
-    color: adminTheme.colors.textSecondary,
-  },
+  cardText: { color: adminTheme.colors.text },
+  cardDim: { color: adminTheme.colors.textTertiary, marginTop: 2 },
 });

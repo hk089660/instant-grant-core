@@ -5,16 +5,14 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as QRCode from 'qrcode';
 import { AppText, Button, Card } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
-import { getMockAdminRole } from '../../data/adminMock';
-import { roleLabel } from '../../types/ui';
+
 import { getSchoolDeps } from '../../api/createSchoolDeps';
 import type { SchoolEvent } from '../../types/school';
 
 export const AdminPrintScreen: React.FC = () => {
   const router = useRouter();
   const { eventId } = useLocalSearchParams<{ eventId: string }>();
-  const role = getMockAdminRole();
-  const isAdmin = role === 'admin';
+  const isAdmin = true;
   const printHiddenProps = { 'data-print-hidden': 'true' } as any;
   const printCardProps = { 'data-print-card': 'true' } as any;
   const printQrProps = { 'data-print-qr': 'true' } as any;
@@ -104,7 +102,7 @@ export const AdminPrintScreen: React.FC = () => {
           </AppText>
           <View style={styles.headerRight}>
             <AppText variant="small" style={styles.role}>
-              {roleLabel[role]}
+              Admin
             </AppText>
             <Button title="戻る" variant="secondary" onPress={() => router.back()} />
           </View>

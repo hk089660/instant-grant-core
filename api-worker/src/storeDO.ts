@@ -1,7 +1,7 @@
 
 
 import type { ClaimBody, RegisterBody, UserClaimBody, UserClaimResponse, SchoolClaimResult } from './types';
-import { ClaimStore, SEED_EVENTS, type IClaimStorage } from './claimLogic';
+import { ClaimStore, type IClaimStorage } from './claimLogic';
 import type { AuditActor, AuditEvent } from './audit/types';
 import { canonicalize, sha256Hex } from './audit/hash';
 
@@ -97,6 +97,24 @@ export class SchoolStore implements DurableObject {
       return Response.json({ items, nextCursor: undefined });
     }
 
+    // POST /v1/school/events — イベント新規作成（admin用）
+    if (path === '/v1/school/events' && request.method === 'POST') {
+      let body: { title?: string; datetime?: string; host?: string; state?: 'draft' | 'published' };
+      try {
+        body = (await request.json()) as any;
+      } catch {
+        return Response.json({ error: 'invalid body' }, { status: 400 });
+      }
+      const title = typeof body?.title === 'string' ? body.title.trim() : '';
+      const datetime = typeof body?.datetime === 'string' ? body.datetime.trim() : '';
+      const host = typeof body?.host === 'string' ? body.host.trim() : '';
+      if (!title || !datetime || !host) {
+        return Response.json({ error: 'title, datetime, host are required' }, { status: 400 });
+      }
+      const event = await this.store.createEvent({ title, datetime, host, state: body.state });
+      return Response.json(event, { status: 201 });
+    }
+
     const eventIdMatch = path.match(/^\/v1\/school\/events\/([^/]+)$/);
     if (eventIdMatch && request.method === 'GET') {
       const eventId = eventIdMatch[1];
@@ -108,6 +126,32 @@ export class SchoolStore implements DurableObject {
         );
       }
       return Response.json(event);
+    }
+
+    // GET /v1/school/events/:eventId/claimants — 参加者一覧
+    const claimantsMatch = path.match(/^\/v1\/school\/events\/([^/]+)\/claimants$/);
+    if (claimantsMatch && request.method === 'GET') {
+      const eventId = claimantsMatch[1];
+      const event = await this.store.getEvent(eventId);
+      if (!event) {
+        return Response.json({ error: 'event not found' }, { status: 404 });
+      }
+      const claimants = await this.store.getClaimants(eventId);
+      // subject が user ID の場合 displayName を引く
+      const items = await Promise.all(claimants.map(async (c) => {
+        let displayName: string | undefined;
+        const userRaw = await this.ctx.storage.get(userKey(c.subject));
+        if (userRaw && typeof userRaw === 'object' && 'displayName' in userRaw) {
+          displayName = (userRaw as { displayName: string }).displayName;
+        }
+        return {
+          subject: c.subject,
+          displayName: displayName ?? '-',
+          confirmationCode: c.confirmationCode,
+          claimedAt: c.claimedAt ? new Date(c.claimedAt).toISOString() : undefined,
+        };
+      }));
+      return Response.json({ eventId, eventTitle: event.title, items });
     }
 
     if (path === '/v1/school/claims' && request.method === 'POST') {
@@ -193,7 +237,7 @@ export class SchoolStore implements DurableObject {
       if ((userRaw as { pinHash: string }).pinHash !== pinHash) {
         return Response.json({ error: 'invalid pin' }, { status: 401 });
       }
-      const event = SEED_EVENTS.find((e) => e.id === eventId);
+      const event = await this.store.getEvent(eventId);
       if (!event) {
         return Response.json({ error: 'event not found' }, { status: 404 });
       }

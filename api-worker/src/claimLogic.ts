@@ -36,8 +36,14 @@ export interface IClaimStorage {
   list(prefix: string): Promise<Map<string, unknown>>;
 }
 
+const EVENT_PREFIX = 'event:';
+
+export function eventKey(eventId: string): string {
+  return `${EVENT_PREFIX}${eventId}`;
+}
+
 export class ClaimStore {
-  constructor(private storage: IClaimStorage) {}
+  constructor(private storage: IClaimStorage) { }
 
   async getClaimedCount(eventId: string): Promise<number> {
     const list = await this.storage.list(claimPrefix(eventId));
@@ -68,9 +74,46 @@ export class ClaimStore {
     }
   }
 
+  /** イベント別の参加者一覧を取得 */
+  async getClaimants(eventId: string): Promise<Array<{ subject: string; claimedAt: number; confirmationCode?: string }>> {
+    const prefix = claimPrefix(eventId);
+    const map = await this.storage.list(prefix);
+    const out: Array<{ subject: string; claimedAt: number; confirmationCode?: string }> = [];
+    map.forEach((value, key) => {
+      const subject = key.slice(prefix.length);
+      let claimedAt = 0;
+      let confirmationCode: string | undefined;
+      if (typeof value === 'number') {
+        claimedAt = value;
+      } else if (value && typeof value === 'object') {
+        const v = value as { at?: number; code?: string };
+        claimedAt = v.at ?? 0;
+        confirmationCode = v.code;
+      }
+      out.push({ subject, claimedAt, confirmationCode });
+    });
+    out.sort((a, b) => a.claimedAt - b.claimedAt);
+    return out;
+  }
+
+  /** 動的に作成されたイベントを取得 */
+  private async getStoredEvents(): Promise<SchoolEvent[]> {
+    const map = await this.storage.list(EVENT_PREFIX);
+    const events: SchoolEvent[] = [];
+    map.forEach((value) => {
+      if (value && typeof value === 'object' && 'id' in (value as any)) {
+        events.push(value as SchoolEvent);
+      }
+    });
+    return events;
+  }
+
+  /** SEED + 動的イベントを統合 */
   async getEvents(): Promise<(SchoolEvent & { claimedCount: number })[]> {
+    const stored = await this.getStoredEvents();
+    const all = [...SEED_EVENTS, ...stored];
     const out: (SchoolEvent & { claimedCount: number })[] = [];
-    for (const e of SEED_EVENTS) {
+    for (const e of all) {
       const claimedCount = await this.getClaimedCount(e.id);
       out.push({ ...e, claimedCount });
     }
@@ -78,10 +121,32 @@ export class ClaimStore {
   }
 
   async getEvent(eventId: string): Promise<(SchoolEvent & { claimedCount: number }) | null> {
-    const event = SEED_EVENTS.find((e) => e.id === eventId);
+    // まず SEED から
+    let event = SEED_EVENTS.find((e) => e.id === eventId) ?? null;
+    // なければ動的イベントから
+    if (!event) {
+      const stored = await this.storage.get(eventKey(eventId));
+      if (stored && typeof stored === 'object' && 'id' in (stored as any)) {
+        event = stored as SchoolEvent;
+      }
+    }
     if (!event) return null;
     const claimedCount = await this.getClaimedCount(eventId);
     return { ...event, claimedCount };
+  }
+
+  /** イベント作成（admin 用） */
+  async createEvent(data: { title: string; datetime: string; host: string; state?: SchoolEvent['state'] }): Promise<SchoolEvent> {
+    const id = `evt-${Date.now().toString(36)}`;
+    const event: SchoolEvent = {
+      id,
+      title: data.title,
+      datetime: data.datetime,
+      host: data.host,
+      state: data.state ?? 'published',
+    };
+    await this.storage.put(eventKey(id), event);
+    return event;
   }
 
   async submitClaim(body: ClaimBody): Promise<SchoolClaimResult> {

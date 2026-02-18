@@ -1,163 +1,229 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react';
+import { View, StyleSheet, ScrollView, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as QRCode from 'qrcode';
 import { AppText, Button, Card, AdminShell } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
-import { getMockAdminRole, setMockAdminRole, mockParticipants } from '../../data/adminMock';
-import { getSchoolDeps } from '../../api/createSchoolDeps';
+import { fetchAdminEvent, fetchClaimants, type Claimant } from '../../api/adminApi';
 import type { SchoolEvent } from '../../types/school';
 
 export const AdminEventDetailScreen: React.FC = () => {
   const router = useRouter();
   const { eventId } = useLocalSearchParams<{ eventId: string }>();
-  const [role, setRole] = useState(getMockAdminRole());
-  const [event, setEvent] = useState<SchoolEvent | null>(null);
-  const canPrint = role === 'admin';
-  const canDownloadCsv = role === 'admin';
+  const [event, setEvent] = useState<(SchoolEvent & { claimedCount: number }) | null>(null);
+  const [claimants, setClaimants] = useState<Claimant[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!eventId) return;
     let cancelled = false;
-    getSchoolDeps()
-      .eventProvider.getById(eventId)
-      .then((ev) => {
-        if (!cancelled) setEvent(ev ?? null);
+    setLoading(true);
+    setError(null);
+
+    Promise.all([
+      fetchAdminEvent(eventId),
+      fetchClaimants(eventId),
+    ])
+      .then(([ev, cl]) => {
+        if (!cancelled) {
+          setEvent(ev);
+          setClaimants(cl.items);
+        }
       })
-      .catch(() => {
-        if (!cancelled) setEvent(null);
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : '読み込みに失敗しました');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
+
+    return () => { cancelled = true; };
   }, [eventId]);
 
-  const displayEvent: SchoolEvent = event ?? {
-    id: eventId ?? '',
-    title: '…',
-    datetime: '',
-    host: '',
-    state: undefined,
-    claimedCount: undefined,
+  // QR 生成
+  const scanUrl = useMemo(() => {
+    if (!event) return '';
+    const base = typeof window !== 'undefined' ? window.location.origin : (process.env.EXPO_PUBLIC_BASE_URL ?? '');
+    return `${base}/u/scan?eventId=${encodeURIComponent(event.id)}`;
+  }, [event]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !scanUrl) return;
+    QRCode.toDataURL(scanUrl, { width: 200, margin: 2 })
+      .then((url: string) => setQrDataUrl(url))
+      .catch(() => setQrDataUrl(null));
+  }, [scanUrl]);
+
+  const handleRefresh = () => {
+    if (!eventId) return;
+    setLoading(true);
+    setError(null);
+    Promise.all([fetchAdminEvent(eventId), fetchClaimants(eventId)])
+      .then(([ev, cl]) => { setEvent(ev); setClaimants(cl.items); })
+      .catch((e) => setError(e instanceof Error ? e.message : '読み込みに失敗しました'))
+      .finally(() => setLoading(false));
   };
 
+  const formatTime = (iso?: string) => {
+    if (!iso) return '-';
+    try {
+      const d = new Date(iso);
+      return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+    } catch { return iso; }
+  };
+
+  if (loading) {
+    return (
+      <AdminShell title="イベント詳細" role="admin">
+        <View style={styles.center}>
+          <AppText style={styles.muted}>読み込み中…</AppText>
+        </View>
+      </AdminShell>
+    );
+  }
+
+  if (error || !event) {
+    return (
+      <AdminShell title="イベント詳細" role="admin">
+        <View style={styles.center}>
+          <AppText style={styles.errorText}>{error ?? 'イベントが見つかりません'}</AppText>
+          <Button title="再読み込み" variant="secondary" onPress={handleRefresh} style={{ marginTop: 12 }} />
+          <Button title="戻る" variant="secondary" onPress={() => router.back()} style={{ marginTop: 8 }} />
+        </View>
+      </AdminShell>
+    );
+  }
+
   return (
-    <AdminShell
-      title="イベント詳細"
-      role={role}
-      onRoleChange={(nextRole) => {
-        setRole(nextRole);
-        setMockAdminRole(nextRole);
-      }}
-    >
+    <AdminShell title="イベント詳細" role="admin">
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <AppText variant="h2" style={styles.title}>
             イベント詳細
           </AppText>
-          <Button title="戻る" variant="secondary" onPress={() => router.back()} />
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Button title="更新" variant="secondary" onPress={handleRefresh} />
+            <Button title="戻る" variant="secondary" onPress={() => router.back()} />
+          </View>
         </View>
 
+        {/* イベント情報 */}
         <Card style={styles.card}>
-          <AppText variant="h3" style={styles.cardText}>
-            {displayEvent.title}
-          </AppText>
-          <AppText variant="caption" style={styles.cardText}>
-            {displayEvent.datetime}
-          </AppText>
-          <AppText variant="caption" style={styles.cardText}>
-            主催: {displayEvent.host}
-          </AppText>
-          <AppText variant="small" style={styles.cardMuted}>
-            ID: {displayEvent.id}
-          </AppText>
-          <AppText variant="small" style={styles.cardMuted}>
-            状態: {displayEvent.state ?? '—'}
-          </AppText>
+          <View style={styles.stateBadge}>
+            <AppText variant="small" style={{
+              color: event.state === 'published' ? '#00c853' : '#ff9800',
+              fontWeight: '700',
+            }}>
+              {event.state === 'published' ? '公開中' : event.state === 'draft' ? '下書き' : '終了'}
+            </AppText>
+          </View>
+          <AppText variant="h3" style={styles.cardText}>{event.title}</AppText>
+          <AppText variant="caption" style={styles.cardMuted}>{event.datetime}</AppText>
+          <AppText variant="caption" style={styles.cardMuted}>主催: {event.host}</AppText>
+          <AppText variant="small" style={styles.cardDim}>ID: {event.id}</AppText>
         </Card>
 
-        <View style={styles.counts}>
-          <Card style={styles.countCard}>
-            <AppText variant="caption" style={styles.cardText}>
-              参加済み数
-            </AppText>
-            <AppText variant="h2" style={styles.cardText}>
-              {displayEvent.claimedCount ?? '—'}
-            </AppText>
+        {/* 統計 */}
+        <View style={styles.stats}>
+          <Card style={styles.statCard}>
+            <AppText variant="caption" style={styles.cardMuted}>参加済み</AppText>
+            <AppText variant="h2" style={styles.cardText}>{event.claimedCount}</AppText>
+          </Card>
+          <Card style={styles.statCard}>
+            <AppText variant="caption" style={styles.cardMuted}>参加者数</AppText>
+            <AppText variant="h2" style={styles.cardText}>{claimants.length}</AppText>
           </Card>
         </View>
 
-        <Card style={styles.card}>
-          <AppText variant="h3" style={styles.cardText}>
-            QR表示
-          </AppText>
-          <View style={styles.qrBox}>
-            <AppText variant="caption" style={styles.cardMuted}>
-              QRプレビュー（モック）
-            </AppText>
-          </View>
-          <View style={styles.qrActions}>
-            <Button title="QRを表示" variant="secondary" onPress={() => {}} />
-            {canPrint ? (
-              <Button
-                title="印刷用PDF"
-                variant="secondary"
-                onPress={() => eventId && router.push(`/admin/print/${eventId}` as any)}
-                style={styles.secondaryButton}
-              />
-            ) : null}
-          </View>
-        </Card>
+        {/* QR */}
+        {event.state === 'published' && (
+          <Card style={styles.card}>
+            <AppText variant="h3" style={styles.cardText}>受付QR</AppText>
+            <View style={styles.qrBox}>
+              {qrDataUrl ? (
+                Platform.OS === 'web' ? (
+                  // @ts-ignore
+                  <img src={qrDataUrl} alt="QR" style={{ width: 180, height: 180 }} />
+                ) : null
+              ) : (
+                <AppText variant="caption" style={styles.cardMuted}>QR生成中…</AppText>
+              )}
+            </View>
+            <Button
+              title="印刷用PDF"
+              variant="secondary"
+              onPress={() => router.push(`/admin/print/${event.id}` as any)}
+              style={{ marginTop: 12 }}
+            />
+          </Card>
+        )}
 
-        {canDownloadCsv ? (
-          <View style={styles.actions}>
-            <Button title="CSVダウンロード" variant="secondary" onPress={() => {}} />
-          </View>
-        ) : null}
-
+        {/* 参加者一覧 */}
         <View style={styles.sectionHeader}>
-          <AppText variant="h3" style={styles.title}>
-            参加者一覧
-          </AppText>
+          <AppText variant="h3" style={styles.title}>参加者一覧</AppText>
           <AppText variant="small" style={styles.muted}>
-            個人情報は表示しません
+            合計 {claimants.length} 名
           </AppText>
         </View>
+
         <Card style={styles.card}>
-          <View style={styles.tableHeader}>
-            <AppText variant="small" style={styles.cardMuted}>
-              内部ID
-            </AppText>
-            <AppText variant="small" style={styles.cardMuted}>
-              表示名
-            </AppText>
-            <AppText variant="small" style={styles.cardMuted}>
-              確認コード
-            </AppText>
-            <AppText variant="small" style={styles.cardMuted}>
-              参加時刻
-            </AppText>
-          </View>
-          {mockParticipants.map((p) => (
-            <View key={p.id} style={styles.participantRow}>
-              <View style={styles.participantInfo}>
-                <AppText variant="bodyLarge" style={styles.cardText}>
-                  {p.id}
-                </AppText>
-                <AppText variant="caption" style={styles.cardMuted}>
-                  表示名: {p.display}
-                </AppText>
-              </View>
-              <View style={styles.participantMeta}>
-                <AppText variant="caption" style={styles.cardText}>
-                  {p.code}
-                </AppText>
-                <AppText variant="small" style={styles.cardMuted}>
-                  {p.time}
-                </AppText>
-              </View>
+          {claimants.length === 0 ? (
+            <View style={styles.center}>
+              <AppText variant="caption" style={styles.cardMuted}>
+                まだ参加者がいません
+              </AppText>
             </View>
-          ))}
+          ) : (
+            <>
+              {/* ヘッダー */}
+              <View style={styles.tableHeader}>
+                <AppText variant="small" style={[styles.cardDim, { flex: 2 }]}>表示名</AppText>
+                <AppText variant="small" style={[styles.cardDim, { flex: 1, textAlign: 'center' }]}>確認コード</AppText>
+                <AppText variant="small" style={[styles.cardDim, { flex: 1, textAlign: 'right' }]}>参加時刻</AppText>
+              </View>
+              {claimants.map((p, i) => (
+                <View key={`${p.subject}-${i}`} style={styles.participantRow}>
+                  <View style={{ flex: 2 }}>
+                    <AppText variant="body" style={styles.cardText}>{p.displayName}</AppText>
+                    <AppText variant="small" style={styles.cardDim}>
+                      {p.subject.length > 12 ? p.subject.slice(0, 12) + '…' : p.subject}
+                    </AppText>
+                  </View>
+                  <AppText variant="caption" style={[styles.cardText, { flex: 1, textAlign: 'center', fontFamily: 'monospace' }]}>
+                    {p.confirmationCode ?? '-'}
+                  </AppText>
+                  <AppText variant="small" style={[styles.cardMuted, { flex: 1, textAlign: 'right' }]}>
+                    {formatTime(p.claimedAt)}
+                  </AppText>
+                </View>
+              ))}
+            </>
+          )}
         </Card>
+
+        {/* CSV ダウンロード */}
+        <Button
+          title="CSVダウンロード"
+          variant="secondary"
+          onPress={() => {
+            if (typeof window === 'undefined') return;
+            const rows = [['表示名', 'サブジェクト', '確認コード', '参加時刻']];
+            claimants.forEach((c) => {
+              rows.push([c.displayName, c.subject, c.confirmationCode ?? '', c.claimedAt ?? '']);
+            });
+            const csv = rows.map((r) => r.map((v) => `"${v}"`).join(',')).join('\n');
+            const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${event.title}_participants.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+          style={{ marginBottom: adminTheme.spacing.lg }}
+        />
       </ScrollView>
     </AdminShell>
   );
@@ -165,6 +231,7 @@ export const AdminEventDetailScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   content: {
+    paddingBottom: 40,
   },
   header: {
     flexDirection: 'row',
@@ -172,74 +239,70 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: adminTheme.spacing.md,
   },
-  title: {
-    color: adminTheme.colors.text,
-  },
+  title: { color: adminTheme.colors.text },
   card: {
     backgroundColor: adminTheme.colors.surface,
     borderColor: adminTheme.colors.border,
+    borderWidth: 1,
+    borderRadius: adminTheme.radius.md,
+    padding: adminTheme.spacing.md,
     marginBottom: adminTheme.spacing.lg,
   },
-  cardText: {
-    color: adminTheme.colors.text,
+  cardText: { color: adminTheme.colors.text },
+  cardMuted: { color: adminTheme.colors.textSecondary, marginTop: 2 },
+  cardDim: { color: adminTheme.colors.textTertiary, marginTop: 2 },
+  center: {
+    paddingVertical: adminTheme.spacing.lg,
+    alignItems: 'center',
   },
-  cardMuted: {
-    color: adminTheme.colors.textSecondary,
+  muted: { color: adminTheme.colors.textTertiary },
+  errorText: { color: '#ff6b6b' },
+  stateBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginBottom: adminTheme.spacing.sm,
   },
-  counts: {
+  stats: {
     flexDirection: 'row',
     gap: adminTheme.spacing.md,
     marginBottom: adminTheme.spacing.lg,
   },
-  countCard: {
+  statCard: {
     flex: 1,
     backgroundColor: adminTheme.colors.surface,
     borderColor: adminTheme.colors.border,
+    borderWidth: 1,
+    borderRadius: adminTheme.radius.md,
+    padding: adminTheme.spacing.md,
+    alignItems: 'center',
   },
   qrBox: {
-    height: 200,
-    borderRadius: adminTheme.radius.md,
-    borderWidth: 1,
-    borderColor: adminTheme.colors.border,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: adminTheme.spacing.md,
-    marginBottom: adminTheme.spacing.md,
-  },
-  qrActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  secondaryButton: {
-    marginLeft: adminTheme.spacing.sm,
-  },
-  actions: {
-    marginBottom: adminTheme.spacing.lg,
+    padding: adminTheme.spacing.sm,
+    backgroundColor: '#ffffff',
+    borderRadius: adminTheme.radius.md,
+    minHeight: 200,
   },
   sectionHeader: {
     marginBottom: adminTheme.spacing.sm,
   },
-  muted: {
-    color: adminTheme.colors.textTertiary,
-  },
   tableHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     paddingBottom: adminTheme.spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: adminTheme.colors.border,
+    marginBottom: adminTheme.spacing.xs,
   },
   participantRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingVertical: adminTheme.spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: adminTheme.colors.border,
-  },
-  participantInfo: {
-    flex: 1,
-  },
-  participantMeta: {
-    alignItems: 'flex-end',
   },
 });
