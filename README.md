@@ -25,13 +25,13 @@ This repository defines "accountability" in code through the following three-lay
 
 ```mermaid
 graph TD
-    User[User / Mobile] -->|1. Signed Request (NaCl)| Layer2
+    User["User / Mobile"] -- "1. Signed Request (NaCl)" --> Layer2
     subgraph "Layer 2: The Time (Process)"
-    Layer2[API Worker / Cloudflare] -->|2. Append to Hash Chain| AuditLog[Audit Hash Chain]
+    Layer2["API Worker / Cloudflare"] -- "2. Append to Hash Chain" --> AuditLog["Audit Hash Chain"]
     end
     subgraph "Layer 1: The Vault (Result)"
-    Layer2 -->|3. Anchor Root Hash| Solana[Solana SVM / Rust]
-    Solana -->|4. Verify & Settle| PDA[PDA Vault]
+    Layer2 -- "3. Anchor Root Hash" --> Solana["Solana SVM / Rust"]
+    Solana -- "4. Verify & Settle" --> PDA["PDA Vault"]
     end
 ```
 
