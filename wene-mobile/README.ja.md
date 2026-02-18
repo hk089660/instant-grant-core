@@ -158,6 +158,10 @@ npm run build
 cd wene-mobile && npx tsc --noEmit
 ```
 
+> **⚠️ 注意: Phantom接続のための設定**
+> ローカル環境で開発を行う際、`app.config.ts` 内の `scheme` 設定をデフォルトの `wene-mobile` から独自の文字列（例: `my-solana-app`）に変更することを強く推奨します。
+> これにより、インストール済みの本番アプリやデモ版とのDeepLink競合（アプリが正しく戻ってこない問題）を防げます。変更した場合、Phantomへの接続リクエストも自動的に新しいschemeを使用するよう実装されています。
+
 ---
 
 ## 成功条件（レビューで確認できること）

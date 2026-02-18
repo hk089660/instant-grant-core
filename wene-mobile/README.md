@@ -447,6 +447,10 @@ npx expo prebuild --clean
 npm start
 ```
 
+> **⚠️ Note: Phantom Connection Setup**
+> When running locally, it is highly recommended to change the `scheme` in `app.config.ts` to a unique string (e.g., `my-solana-app`) instead of the default `wene-mobile`.
+> This prevents DeepLink conflicts if you already have the production/demo version of the app installed on your device. The Phantom redirect logic in this codebase automatically adapts to the configured scheme.
+
 ---
 
 ## Build Android APK
