@@ -128,6 +128,27 @@ Reviewer shortcut: Check `./wene-mobile/src/screens/user/UserScanScreen.tsx` and
 - Milestone 1 (`Status: Completed`): Implement actual scan processing (QR decode + permission handling) at `/u/scan`.
 - Milestone 2 (`Status: Planned`): Add `eventId` manual entry fallback + expired/invalid QR messages, and fix via UI/API tests.
 
+## 🔗 Deployment Flow (Strict Order)
+To run the full Asuka Network system, you **MUST** deploy the components in the following order to satisfy dependency IDs.
+
+### Step 1: Layer 1 (Solana Program)
+1. Go to `grant_program/`.
+2. Build and deploy to Devnet.
+3. **Copy** the generated `Program ID`.
+
+### Step 2: Layer 2 (API Worker)
+1. Go to `api-worker/`.
+2. Paste the `Program ID` (from Step 1) into `wrangler.toml`.
+3. Deploy to Cloudflare Workers.
+4. **Copy** your Worker's URL (e.g., `https://api.your-name.workers.dev`).
+
+### Step 3: Layer 3 (Mobile App)
+1. Go to `wene-mobile/`.
+2. Create `.env` from `.env.example`.
+3. Paste the `Worker URL` (from Step 2) and `Program ID` (from Step 1).
+4. Run `npm install` (patches for web3.js will apply automatically).
+5. Start the app.
+
 ## Quick Start (Local)
 
 ```bash

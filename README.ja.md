@@ -130,6 +130,27 @@ Reviewer shortcut: \`./wene-mobile/src/screens/user/UserScanScreen.tsx\` と \`.
 - マイルストーン1（\`状態：完了\`）: \`/u/scan\` に実スキャン処理（QRデコード + 権限ハンドリング）を実装。
 - マイルストーン2（\`状態：予定\`）: \`eventId\` 手入力フォールバック + 期限切れ/無効 QR メッセージを追加し、UI/API テストで固定する。
 
+## 🔗 デプロイメントフロー（厳格な順序）
+Asuka Networkの全システムを動作させるには、依存関係IDを満たすために、以下の順序でコンポーネントをデプロイする**必要**があります。
+
+### Step 1: Layer 1 (Solana Program)
+1. `grant_program/` に移動します。
+2. ビルドし、Devnetへデプロイします。
+3. 生成された `Program ID` を**コピー**します。
+
+### Step 2: Layer 2 (API Worker)
+1. `api-worker/` に移動します。
+2. `wrangler.toml` に Step 1 の `Program ID` を貼り付けます。
+3. Cloudflare Workersへデプロイします。
+4. WorkerのURL（例: `https://api.your-name.workers.dev`）を**コピー**します。
+
+### Step 3: Layer 3 (Mobile App)
+1. `wene-mobile/` に移動します。
+2. `.env.example` から `.env` を作成します。
+3. `Worker URL` (Step 2由来) と `Program ID` (Step 1由来) を貼り付けます。
+4. `npm install` を実行します（web3.jsのパッチが自動的に適用されます）。
+5. アプリを起動します。
+
 ## クイックスタート（ローカル）
 
 \`\`\`bash
