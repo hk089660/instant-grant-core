@@ -6,30 +6,8 @@
  * - The old retryable (intentional failure) scenario has been removed.
  */
 
-export type SchoolEvent = {
-  id: string;
-  title: string;
-  datetime?: string;
-  host?: string;
-  state: 'draft' | 'published' | 'closed' | string;
-};
-
-export type SchoolClaimErrorCode = 'not_found' | 'bad_request' | 'retryable' | 'internal';
-
-export type SchoolClaimResult =
-  | {
-      success: true;
-      alreadyJoined: boolean;
-      claimedCount?: number;
-      completedCount?: number;
-    }
-  | {
-      success: false;
-      error: {
-        code: SchoolClaimErrorCode;
-        message: string;
-      };
-    };
+import type { SchoolClaimClient, SchoolClaimSubmitOptions } from './schoolClaimClient';
+import type { SchoolEvent, SchoolClaimResult, SchoolClaimErrorCode } from '../types/school';
 
 // Mock events used by the client.
 // Keep this aligned with the API seed (evt-001 / evt-002).
@@ -85,7 +63,7 @@ export async function submitClaim(params: {
   if (!eventId) {
     return {
       success: false,
-      error: { code: 'bad_request', message: 'eventId is required' },
+      error: { code: 'invalid', message: 'eventId is required' },
     };
   }
 
@@ -101,7 +79,7 @@ export async function submitClaim(params: {
   if (!subjectKey) {
     return {
       success: false,
-      error: { code: 'bad_request', message: 'joinToken or walletAddress is required' },
+      error: { code: 'invalid', message: 'joinToken or walletAddress is required' },
     };
   }
 
@@ -118,9 +96,27 @@ export async function submitClaim(params: {
   const c = getCounts(eventId);
   return {
     success: true,
+    eventName: event.title,
     alreadyJoined,
-    claimedCount: c.claimed,
-    completedCount: c.completed,
+    // claimedCount, completedCount are not in SchoolClaimResultSuccess but useful for mock logic internally if needed
+    // However, SchoolClaimResultSuccess expects specific fields.
+    // Adding extra fields is generally fine in TS if not strict object literal check, but let's be safe.
+    txSignature: 'mock_tx_signature',
+    receiptPubkey: 'mock_receipt_pubkey',
+    explorerTxUrl: 'https://explorer.solana.com/tx/mock_tx_signature?cluster=devnet',
+    explorerReceiptUrl: 'https://explorer.solana.com/address/mock_receipt_pubkey?cluster=devnet',
+  };
+}
+
+export function createMockSchoolClaimClient(_provider?: any): SchoolClaimClient {
+  return {
+    async submit(eventId: string, options?: SchoolClaimSubmitOptions): Promise<SchoolClaimResult> {
+      return submitClaim({
+        eventId,
+        joinToken: options?.joinToken,
+        walletAddress: options?.walletAddress,
+      });
+    },
   };
 }
 
@@ -128,6 +124,7 @@ export const schoolClaimClientMock = {
   listEvents,
   getEvent,
   submitClaim,
+  createMockSchoolClaimClient,
 };
 
 export default schoolClaimClientMock;
