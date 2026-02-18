@@ -57,6 +57,7 @@ app.all('/api/*', forwardToDo);
 // 監査ログは DO 転送の外で処理
 app.route('/', auditRouter);
 
+app.get('/', (c) => c.json({ status: 'ok', service: 'we-ne-school-api' }));
 app.get('/health', (c) => c.json({ ok: true }));
 
 export { SchoolStore };
