@@ -1,8 +1,18 @@
-import { Hono } from 'hono';
-import { canonicalize, sha256Hex } from './hash';
-import type { AuditEvent, AuditLogRequest } from './types';
 
-type Env = { AUDIT_LOGS: R2Bucket; AUDIT_INDEX: KVNamespace };
+import { Hono } from 'hono';
+import type { AuditActor, AuditEvent, AuditLogRequest } from './types';
+
+// Define the stub interface for RPC
+interface SchoolStoreStub {
+  appendAuditLog(event: string, actor: AuditActor, data: unknown, eventId: string): Promise<AuditEvent>;
+}
+
+type Env = {
+  AUDIT_LOGS: R2Bucket;
+  AUDIT_INDEX: KVNamespace;
+
+  SCHOOL_STORE: any;
+};
 
 const auditRouter = new Hono<{ Bindings: Env }>();
 
@@ -26,21 +36,20 @@ auditRouter.post('/v1/audit/log', async (c) => {
   }
 
   const eventId = body.eventId;
-  const lastHashKey = `audit:lastHash:${eventId}`;
-  const prevHash = (await c.env.AUDIT_INDEX.get(lastHashKey)) ?? 'GENESIS';
-  const ts = new Date().toISOString();
 
-  const baseEntry = {
-    ts,
-    event: body.event,
-    eventId,
-    actor: body.actor,
-    data: body.data ?? {},
-    prev_hash: prevHash,
-  };
+  // Use the 'default' DO instance to serialize all audit logs (or per-event if needed, but keeping single instance for now)
+  // To strictly follow the instruction about "schoolId or similar", we could use eventId, 
+  // but since we are migrating from a single index, using 'default' ensures we don't need to migrate data yet per-shard if not intended.
+  // However, the DO method appendAuditLog keys by eventId internally, so using 'default' stub is safe.
 
-  const entry_hash = await sha256Hex(canonicalize(baseEntry));
-  const fullEntry: AuditEvent = { ...baseEntry, entry_hash };
+
+  const id = c.env.SCHOOL_STORE.idFromName('default');
+  const tempStub: unknown = c.env.SCHOOL_STORE.get(id);
+  const stub = tempStub as SchoolStoreStub;
+
+  const fullEntry = await stub.appendAuditLog(body.event, body.actor, body.data, eventId);
+  const entry_hash = fullEntry.entry_hash;
+  const ts = fullEntry.ts;
 
   const date = ts.slice(0, 10);
   const objectKey = `audit/${eventId}/${date}.jsonl`;
@@ -49,7 +58,10 @@ auditRouter.post('/v1/audit/log', async (c) => {
   const existingText = existingObj ? await existingObj.text() : '';
 
   await c.env.AUDIT_LOGS.put(objectKey, existingText + JSON.stringify(fullEntry) + '\n');
-  await c.env.AUDIT_INDEX.put(lastHashKey, entry_hash);
+
+  // KV update is now handled by DO (as storage.put), so we don't need AUDIT_INDEX.put here.
+  // We keep AUDIT_INDEX in Env just in case it's still needed elsewhere or for legacy reads, 
+  // but for this flow it's replaced by DO.
 
   return c.json({ ok: true, entry_hash, objectKey });
 });

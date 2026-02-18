@@ -1,10 +1,9 @@
-/**
- * Durable Object: 学校PoC の events / claims / users を永続化
- * ルーティングとストレージは claimLogic.ClaimStore に委譲
- */
+
 
 import type { ClaimBody, RegisterBody, UserClaimBody, UserClaimResponse, SchoolClaimResult } from './types';
 import { ClaimStore, SEED_EVENTS, type IClaimStorage } from './claimLogic';
+import type { AuditActor, AuditEvent } from './audit/types';
+import { canonicalize, sha256Hex } from './audit/hash';
 
 const USER_PREFIX = 'user:';
 
@@ -44,11 +43,49 @@ function doStorageAdapter(ctx: DurableObjectState): IClaimStorage {
   };
 }
 
+
 export class SchoolStore implements DurableObject {
   private store: ClaimStore;
 
   constructor(private ctx: DurableObjectState, _env: Env) {
     this.store = new ClaimStore(doStorageAdapter(ctx));
+  }
+
+
+  private locks = new Map<string, Promise<void>>();
+
+  async appendAuditLog(event: string, actor: AuditActor, data: unknown, eventId: string): Promise<AuditEvent> {
+    // Serialize execution per eventId using a promise chain (mutex)
+    const currentLock = this.locks.get(eventId) || Promise.resolve();
+
+    const task = currentLock.then(async () => {
+      const ts = new Date().toISOString();
+      // Use eventId to namespace the hash chain
+      const lastHashKey = `audit:lastHash:${eventId}`;
+      const prevHash = (await this.ctx.storage.get<string>(lastHashKey)) ?? 'GENESIS';
+
+      const baseEntry = {
+        ts,
+        event,
+        eventId,
+        actor,
+        data: (data as Record<string, unknown>) ?? {},
+        prev_hash: prevHash,
+      };
+
+      const entry_hash = await sha256Hex(canonicalize(baseEntry));
+      const fullEntry: AuditEvent = { ...baseEntry, entry_hash };
+
+      // Atomically update the hash chain
+      await this.ctx.storage.put(lastHashKey, entry_hash);
+
+      return fullEntry;
+    });
+
+    // Update lock for next caller, robust against failures
+    this.locks.set(eventId, task.then(() => { }, () => { }));
+
+    return task;
   }
 
   async fetch(request: Request): Promise<Response> {
