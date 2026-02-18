@@ -6,12 +6,6 @@
  * - The old retryable (intentional failure) scenario has been removed.
  */
 
-import type { SchoolClaimClient, SchoolClaimSubmitOptions, SchoolEventProvider } from './schoolClaimClient';
-import type {
-  SchoolClaimResult as UiSchoolClaimResult,
-  SchoolClaimErrorCode as UiSchoolClaimErrorCode,
-} from '../types/school';
-
 export type SchoolEvent = {
   id: string;
   title: string;
@@ -127,76 +121,6 @@ export async function submitClaim(params: {
     alreadyJoined,
     claimedCount: c.claimed,
     completedCount: c.completed,
-  };
-}
-
-function mapMockErrorCode(code: SchoolClaimErrorCode): UiSchoolClaimErrorCode {
-  switch (code) {
-    case 'not_found':
-      return 'not_found';
-    case 'bad_request':
-      return 'invalid';
-    case 'retryable':
-    case 'internal':
-    default:
-      return 'retryable';
-  }
-}
-
-export function createMockSchoolClaimClient(eventProvider: SchoolEventProvider): SchoolClaimClient {
-  return {
-    async submit(eventId: string, options?: SchoolClaimSubmitOptions): Promise<UiSchoolClaimResult> {
-      const normalizedEventId = eventId.trim();
-      if (!normalizedEventId) {
-        return {
-          success: false,
-          error: { code: 'invalid', message: 'イベントIDが無効です' },
-        };
-      }
-
-      const event = await eventProvider.getById(normalizedEventId);
-      if (!event) {
-        return {
-          success: false,
-          error: { code: 'not_found', message: 'イベントが見つかりません' },
-        };
-      }
-      if (event.state && event.state !== 'published') {
-        return {
-          success: false,
-          error: { code: 'eligibility', message: 'このイベントは参加できません' },
-        };
-      }
-
-      if (!(options?.joinToken ?? options?.walletAddress)) {
-        return {
-          success: false,
-          error: { code: 'wallet_required', message: 'ウォレット接続が必要です' },
-        };
-      }
-
-      const result = await submitClaim({
-        eventId: normalizedEventId,
-        joinToken: options?.joinToken,
-        walletAddress: options?.walletAddress,
-      });
-
-      if (result.success) {
-        return {
-          success: true,
-          eventName: event.title,
-          alreadyJoined: result.alreadyJoined,
-        };
-      }
-
-      return {
-        success: false,
-        error: {
-          code: mapMockErrorCode(result.error.code),
-          message: result.error.message,
-        },
-      };
-    },
   };
 }
 

@@ -62,6 +62,8 @@ export function createV1SchoolRouter(deps: V1SchoolDeps): Router {
       } as SchoolClaimResult);
       return;
     }
+
+
     const existing = storage.getClaims(eventId);
     const alreadyByWallet = walletAddress && existing.some((c) => c.walletAddress === walletAddress);
     const alreadyByToken = joinToken && existing.some((c) => (c as { joinToken?: string }).joinToken === joinToken);

@@ -8,7 +8,6 @@ import type { SchoolClaimResult, SchoolEvent, ClaimBody } from './types';
 export const SEED_EVENTS: SchoolEvent[] = [
   { id: 'evt-001', title: '地域清掃ボランティア', datetime: '2026/02/02 09:00-10:30', host: '生徒会', state: 'published' },
   { id: 'evt-002', title: '進路説明会', datetime: '2026/02/10 15:00-16:00', host: '進路指導室', state: 'published' },
-  { id: 'evt-003', title: '体育祭', datetime: '2026/02/15 09:00-15:00', host: '体育委員会', state: 'published' },
 ];
 
 const CLAIM_PREFIX = 'claim:';
@@ -103,15 +102,6 @@ export class ClaimStore {
       return { success: false, error: { code: 'eligibility', message: 'このイベントは参加できません' } };
     }
 
-    if (eventId === 'evt-003') {
-      return {
-        success: false,
-        error: {
-          code: 'retryable',
-          message: '接続できませんでした。しばらくしてから再試行してください。',
-        },
-      };
-    }
 
     const subject = normalizeSubject(walletAddress, joinToken);
     if (subject === null) {
