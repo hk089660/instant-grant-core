@@ -10,7 +10,7 @@
 Asuka Network上で稼働する最初の行政・公共向けリファレンス実装「We-ne」は、今すぐブラウザから体験可能です。
 インストール不要。エッジで動作する爆速の承認プロセスを確認してください。
 
-[🚀 **Launch We-ne (Web App)**](ここにCloudflareのURLを貼る)
+[🚀 **Launch We-ne (Web App)**](https://instant-grant-core.pages.dev/)
 
 ---
 
@@ -24,6 +24,18 @@ Asuka Network上で稼働する最初の行政・公共向けリファレンス�
 本リポジトリは、以下の3層構造（Trinity Architecture）によって「責任の所在」をコードで定義します。
 
 
+
+```mermaid
+graph TD
+    User[User / Mobile] -->|1. Signed Request (NaCl)| Layer2
+    subgraph "Layer 2: The Time (Process)"
+    Layer2[API Worker / Cloudflare] -->|2. Append to Hash Chain| AuditLog[Audit Hash Chain]
+    end
+    subgraph "Layer 1: The Vault (Result)"
+    Layer2 -->|3. Anchor Root Hash| Solana[Solana SVM / Rust]
+    Solana -->|4. Verify & Settle| PDA[PDA Vault]
+    end
+```
 
 ### 1. Layer 1: The Vault (結果の保証)
 * **技術スタック:** Rust, Anchor Framework (Solana SVM)

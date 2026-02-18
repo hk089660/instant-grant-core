@@ -23,6 +23,18 @@ This project proposes and implements a new consensus concept called **"Proof of 
 ## 🏗 Architecture: Trinity of Trust
 This repository defines "accountability" in code through the following three-layer structure (Trinity Architecture).
 
+```mermaid
+graph TD
+    User[User / Mobile] -->|1. Signed Request (NaCl)| Layer2
+    subgraph "Layer 2: The Time (Process)"
+    Layer2[API Worker / Cloudflare] -->|2. Append to Hash Chain| AuditLog[Audit Hash Chain]
+    end
+    subgraph "Layer 1: The Vault (Result)"
+    Layer2 -->|3. Anchor Root Hash| Solana[Solana SVM / Rust]
+    Solana -->|4. Verify & Settle| PDA[PDA Vault]
+    end
+```
+
 ### 1. Layer 1: The Vault (Guarantee of Result)
 * **Tech Stack:** Rust, Anchor Framework (Solana SVM)
 * **Role:** Storage of value and settlement finality.
