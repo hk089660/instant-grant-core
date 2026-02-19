@@ -2,6 +2,9 @@
  * Cloudflare Pages deploy workaround:
  * `dist/assets/node_modules/**` can be omitted by deploy tooling.
  * Move/copy those assets to `dist/assets/vendor/**` and rewrite web bundle paths.
+ *
+ * Also flatten icon fonts to `dist/fonts/*.ttf` so webfont URLs are short and
+ * stable on Cloudflare Pages.
  */
 const fs = require('fs');
 const path = require('path');
@@ -10,10 +13,22 @@ const distDir = path.join(process.cwd(), 'dist');
 const assetsDir = path.join(distDir, 'assets');
 const sourceRoot = path.join(assetsDir, 'node_modules');
 const targetRoot = path.join(assetsDir, 'vendor');
+const fontsDir = path.join(distDir, 'fonts');
+const vectorIconFontsDir = path.join(
+  targetRoot,
+  '@expo',
+  'vector-icons',
+  'build',
+  'vendor',
+  'react-native-vector-icons',
+  'Fonts'
+);
 const jsDir = path.join(distDir, '_expo', 'static', 'js', 'web');
 
 const SEARCH = '/assets/node_modules/';
 const REPLACE = '/assets/vendor/';
+const FONT_SEARCH = '/assets/vendor/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/';
+const FONT_REPLACE = '/fonts/';
 
 function fail(msg) {
   console.error(`[prepare-pages-assets] ERROR: ${msg}`);
@@ -24,17 +39,33 @@ if (!fs.existsSync(distDir)) {
   fail(`dist directory not found. Run web export first.`);
 }
 
-if (!fs.existsSync(sourceRoot)) {
-  console.log(`[prepare-pages-assets] skip: ${sourceRoot} not found`);
-  process.exit(0);
-}
-
 if (!fs.existsSync(jsDir)) {
   fail(`JS bundle directory not found: ${jsDir}`);
 }
 
-fs.rmSync(targetRoot, { recursive: true, force: true });
-fs.cpSync(sourceRoot, targetRoot, { recursive: true });
+if (fs.existsSync(sourceRoot)) {
+  fs.rmSync(targetRoot, { recursive: true, force: true });
+  fs.cpSync(sourceRoot, targetRoot, { recursive: true });
+  fs.rmSync(sourceRoot, { recursive: true, force: true });
+} else {
+  console.log(`[prepare-pages-assets] skip move: ${sourceRoot} not found`);
+}
+
+if (fs.existsSync(vectorIconFontsDir)) {
+  fs.rmSync(fontsDir, { recursive: true, force: true });
+  fs.mkdirSync(fontsDir, { recursive: true });
+  const fontFiles = fs
+    .readdirSync(vectorIconFontsDir)
+    .filter((name) => name.toLowerCase().endsWith('.ttf'));
+  for (const fileName of fontFiles) {
+    const from = path.join(vectorIconFontsDir, fileName);
+    const to = path.join(fontsDir, fileName);
+    fs.copyFileSync(from, to);
+  }
+  console.log(`[prepare-pages-assets] copied ${fontFiles.length} font file(s) to ${fontsDir}.`);
+} else {
+  console.log(`[prepare-pages-assets] skip font flatten: ${vectorIconFontsDir} not found`);
+}
 
 const jsFiles = fs
   .readdirSync(jsDir)
@@ -46,27 +77,34 @@ if (jsFiles.length === 0) {
 }
 
 let patchedFiles = 0;
-let replacementCount = 0;
+let assetReplacementCount = 0;
+let fontReplacementCount = 0;
 
 for (const filePath of jsFiles) {
   const before = fs.readFileSync(filePath, 'utf8');
-  const count = before.split(SEARCH).length - 1;
-  if (count <= 0) continue;
+  const assetRefs = before.split(SEARCH).length - 1;
+  const afterAssets = assetRefs > 0 ? before.split(SEARCH).join(REPLACE) : before;
+  const fontRefs = afterAssets.split(FONT_SEARCH).length - 1;
+  const afterFonts = fontRefs > 0 ? afterAssets.split(FONT_SEARCH).join(FONT_REPLACE) : afterAssets;
+  if (before === afterFonts) continue;
 
-  const after = before.split(SEARCH).join(REPLACE);
-  fs.writeFileSync(filePath, after, 'utf8');
+  fs.writeFileSync(filePath, afterFonts, 'utf8');
 
   patchedFiles += 1;
-  replacementCount += count;
+  assetReplacementCount += Math.max(0, assetRefs);
+  fontReplacementCount += Math.max(0, fontRefs);
 }
 
-if (replacementCount === 0) {
-  fail(`No "${SEARCH}" references found in JS bundles.`);
-}
+const leftoverNodeModuleRefs = jsFiles.reduce((total, filePath) => {
+  const content = fs.readFileSync(filePath, 'utf8');
+  return total + (content.split(SEARCH).length - 1);
+}, 0);
 
-fs.rmSync(sourceRoot, { recursive: true, force: true });
+if (leftoverNodeModuleRefs > 0) {
+  fail(`"${SEARCH}" references still remain in JS bundles: ${leftoverNodeModuleRefs}`);
+}
 
 console.log(
-  `[prepare-pages-assets] patched ${patchedFiles} JS file(s), replaced ${replacementCount} reference(s).`
+  `[prepare-pages-assets] patched ${patchedFiles} JS file(s), replaced ${assetReplacementCount} asset reference(s), ${fontReplacementCount} font reference(s).`
 );
-console.log(`[prepare-pages-assets] moved assets from ${sourceRoot} to ${targetRoot}.`);
+console.log(`[prepare-pages-assets] finalized assets under ${targetRoot}.`);

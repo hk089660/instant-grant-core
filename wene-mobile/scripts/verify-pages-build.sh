@@ -64,7 +64,40 @@ fi
 log "OK: JS build matches (local dist == production JS bundle)."
 
 ############################################
-# Step 3: GET /v1/school/events の到達先確認
+# Step 3: アイコンフォント（Ionicons）が配信されることを確認
+############################################
+IONICONS_FONT_PATH="$(grep -Eo '/fonts/Ionicons\.[^"]+\.ttf' "${LOCAL_INDEX_JS}" | head -n 1 || true)"
+if [ -z "${IONICONS_FONT_PATH}" ]; then
+  IONICONS_FONT_PATH="$(grep -Eo '/fonts/[^"]+\.ttf' "${LOCAL_INDEX_JS}" | head -n 1 || true)"
+fi
+
+if [ -z "${IONICONS_FONT_PATH}" ]; then
+  fail "Could not find /fonts/*.ttf reference in local JS bundle."
+fi
+
+IONICONS_FONT_URL="${PAGES_BASE_URL}${IONICONS_FONT_PATH}"
+FONT_HEADERS="$(curl -sSIL "${IONICONS_FONT_URL}" 2>/dev/null || true)"
+if [ -z "$FONT_HEADERS" ]; then
+  fail "Could not fetch icon font: ${IONICONS_FONT_URL}"
+fi
+
+FONT_STATUS_CODE="$(printf '%s\n' "$FONT_HEADERS" | awk '/^HTTP/{code=$2} END{print code}')"
+FONT_CT_RAW="$(printf '%s\n' "$FONT_HEADERS" | grep -i '^content-type:' | tail -n 1 | sed -E 's/^content-type:\s*//I' | tr -d '\r')"
+
+log "CHECK: GET ${IONICONS_FONT_PATH} status=${FONT_STATUS_CODE} content-type=${FONT_CT_RAW}"
+
+if [ "${FONT_STATUS_CODE}" != "200" ]; then
+  fail "Expected HTTP 200 from ${IONICONS_FONT_PATH} but got ${FONT_STATUS_CODE}."
+fi
+
+if printf '%s\n' "$FONT_CT_RAW" | grep -Eqi 'text/html'; then
+  fail "${IONICONS_FONT_PATH} returned text/html (SPA rewrite likely swallowed font file)."
+fi
+
+log "OK: icon font is reachable (${IONICONS_FONT_PATH})."
+
+############################################
+# Step 4: GET /v1/school/events の到達先確認
 ############################################
 EVENTS_URL="${PAGES_BASE_URL}/v1/school/events"
 EVENTS_HEADERS="$(curl -sSIL "${EVENTS_URL}" 2>/dev/null || true)"
@@ -89,7 +122,7 @@ else
 fi
 
 ############################################
-# Step 4: POST /api/users/register の挙動確認
+# Step 5: POST /api/users/register の挙動確認
 ############################################
 REGISTER_URL="${PAGES_BASE_URL}/api/users/register"
 REGISTER_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
