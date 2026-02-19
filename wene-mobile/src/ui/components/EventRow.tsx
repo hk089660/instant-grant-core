@@ -11,6 +11,7 @@ interface EventRowProps {
   rightSlot?: React.ReactNode;
   onPress?: () => void;
   style?: ViewStyle;
+  textColor?: string;
 }
 
 export const EventRow: React.FC<EventRowProps> = ({
@@ -21,14 +22,23 @@ export const EventRow: React.FC<EventRowProps> = ({
   rightSlot,
   onPress,
   style,
+  textColor,
 }) => {
+  const textStyle = textColor ? { color: textColor } : undefined;
+
   return (
     <TouchableOpacity style={[styles.row, style]} onPress={onPress} disabled={!onPress}>
       {leftSlot ? <View style={styles.left}>{leftSlot}</View> : null}
       <View style={styles.body}>
-        <AppText variant="bodyLarge">{title}</AppText>
-        <AppText variant="caption">{datetime}</AppText>
-        <AppText variant="caption">主催: {host}</AppText>
+        <AppText variant="bodyLarge" style={textStyle}>
+          {title}
+        </AppText>
+        <AppText variant="caption" style={textStyle}>
+          {datetime}
+        </AppText>
+        <AppText variant="caption" style={textStyle}>
+          主催: {host}
+        </AppText>
       </View>
       {rightSlot ? <View style={styles.right}>{rightSlot}</View> : null}
     </TouchableOpacity>

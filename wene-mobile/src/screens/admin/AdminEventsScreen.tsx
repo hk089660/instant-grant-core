@@ -112,6 +112,7 @@ export const AdminEventsScreen: React.FC = () => {
                   title={event.title}
                   datetime={event.datetime}
                   host={event.host}
+                  textColor={adminTheme.colors.text}
                   leftSlot={
                     <CountBadge
                       value={event.claimedCount ?? 0}
