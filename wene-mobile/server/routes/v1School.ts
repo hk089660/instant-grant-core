@@ -21,6 +21,28 @@ export function createV1SchoolRouter(deps: V1SchoolDeps): Router {
     res.json({ items, nextCursor: undefined });
   });
 
+  // POST /v1/school/events — イベント新規作成（admin用）
+  router.post('/events', (req: Request, res: Response) => {
+    const body = req.body as { title?: string; datetime?: string; host?: string; state?: 'draft' | 'published' };
+    const title = typeof body?.title === 'string' ? body.title.trim() : '';
+    const datetime = typeof body?.datetime === 'string' ? body.datetime.trim() : '';
+    const host = typeof body?.host === 'string' ? body.host.trim() : '';
+    if (!title || !datetime || !host) {
+      res.status(400).json({ error: 'title, datetime, host are required' });
+      return;
+    }
+    const id = `evt-${Date.now().toString(36)}`;
+    const event: SchoolEvent = {
+      id,
+      title,
+      datetime,
+      host,
+      state: body.state ?? 'published',
+    };
+    storage.addEvent(event);
+    res.status(201).json(event);
+  });
+
   // GET /v1/school/events/:eventId
   router.get('/events/:eventId', (req: Request, res: Response) => {
     const event = storage.getEvent(req.params.eventId);
@@ -29,6 +51,23 @@ export function createV1SchoolRouter(deps: V1SchoolDeps): Router {
       return;
     }
     res.json(event as SchoolEvent);
+  });
+
+  // GET /v1/school/events/:eventId/claimants
+  router.get('/events/:eventId/claimants', (req: Request, res: Response) => {
+    const event = storage.getEvent(req.params.eventId);
+    if (!event) {
+      res.status(404).json({ code: 'not_found', message: 'イベントが見つかりません' });
+      return;
+    }
+    const claims = storage.getClaims(req.params.eventId);
+    const items = claims.map((c) => ({
+      subject: c.walletAddress ?? 'anonymous',
+      displayName: c.walletAddress ? c.walletAddress.slice(0, 8) + '…' : '匿名',
+      confirmationCode: Math.random().toString(36).slice(2, 8).toUpperCase(),
+      claimedAt: new Date(c.joinedAt).toISOString(),
+    }));
+    res.json({ eventId: req.params.eventId, eventTitle: event.title, items });
   });
 
   // POST /v1/school/claims

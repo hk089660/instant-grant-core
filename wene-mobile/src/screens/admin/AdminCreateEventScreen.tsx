@@ -14,11 +14,12 @@ import { httpPost } from '../../api/http/httpClient';
 import type { SchoolEvent } from '../../types/school';
 
 function getAdminBaseUrl(): string {
+    const envBase = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
+    if (envBase) return envBase;
     if (typeof window !== 'undefined' && window.location?.origin) {
         return window.location.origin;
     }
-    const base = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
-    return base;
+    return '';
 }
 
 type Step = 'form' | 'preview' | 'done';
@@ -133,6 +134,7 @@ export const AdminCreateEventScreen: React.FC = () => {
                     <Button
                         title="← イベント一覧"
                         variant="secondary"
+                        dark
                         onPress={() => router.push('/admin' as any)}
                         style={styles.backButton}
                     />
@@ -215,6 +217,7 @@ export const AdminCreateEventScreen: React.FC = () => {
                             <Button
                                 title="← 戻る"
                                 variant="secondary"
+                                dark
                                 onPress={() => { setStep('form'); setError(null); }}
                                 style={styles.halfButton}
                             />
@@ -278,6 +281,7 @@ export const AdminCreateEventScreen: React.FC = () => {
                             <Button
                                 title="印刷する"
                                 variant="secondary"
+                                dark
                                 onPress={handlePrint}
                                 style={styles.halfButton}
                             />

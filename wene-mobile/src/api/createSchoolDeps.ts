@@ -15,13 +15,13 @@ export interface SchoolDeps {
 let cached: SchoolDeps | null = null;
 
 function resolveBaseUrl(): string {
+  // 環境変数が明示的に設定されていればそちらを優先（ローカル開発用）
+  const envBase = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
+  if (envBase) return envBase;
   // Web: _redirects で /v1/* → Workers プロキシされるため同一オリジンを使用
   if (typeof window !== 'undefined' && window.location?.origin) {
     return window.location.origin;
   }
-  // Native: 環境変数から取得
-  const envBase = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
-  if (envBase) return envBase;
   throw new Error('EXPO_PUBLIC_API_BASE_URL is required for native builds');
 }
 

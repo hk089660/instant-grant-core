@@ -89,8 +89,8 @@ export const AdminEventDetailScreen: React.FC = () => {
       <AdminShell title="イベント詳細" role="admin">
         <View style={styles.center}>
           <AppText style={styles.errorText}>{error ?? 'イベントが見つかりません'}</AppText>
-          <Button title="再読み込み" variant="secondary" onPress={handleRefresh} style={{ marginTop: 12 }} />
-          <Button title="戻る" variant="secondary" onPress={() => router.back()} style={{ marginTop: 8 }} />
+          <Button title="再読み込み" variant="secondary" dark onPress={handleRefresh} style={{ marginTop: 12 }} />
+          <Button title="戻る" variant="secondary" dark onPress={() => router.back()} style={{ marginTop: 8 }} />
         </View>
       </AdminShell>
     );
@@ -104,8 +104,8 @@ export const AdminEventDetailScreen: React.FC = () => {
             イベント詳細
           </AppText>
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Button title="更新" variant="secondary" onPress={handleRefresh} />
-            <Button title="戻る" variant="secondary" onPress={() => router.back()} />
+            <Button title="更新" variant="secondary" dark onPress={handleRefresh} />
+            <Button title="戻る" variant="secondary" dark onPress={() => router.back()} />
           </View>
         </View>
 
@@ -154,6 +154,7 @@ export const AdminEventDetailScreen: React.FC = () => {
             <Button
               title="印刷用PDF"
               variant="secondary"
+              dark
               onPress={() => router.push(`/admin/print/${event.id}` as any)}
               style={{ marginTop: 12 }}
             />
@@ -207,6 +208,7 @@ export const AdminEventDetailScreen: React.FC = () => {
         <Button
           title="CSVダウンロード"
           variant="secondary"
+          dark
           onPress={() => {
             if (typeof window === 'undefined') return;
             const rows = [['表示名', 'サブジェクト', '確認コード', '参加時刻']];

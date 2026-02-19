@@ -7,10 +7,12 @@ import { httpGet, httpPost } from './http/httpClient';
 import type { SchoolEvent } from '../types/school';
 
 function getBaseUrl(): string {
+    const envBase = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
+    if (envBase) return envBase;
     if (typeof window !== 'undefined' && window.location?.origin) {
         return window.location.origin;
     }
-    return (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
+    return '';
 }
 
 /** イベント一覧取得 */

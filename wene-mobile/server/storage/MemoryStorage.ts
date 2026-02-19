@@ -31,6 +31,7 @@ const SEED_EVENTS: SchoolEvent[] = [
 export interface SchoolStorage {
   getEvents(): SchoolEvent[];
   getEvent(eventId: string): SchoolEvent | null;
+  addEvent(event: SchoolEvent): void;
   getClaims(eventId: string): ClaimRecord[];
   addClaim(eventId: string, walletAddress?: string, joinToken?: string): void;
 }
@@ -45,6 +46,9 @@ export function createMemoryStorage(): SchoolStorage {
     },
     getEvent(eventId: string) {
       return events.find((e) => e.id === eventId) ?? null;
+    },
+    addEvent(event: SchoolEvent) {
+      events.push(event);
     },
     getClaims(eventId: string) {
       return claims.filter((c) => c.eventId === eventId);

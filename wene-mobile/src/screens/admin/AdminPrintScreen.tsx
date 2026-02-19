@@ -104,7 +104,7 @@ export const AdminPrintScreen: React.FC = () => {
             <AppText variant="small" style={styles.role}>
               Admin
             </AppText>
-            <Button title="戻る" variant="secondary" onPress={() => router.back()} />
+            <Button title="戻る" variant="secondary" dark onPress={() => router.back()} />
           </View>
         </View>
 
@@ -165,7 +165,7 @@ export const AdminPrintScreen: React.FC = () => {
             </Card>
 
             <View {...printHiddenProps}>
-              <Button title="印刷する" variant="secondary" onPress={handlePrint} />
+              <Button title="印刷する" variant="secondary" dark onPress={handlePrint} />
             </View>
           </>
         )}
@@ -197,7 +197,7 @@ const styles = StyleSheet.create({
     marginBottom: adminTheme.spacing.xs,
   },
   title: {
-    color: adminTheme.colors.text,
+    color: '#000000',
   },
   card: {
     backgroundColor: adminTheme.colors.surface,
@@ -205,10 +205,10 @@ const styles = StyleSheet.create({
     marginBottom: adminTheme.spacing.lg,
   },
   cardText: {
-    color: adminTheme.colors.text,
+    color: '#000000',
   },
   cardMuted: {
-    color: adminTheme.colors.textSecondary,
+    color: '#666666',
   },
   qrBox: {
     height: 220,

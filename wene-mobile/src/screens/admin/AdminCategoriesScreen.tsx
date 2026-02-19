@@ -25,7 +25,7 @@ export const AdminCategoriesScreen: React.FC = () => {
           <AppText variant="h2" style={styles.title}>
             カテゴリ管理
           </AppText>
-          <Button title="戻る" variant="secondary" onPress={() => router.back()} />
+          <Button title="戻る" variant="secondary" dark onPress={() => router.back()} />
         </View>
 
         <AppText variant="caption" style={styles.note}>

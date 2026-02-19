@@ -13,6 +13,7 @@ interface ButtonProps {
   disabled?: boolean;
   loading?: boolean;
   style?: ViewStyle;
+  dark?: boolean;
 }
 
 export const Button: React.FC<ButtonProps> = ({
@@ -23,6 +24,7 @@ export const Button: React.FC<ButtonProps> = ({
   disabled = false,
   loading = false,
   style,
+  dark = false,
 }) => {
   const isDisabled = disabled || loading;
 
@@ -33,6 +35,7 @@ export const Button: React.FC<ButtonProps> = ({
         styles[variant],
         styles[size],
         isDisabled && styles.disabled,
+        dark && variant === 'secondary' && styles.secondaryDark,
         style,
       ]}
       onPress={onPress}
@@ -42,10 +45,15 @@ export const Button: React.FC<ButtonProps> = ({
       {loading ? (
         <ActivityIndicator
           size="small"
-          color={variant === 'primary' ? theme.colors.white : theme.colors.black}
+          color={variant === 'primary' ? theme.colors.white : (dark ? theme.colors.white : theme.colors.black)}
         />
       ) : (
-        <Text style={[styles.text, styles[`${variant}Text`], styles[`${size}Text`]]}>
+        <Text style={[
+          styles.text,
+          styles[`${variant}Text`],
+          styles[`${size}Text`],
+          dark && variant === 'secondary' && styles.secondaryDarkText,
+        ]}>
           {title}
         </Text>
       )}
@@ -90,6 +98,13 @@ const styles = StyleSheet.create({
   },
   secondaryText: {
     color: theme.colors.black,
+  },
+  secondaryDark: {
+    backgroundColor: '#222222',
+    borderColor: '#444444',
+  },
+  secondaryDarkText: {
+    color: '#ffffff',
   },
   largeText: {
     fontSize: 16,

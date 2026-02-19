@@ -91,6 +91,7 @@ export const AdminEventsScreen: React.FC = () => {
               <Button
                 title="再読み込み"
                 variant="secondary"
+                dark
                 onPress={handleRetry}
                 style={styles.retryButton}
               />
