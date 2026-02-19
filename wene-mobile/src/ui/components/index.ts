@@ -10,6 +10,7 @@ export { EventRow } from './EventRow';
 export { AdminSearchBar } from './AdminSearchBar';
 export { AdminShell } from './AdminShell';
 export { StatusBadge } from './StatusBadge';
+export { SettingsButton } from './SettingsButton';
 
 export {
   BalanceList,

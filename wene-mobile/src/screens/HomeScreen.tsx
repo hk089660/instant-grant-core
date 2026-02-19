@@ -1,6 +1,6 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
-import { useRouter, useNavigation } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { AppText, Button } from '../ui/components';
 import { theme } from '../ui/theme';
@@ -8,21 +8,6 @@ import { schoolRoutes } from '../lib/schoolRoutes';
 
 export const HomeScreen: React.FC = () => {
   const router = useRouter();
-  const navigation = useNavigation();
-
-  useEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
-        <TouchableOpacity
-          onPress={() => router.push('/wallet')}
-          style={styles.settingsButton}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Ionicons name="settings-outline" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-      ),
-    });
-  }, [navigation, router]);
 
   const handleGoToEvents = () => {
     router.push(schoolRoutes.events as any);
@@ -65,9 +50,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.background,
-  },
-  settingsButton: {
-    paddingRight: theme.spacing.md,
   },
   content: {
     flex: 1,
