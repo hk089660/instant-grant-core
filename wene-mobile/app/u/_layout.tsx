@@ -41,14 +41,12 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
 export default function ULayout() {
   return (
-    <AuthProvider>
-      <View style={styles.container}>
-        <WebOnlyBanner />
-        <AuthGate>
-          <Stack screenOptions={{ headerShown: false }} />
-        </AuthGate>
-      </View>
-    </AuthProvider>
+    <View style={styles.container}>
+      <WebOnlyBanner />
+      <AuthGate>
+        <Stack screenOptions={{ headerShown: false }} />
+      </AuthGate>
+    </View>
   );
 }
 

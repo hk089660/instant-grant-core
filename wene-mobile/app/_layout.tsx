@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { usePhantomStore } from '../src/store/phantomStore';
 import { useRecipientStore } from '../src/store/recipientStore';
 import { processPhantomUrl } from '../src/utils/phantomDeeplinkListener';
+import { AuthProvider } from '../src/contexts/AuthContext';
 
 export default function RootLayout() {
   const initRef = useRef(false);
@@ -49,18 +50,20 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <Stack
-        screenOptions={{
-          headerShown: false,
-        }}
-      >
-        <Stack.Screen name="(drawer)" />
-        <Stack.Screen name="r/[campaignId]" />
-        <Stack.Screen name="r/school/[eventId]" />
-        <Stack.Screen name="use/[campaignId]" />
-        <Stack.Screen name="phantom/[action]" />
-        <Stack.Screen name="phantom-callback" />
-      </Stack>
+      <AuthProvider>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+          }}
+        >
+          <Stack.Screen name="(drawer)" />
+          <Stack.Screen name="r/[campaignId]" />
+          <Stack.Screen name="r/school/[eventId]" />
+          <Stack.Screen name="use/[campaignId]" />
+          <Stack.Screen name="phantom/[action]" />
+          <Stack.Screen name="phantom-callback" />
+        </Stack>
+      </AuthProvider>
     </SafeAreaProvider>
   );
 }
