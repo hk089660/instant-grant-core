@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useCallback } from 'react';
-import { View, StyleSheet, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, StyleSheet, TextInput, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { AppText, Button } from '../../ui/components';
@@ -92,18 +92,28 @@ export const UserLoginScreen: React.FC = () => {
             </AppText>
           ) : null}
 
-          <Button
-            title={loading ? '確認中…' : '確認'}
-            onPress={handleVerify}
-            loading={loading}
-            disabled={loading}
-          />
-          <Button
-            title="戻る"
-            variant="secondary"
-            onPress={() => router.back()}
-            style={styles.secondaryButton}
-          />
+          <View style={styles.actionGroup}>
+            <Button
+              title={loading ? '確認中…' : '確認する'}
+              onPress={handleVerify}
+              loading={loading}
+              disabled={loading}
+            />
+            <Button
+              title="戻る"
+              variant="secondary"
+              onPress={() => router.back()}
+              style={styles.backButton}
+            />
+            <TouchableOpacity
+              onPress={() => router.push(schoolRoutes.register as any)}
+              style={styles.registerLink}
+            >
+              <AppText variant="caption" style={styles.registerLinkText}>
+                まだ登録していない方はこちら
+              </AppText>
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -149,7 +159,19 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.sm,
     marginBottom: theme.spacing.sm,
   },
-  secondaryButton: {
+  actionGroup: {
+    marginTop: theme.spacing.md,
+  },
+  backButton: {
     marginTop: theme.spacing.sm,
+  },
+  registerLink: {
+    marginTop: theme.spacing.md,
+    alignItems: 'center',
+    paddingVertical: theme.spacing.xs,
+  },
+  registerLinkText: {
+    color: theme.colors.textSecondary,
+    textDecorationLine: 'underline',
   },
 });

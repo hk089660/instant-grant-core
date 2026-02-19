@@ -306,23 +306,37 @@ export const UserScanScreen: React.FC = () => {
           {statusText}
         </AppText>
 
+        {/* メインアクション */}
         <Button
-          title={activeEventId ? `確認画面へ進む（${activeEventId}）` : 'QRを読み取ってください'}
+          title={activeEventId ? '確認画面へ進む' : 'QRを読み取ってください'}
           onPress={() => activeEventId && router.push(schoolRoutes.confirm(activeEventId) as any)}
           disabled={!activeEventId}
         />
-        <Button
-          title={isWeb ? (webDevices.length > 1 ? 'カメラ切替' : 'カメラ再接続') : 'カメラ切替'}
-          variant="secondary"
-          onPress={handleSwitchCamera}
-          style={styles.secondaryButton}
-        />
-        <Button
-          title="もう一度読み取る"
-          variant="secondary"
-          onPress={handleResetScan}
-          style={styles.secondaryButton}
-        />
+
+        {activeEventId && (
+          <AppText variant="small" style={styles.eventIdHint}>
+            イベントID: {activeEventId}
+          </AppText>
+        )}
+
+        {/* サブアクション（横並び） */}
+        <View style={styles.secondaryRow}>
+          <Button
+            title={isWeb ? (webDevices.length > 1 ? 'カメラ切替' : '再接続') : 'カメラ切替'}
+            variant="secondary"
+            size="medium"
+            onPress={handleSwitchCamera}
+            style={styles.secondaryHalf}
+          />
+          <Button
+            title="再読み取り"
+            variant="secondary"
+            size="medium"
+            onPress={handleResetScan}
+            style={styles.secondaryHalf}
+          />
+        </View>
+
         {isWeb ? (
           <AppText variant="small" style={styles.webHint}>
             Webで読めない場合: HTTPS（またはlocalhost）、カメラ権限、Safari/Firefox最新版を確認してください。
@@ -409,8 +423,19 @@ const styles = StyleSheet.create({
   errorText: {
     color: theme.colors.error,
   },
-  secondaryButton: {
-    marginTop: theme.spacing.sm,
+  eventIdHint: {
+    color: theme.colors.textTertiary,
+    textAlign: 'center',
+    marginTop: theme.spacing.xs,
+    marginBottom: theme.spacing.sm,
+  },
+  secondaryRow: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+    marginTop: theme.spacing.md,
+  },
+  secondaryHalf: {
+    flex: 1,
   },
   webHint: {
     marginTop: theme.spacing.md,

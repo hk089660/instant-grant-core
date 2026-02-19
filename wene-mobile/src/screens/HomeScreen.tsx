@@ -5,9 +5,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { AppText, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { schoolRoutes } from '../lib/schoolRoutes';
+import { useAuth } from '../contexts/AuthContext';
 
 export const HomeScreen: React.FC = () => {
   const router = useRouter();
+  const { userId, displayName } = useAuth();
 
   const handleGoToEvents = () => {
     router.push(schoolRoutes.events as any);
@@ -15,6 +17,14 @@ export const HomeScreen: React.FC = () => {
 
   const handleScanQR = () => {
     router.push(schoolRoutes.scan as any);
+  };
+
+  const handleRegister = () => {
+    router.push(schoolRoutes.register as any);
+  };
+
+  const handleLogin = () => {
+    router.push(schoolRoutes.login as any);
   };
 
   return (
@@ -27,20 +37,51 @@ export const HomeScreen: React.FC = () => {
           学校イベントの参加を記録するアプリ
         </AppText>
 
-        <Button
-          title="参加券を見る"
-          onPress={handleGoToEvents}
-          variant="primary"
-          disabled={false}
-          style={styles.mainButton}
-        />
+        {/* メインアクション */}
+        <View style={styles.actions}>
+          <Button
+            title="参加券を見る"
+            onPress={handleGoToEvents}
+            variant="primary"
+            disabled={false}
+            style={styles.mainButton}
+          />
 
-        <TouchableOpacity onPress={handleScanQR} style={styles.scanLink}>
-          <Ionicons name="qr-code-outline" size={18} color={theme.colors.textSecondary} />
-          <AppText variant="small" style={styles.scanLinkText}>
-            QRを読み取って参加する
-          </AppText>
-        </TouchableOpacity>
+          <TouchableOpacity onPress={handleScanQR} style={styles.scanLink}>
+            <Ionicons name="qr-code-outline" size={18} color={theme.colors.textSecondary} />
+            <AppText variant="caption" style={styles.scanLinkText}>
+              QRを読み取って参加する
+            </AppText>
+          </TouchableOpacity>
+        </View>
+
+        {/* 登録/ログイン案内 */}
+        {!userId ? (
+          <View style={styles.authSection}>
+            <View style={styles.divider} />
+            <AppText variant="caption" style={styles.authHint}>
+              はじめての方はこちら
+            </AppText>
+            <View style={styles.authButtons}>
+              <TouchableOpacity onPress={handleRegister} style={styles.authLink}>
+                <Ionicons name="person-add-outline" size={16} color={theme.colors.text} />
+                <AppText variant="body" style={styles.authLinkText}>参加登録</AppText>
+              </TouchableOpacity>
+              <View style={styles.authDot} />
+              <TouchableOpacity onPress={handleLogin} style={styles.authLink}>
+                <Ionicons name="log-in-outline" size={16} color={theme.colors.text} />
+                <AppText variant="body" style={styles.authLinkText}>ログイン</AppText>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.userBadge}>
+            <Ionicons name="person-circle-outline" size={16} color={theme.colors.textSecondary} />
+            <AppText variant="small" style={styles.userBadgeText}>
+              {displayName ?? 'ログイン済み'}
+            </AppText>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -58,23 +99,80 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
   },
   title: {
-    marginBottom: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
   },
   description: {
     marginBottom: theme.spacing.xxl,
     textAlign: 'center',
     color: theme.colors.textSecondary,
   },
+  actions: {
+    alignItems: 'center',
+    width: '100%',
+  },
   mainButton: {
     marginBottom: theme.spacing.md,
   },
   scanLink: {
-    padding: theme.spacing.sm,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
   scanLinkText: {
+    color: theme.colors.textSecondary,
+  },
+  // 登録/ログイン案内
+  authSection: {
+    marginTop: theme.spacing.xl,
+    alignItems: 'center',
+    width: '100%',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: theme.colors.divider,
+    width: 120,
+    marginBottom: theme.spacing.md,
+  },
+  authHint: {
+    color: theme.colors.textTertiary,
+    marginBottom: theme.spacing.sm,
+  },
+  authButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.md,
+  },
+  authLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.sm,
+  },
+  authLinkText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  authDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: theme.colors.gray300,
+  },
+  // ログイン済みバッジ
+  userBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: theme.spacing.xl,
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.md,
+    backgroundColor: theme.colors.gray100,
+    borderRadius: 20,
+  },
+  userBadgeText: {
     color: theme.colors.textSecondary,
   },
 });

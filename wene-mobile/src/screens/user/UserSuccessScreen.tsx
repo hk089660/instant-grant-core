@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Linking } from 'react-native';
+import { View, StyleSheet, Linking, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { AppText, Button, Card } from '../../ui/components';
 import { theme } from '../../ui/theme';
+import { Ionicons } from '@expo/vector-icons';
 import { setCompleted } from '../../data/participationStore';
 import { schoolRoutes } from '../../lib/schoolRoutes';
 import { useEventIdFromParams } from '../../hooks/useEventIdFromParams';
@@ -130,13 +131,24 @@ export const UserSuccessScreen: React.FC = () => {
           </Card>
         )}
 
-        <Button title="参加券一覧へ" onPress={() => router.replace(schoolRoutes.events as any)} />
-        <Button
-          title="続けて別のイベントに参加"
-          variant="secondary"
-          onPress={() => router.replace(schoolRoutes.scan as any)}
-          style={styles.secondaryButton}
-        />
+        {/* アクションボタン群 */}
+        <View style={styles.actionGroup}>
+          <Button title="参加券一覧へ" onPress={() => router.replace(schoolRoutes.events as any)} />
+          <Button
+            title="続けて別のイベントに参加"
+            variant="secondary"
+            onPress={() => router.replace(schoolRoutes.scan as any)}
+            style={styles.secondaryButton}
+          />
+        </View>
+
+        <TouchableOpacity
+          onPress={() => router.replace(schoolRoutes.home as any)}
+          style={styles.homeLink}
+        >
+          <Ionicons name="home-outline" size={14} color={theme.colors.textTertiary} />
+          <AppText variant="small" style={styles.homeLinkText}>ホームに戻る</AppText>
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -189,6 +201,20 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     marginTop: theme.spacing.sm,
+  },
+  actionGroup: {
+    marginTop: theme.spacing.sm,
+  },
+  homeLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    marginTop: theme.spacing.lg,
+    paddingVertical: theme.spacing.xs,
+  },
+  homeLinkText: {
+    color: theme.colors.textTertiary,
   },
   label: {
     marginBottom: theme.spacing.xs,

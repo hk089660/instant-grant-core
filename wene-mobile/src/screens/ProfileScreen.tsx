@@ -6,6 +6,7 @@ import { AppText, Button, Card, CategoryTabs, BalanceList, BALANCE_LIST_DUMMY } 
 import { theme } from '../ui/theme';
 import { useRecipientStore } from '../store/recipientStore';
 import { usePhantomStore } from '../store/phantomStore';
+import { useAuth } from '../contexts/AuthContext';
 
 const CATEGORIES = [
     { id: 'profile', label: '登録情報' },
@@ -16,10 +17,12 @@ export const ProfileScreen: React.FC = () => {
     const router = useRouter();
     const { walletPubkey } = useRecipientStore();
     const { clearPhantomKeys } = usePhantomStore();
+    const { userId, displayName: authDisplayName, clearUser } = useAuth();
     const [activeTab, setActiveTab] = useState('profile');
 
     const handleLogout = async () => {
         await clearPhantomKeys();
+        clearUser();
         router.replace('/');
     };
 
@@ -47,7 +50,7 @@ export const ProfileScreen: React.FC = () => {
                                     ユーザー名
                                 </AppText>
                                 <AppText variant="body" style={styles.value}>
-                                    未設定
+                                    {authDisplayName ?? '未設定'}
                                 </AppText>
                             </View>
                             <View style={styles.divider} />

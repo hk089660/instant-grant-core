@@ -146,24 +146,32 @@ export const UserConfirmScreen: React.FC = () => {
           </AppText>
         ) : null}
 
-        <Button
-          title={
-            status === 'loading'
-              ? '処理中…'
-              : showPinInput
-                ? '参加を確定する'
-                : '参加する'
-          }
-          onPress={handleParticipate}
-          loading={status === 'loading'}
-          disabled={status === 'loading' || !event || (event.state != null && event.state !== 'published')}
-        />
-        <Button
-          title="戻る"
-          variant="secondary"
-          onPress={() => router.back()}
-          style={styles.secondaryButton}
-        />
+        {/* アクションボタン群 */}
+        <View style={styles.actionGroup}>
+          <Button
+            title={
+              status === 'loading'
+                ? '処理中…'
+                : showPinInput
+                  ? '参加を確定する'
+                  : '参加する'
+            }
+            onPress={handleParticipate}
+            loading={status === 'loading'}
+            disabled={status === 'loading' || !event || (event.state != null && event.state !== 'published')}
+          />
+          {!showPinInput && event && event.state === 'published' && (
+            <AppText variant="small" style={styles.actionHint}>
+              PINを入力して参加を確定します
+            </AppText>
+          )}
+          <Button
+            title="戻る"
+            variant="secondary"
+            onPress={() => router.back()}
+            style={styles.backButton}
+          />
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -237,7 +245,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     letterSpacing: 8,
   },
-  secondaryButton: {
+  actionGroup: {
+    marginTop: theme.spacing.sm,
+  },
+  actionHint: {
+    color: theme.colors.textTertiary,
+    textAlign: 'center',
+    marginTop: theme.spacing.xs,
+  },
+  backButton: {
     marginTop: theme.spacing.sm,
   },
   apiErrorText: {

@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useCallback } from 'react';
-import { View, StyleSheet, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, StyleSheet, TextInput, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { AppText, Button } from '../../ui/components';
@@ -104,12 +104,22 @@ export const UserRegisterScreen: React.FC = () => {
             </AppText>
           ) : null}
 
-          <Button
-            title={loading ? '登録中…' : '登録'}
-            onPress={handleRegister}
-            loading={loading}
-            disabled={loading}
-          />
+          <View style={styles.actionGroup}>
+            <Button
+              title={loading ? '登録中…' : '登録する'}
+              onPress={handleRegister}
+              loading={loading}
+              disabled={loading}
+            />
+            <TouchableOpacity
+              onPress={() => router.push(schoolRoutes.login as any)}
+              style={styles.loginLink}
+            >
+              <AppText variant="caption" style={styles.loginLinkText}>
+                既に登録済みの方はこちら
+              </AppText>
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -154,5 +164,17 @@ const styles = StyleSheet.create({
     color: theme.colors.error,
     marginTop: theme.spacing.sm,
     marginBottom: theme.spacing.sm,
+  },
+  actionGroup: {
+    marginTop: theme.spacing.md,
+  },
+  loginLink: {
+    marginTop: theme.spacing.md,
+    alignItems: 'center',
+    paddingVertical: theme.spacing.xs,
+  },
+  loginLinkText: {
+    color: theme.colors.textSecondary,
+    textDecorationLine: 'underline',
   },
 });

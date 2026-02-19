@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { AppText, Button, EventRow, StatusDot } from '../../ui/components';
 import { theme } from '../../ui/theme';
+import { Ionicons } from '@expo/vector-icons';
 import { useRecipientTicketStore } from '../../store/recipientTicketStore';
 import { getSchoolDeps } from '../../api/createSchoolDeps';
 import { schoolRoutes } from '../../lib/schoolRoutes';
