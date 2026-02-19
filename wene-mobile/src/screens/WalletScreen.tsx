@@ -24,6 +24,7 @@ import {
 import { AppText, Card, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { initiatePhantomConnect } from '../utils/phantom';
+import { setPhantomWebReturnPath } from '../utils/phantomWebReturnPath';
 import * as nacl from 'tweetnacl';
 
 const LAMPORTS_PER_SOL = 1e9;
@@ -107,6 +108,10 @@ export const WalletScreen: React.FC = () => {
       const redirectLink = isWeb
         ? `${window.location.origin}/phantom-callback`
         : 'wene://phantom/connect';
+      if (isWeb) {
+        const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        setPhantomWebReturnPath(returnPath);
+      }
 
       // Phantom接続を開始
       await initiatePhantomConnect(

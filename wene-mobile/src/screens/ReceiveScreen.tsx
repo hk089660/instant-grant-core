@@ -17,6 +17,7 @@ import { buildClaimTx } from '../solana/txBuilders';
 import { signTransaction, initiatePhantomConnect, buildPhantomConnectUrl } from '../utils/phantom';
 import { rejectPendingSignTx } from '../utils/phantomSignTxPending';
 import { getLastPhantomDebug } from '../utils/phantomUrlDebug';
+import { setPhantomWebReturnPath } from '../utils/phantomWebReturnPath';
 import { sendSignedTx, isBlockhashExpiredError, isSimulationFailedError } from '../solana/sendTx';
 import { getConnection } from '../solana/anchorClient';
 import { RPC_URL } from '../solana/singleton';
@@ -419,6 +420,8 @@ ${st.balanceLamports ?? 'null'}
       const appUrl = isWeb ? window.location.origin : 'https://wene.app';
       let redirectLink: string;
       if (isWeb) {
+        const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        setPhantomWebReturnPath(returnPath);
         redirectLink = window.location.origin + PHANTOM_CALLBACK_PATH;
         if (!redirectLink.startsWith('https://')) {
           console.warn('[handleConnect] redirect_link is not HTTPS on web:', redirectLink);

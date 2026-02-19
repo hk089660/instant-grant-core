@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useRecipientStore } from '../src/store/recipientStore';
 import { usePhantomStore } from '../src/store/phantomStore';
 import { handlePhantomConnectRedirect } from '../src/utils/phantom';
+import { consumePhantomWebReturnPath } from '../src/utils/phantomWebReturnPath';
 import { AppText } from '../src/ui/components';
 import { theme } from '../src/ui/theme';
 
@@ -20,6 +21,12 @@ export default function PhantomCallbackScreen() {
   const { loadKeyPair, savePhantomConnectResult, setPhantomEncryptionPublicKey } = usePhantomStore();
   const [status, setStatus] = useState<'idle' | 'error' | 'done'>('idle');
   const [message, setMessage] = useState<string>('');
+  const [returnPath] = useState<string>(() => {
+    if (Platform.OS === 'web') {
+      return consumePhantomWebReturnPath() ?? '/u';
+    }
+    return '/u';
+  });
   const doneRef = useRef(false);
 
   useEffect(() => {
@@ -90,7 +97,7 @@ export default function PhantomCallbackScreen() {
           setPhantomSession(result.result.session);
           setState('Connected');
           setStatus('done');
-          router.replace('/u' as any);
+          router.replace(returnPath as any);
         } else {
           setStatus('error');
           setMessage(result.error || '接続に失敗しました。');
@@ -106,7 +113,7 @@ export default function PhantomCallbackScreen() {
     run();
 
     return () => clearTimeout(timeoutId);
-  }, [loadKeyPair, savePhantomConnectResult, setPhantomEncryptionPublicKey, setWalletPubkey, setPhantomSession, setState, router]);
+  }, [loadKeyPair, savePhantomConnectResult, setPhantomEncryptionPublicKey, setWalletPubkey, setPhantomSession, setState, router, returnPath]);
 
   if (status === 'idle') {
     return (
@@ -128,7 +135,7 @@ export default function PhantomCallbackScreen() {
           {message}
         </AppText>
         <TouchableOpacity
-          onPress={() => router.replace('/u' as any)}
+          onPress={() => router.replace(returnPath as any)}
           style={styles.link}
         >
           <AppText variant="body" style={styles.linkText}>
