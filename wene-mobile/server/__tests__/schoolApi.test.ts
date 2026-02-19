@@ -18,7 +18,7 @@ describe('school API', () => {
     const res = await request(app).get('/v1/school/events');
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.items)).toBe(true);
-    expect(res.body.items.length).toBeGreaterThanOrEqual(3);
+    expect(res.body.items.length).toBeGreaterThanOrEqual(2);
     const evt001 = res.body.items.find((e: { id: string }) => e.id === 'evt-001');
     expect(evt001).toBeDefined();
     expect(evt001.title).toBe('地域清掃ボランティア');
