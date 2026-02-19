@@ -31,8 +31,9 @@ export default function MasterLayout() {
         if (isAuthorized === false) {
             // If not authorized and not on login screen, redirect
             // Ensure we don't loop if already on login
-            // segments for /master/login would be ['master', 'login']
-            const inLoginGroup = segments[1] === 'login';
+            // `useSegments()` can be inferred as a tuple in typed-routes mode,
+            // so avoid fixed index access like segments[1].
+            const inLoginGroup = segments[segments.length - 1] === 'login';
             if (!inLoginGroup) {
                 router.replace('/master/login');
             }
