@@ -16,7 +16,7 @@ export async function onRequest(context: PagesFunctionContext): Promise<Response
     return context.next();
   }
 
-  const WORKER_ORIGIN = "https://we-ne-school-api.haruki-kira3.workers.dev";
+  const WORKER_ORIGIN = "https://instant-grant-core.haruki-kira3.workers.dev";
   const target = new URL(url.pathname + url.search, WORKER_ORIGIN);
 
   const init: RequestInit = {
