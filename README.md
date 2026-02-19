@@ -12,6 +12,8 @@ No installation required. Experience the lightning-fast approval process powered
 
 [🚀 **Launch We-ne (Web App)**](https://instant-grant-core.pages.dev/)
 
+[🚀 **Launch We-ne (Web admin App)**](https://instant-grant-core.pages.dev/admin/login)
+
 ---
 
 ## 📖 Project Overview
@@ -172,12 +174,8 @@ Cloudflare Pages configuration for this monorepo:
 
 Prerequisites for `export:web`:
 
-- Set Worker URL to `EXPO_PUBLIC_API_BASE_URL`.
-- `npm run export:web` runs these steps in order:
-  1. `expo export -p web`
-  2. `scripts/prepare-pages-assets.js` (moves `dist/assets/node_modules/**` to `dist/assets/vendor/**` and rewrites bundle paths for Pages deploy stability)
-  3. `scripts/gen-redirects.js` (generates proxy redirects for `/api/*` and `/v1/*`)
-- If `EXPO_PUBLIC_API_BASE_URL` is unset, `scripts/gen-redirects.js` fails and proxy redirects are not generated. In that case `/api/*` and `/v1/*` may hit Pages directly and return `405` or HTML.
+- Set Worker URL to `EXPO_PUBLIC_API_BASE_URL` (or `EXPO_PUBLIC_SCHOOL_API_BASE_URL`).
+- If unset, `scripts/gen-redirects.js` will fail. If proxy redirects are not generated, `/api/*` and `/v1/*` may hit Pages directly and return `405` or HTML.
 
 Copy-paste Deploy Command:
 
@@ -214,7 +212,6 @@ npm run verify:pages
 Check items for `verify:pages`:
 
 - Bundle SHA256 for `/admin` matches local `dist`.
-- Web bundles reference `/assets/vendor/` (not `/assets/node_modules/`) after export.
 - `GET /v1/school/events` returns `200` and `application/json`.
 - `POST /api/users/register` is **NOT `405 Method Not Allowed`**.
 
@@ -240,9 +237,9 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
 ## Detailed Documentation
 
 - School PoC guide: `wene-mobile/README_SCHOOL.md`
-- Cloudflare Pages deployment notes: `wene-mobile/docs/CLOUDFLARE_PAGES.md`
-- Worker API details: `api-worker/README.md`
-- Devnet setup: `docs/DEVNET_SETUP.md`
+- Cloudflare Pages deployment notes: `CLOUDFLARE_PAGES.md`
+- Worker API details: `README.md`
+- Devnet setup: `DEVNET_SETUP.md`
 
 ## Context for Judges
 

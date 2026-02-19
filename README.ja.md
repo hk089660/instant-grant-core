@@ -12,6 +12,8 @@ Asuka Network上で稼働する最初の行政・公共向けリファレンス�
 
 [🚀 **Launch We-ne (Web App)**](https://instant-grant-core.pages.dev/)
 
+[🚀 **Launch We-ne (Web admin App)**](https://instant-grant-core.pages.dev/admin/login)
+
 ---
 
 ## 📖 プロジェクト概要
@@ -174,12 +176,8 @@ npm run dev:full
 
 \`export:web\` の必須条件:
 
-- \`EXPO_PUBLIC_API_BASE_URL\` に Worker URL を設定する。
-- \`npm run export:web\` は次を順番に実行する:
-  1. \`expo export -p web\`
-  2. \`scripts/prepare-pages-assets.js\`（\`dist/assets/node_modules/**\` を \`dist/assets/vendor/**\` へ移動し、Pages 配信向けに bundle 内パスを書き換える）
-  3. \`scripts/gen-redirects.js\`（\`/api/*\` と \`/v1/*\` の proxy リダイレクトを生成）
-- \`EXPO_PUBLIC_API_BASE_URL\` が未設定だと \`scripts/gen-redirects.js\` が失敗し、proxy リダイレクトが生成されない。その場合 \`/api/*\` と \`/v1/*\` が Pages に直接当たり \`405\` や HTML を返す場合がある。
+- \`EXPO_PUBLIC_API_BASE_URL\`（または \`EXPO_PUBLIC_SCHOOL_API_BASE_URL\`）に Worker URL を設定する。
+- 未設定の場合、\`scripts/gen-redirects.js\` が失敗する。proxy 用リダイレクトが生成されないと、\`/api/*\` と \`/v1/*\` が Pages に直接当たり \`405\` や HTML を返す場合がある。
 
 コピペ用デプロイコマンド:
 
@@ -216,7 +214,6 @@ npm run verify:pages
 \`verify:pages\` の確認項目:
 
 - \`/admin\` の配信 bundle SHA256 がローカル \`dist\` と一致する。
-- export 後の bundle が \`/assets/vendor/\` を参照している（\`/assets/node_modules/\` 参照が残っていない）。
 - \`GET /v1/school/events\` が \`200\` かつ \`application/json\` を返す。
 - \`POST /api/users/register\` が **\`405 Method Not Allowed\` ではない**。
 
@@ -242,9 +239,9 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST \\
 ## 詳細ドキュメント
 
 - School PoC guide: \`wene-mobile/README_SCHOOL.md\`
-- Cloudflare Pages deployment notes: \`wene-mobile/docs/CLOUDFLARE_PAGES.md\`
-- Worker API details: \`api-worker/README.md\`
-- Devnet setup: \`docs/DEVNET_SETUP.md\`
+- Cloudflare Pages deployment notes: \`CLOUDFLARE_PAGES.md\`
+- Worker API details: \`README.md\`
+- Devnet setup: \`DEVNET_SETUP.md\`
 
 ## 審査員向けコンテキスト
 
