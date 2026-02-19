@@ -62,6 +62,9 @@ export default function RootLayout() {
           <Stack.Screen name="use/[campaignId]" />
           <Stack.Screen name="phantom/[action]" />
           <Stack.Screen name="phantom-callback" />
+          {/* 追加: ユーザー画面・管理者画面 */}
+          <Stack.Screen name="u" />
+          <Stack.Screen name="admin" />
         </Stack>
       </AuthProvider>
     </SafeAreaProvider>

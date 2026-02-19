@@ -5,6 +5,7 @@
 
 import express, { Express } from 'express';
 import { createV1SchoolRouter } from './routes/v1School';
+import { createApiRouter } from './routes/api';
 import type { SchoolStorage } from './storage/MemoryStorage';
 import type { Clock } from './clock';
 
@@ -15,7 +16,7 @@ export interface CreateServerOptions {
 }
 
 export function createServer(options: CreateServerOptions): Express {
-  const { storage, logger = () => {} } = options;
+  const { storage, logger = () => { } } = options;
   const app = express();
 
   app.use(express.json());
@@ -29,6 +30,9 @@ export function createServer(options: CreateServerOptions): Express {
   app.options('*', (_req, res) => res.sendStatus(204));
 
   app.use('/v1/school', createV1SchoolRouter({ storage }));
+
+  // /api/users/register などの実装
+  app.use('/api', createApiRouter({ storage }));
 
   app.get('/health', (_req, res) => {
     res.json({ ok: true });

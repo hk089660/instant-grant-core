@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { setCompleted } from '../../data/participationStore';
 import { schoolRoutes } from '../../lib/schoolRoutes';
 import { useEventIdFromParams } from '../../hooks/useEventIdFromParams';
+import { useRecipientTicketStore } from '../../store/recipientTicketStore';
 import { getSchoolDeps } from '../../api/createSchoolDeps';
 import type { SchoolEvent } from '../../types/school';
 
@@ -23,22 +24,33 @@ export const UserSuccessScreen: React.FC = () => {
   }>();
 
   const [event, setEvent] = useState<SchoolEvent | null>(null);
+  const { addTicket } = useRecipientTicketStore();
 
   useEffect(() => {
     if (!targetEventId) return;
     setCompleted(targetEventId).catch(() => { });
   }, [targetEventId]);
 
-  // イベント情報を取得して表示
+  // イベント情報を取得して表示 & ストアに追加
   useEffect(() => {
     if (!targetEventId) return;
     let cancelled = false;
     getSchoolDeps()
       .eventProvider.getById(targetEventId)
-      .then((ev) => { if (!cancelled) setEvent(ev ?? null); })
+      .then((ev) => {
+        if (!cancelled && ev) {
+          setEvent(ev);
+          // ストアに参加チケットを追加して一覧に反映
+          addTicket({
+            eventId: ev.id,
+            eventName: ev.title,
+            joinedAt: Date.now(),
+          });
+        }
+      })
       .catch(() => { if (!cancelled) setEvent(null); });
     return () => { cancelled = true; };
-  }, [targetEventId]);
+  }, [targetEventId, addTicket]);
 
   const isAlready = already === '1' || status === 'already';
   const explorerTxUrl = tx ? `https://explorer.solana.com/tx/${tx}?cluster=devnet` : null;

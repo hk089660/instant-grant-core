@@ -5,9 +5,17 @@
 
 import type { SchoolEvent } from '../../src/types/school';
 
+export interface UserRecord {
+  id: string;
+  displayName: string;
+  pinHash: string;
+}
+
 export interface ClaimRecord {
   eventId: string;
-  walletAddress?: string;
+  walletAddress?: string; // 旧来の互換性のため残す
+  userId?: string;
+  confirmationCode?: string;
   joinedAt: number;
 }
 
@@ -32,13 +40,23 @@ export interface SchoolStorage {
   getEvents(): SchoolEvent[];
   getEvent(eventId: string): SchoolEvent | null;
   addEvent(event: SchoolEvent): void;
+
+  // Claims
   getClaims(eventId: string): ClaimRecord[];
   addClaim(eventId: string, walletAddress?: string, joinToken?: string): void;
+
+  // User & User Claims
+  addUser(user: UserRecord): void;
+  getUser(userId: string): UserRecord | null;
+  addUserClaim(eventId: string, userId: string, confirmationCode: string): void;
+  hasClaimed(eventId: string, userId: string): boolean;
+  getUserClaims(userId: string): ClaimRecord[];
 }
 
 export function createMemoryStorage(): SchoolStorage {
   const events = [...SEED_EVENTS];
   const claims: ClaimRecord[] = [];
+  const users: UserRecord[] = [];
 
   return {
     getEvents() {
@@ -59,6 +77,28 @@ export function createMemoryStorage(): SchoolStorage {
         walletAddress,
         joinedAt: Date.now(),
       });
+    },
+
+    // User related implementation
+    addUser(user: UserRecord) {
+      users.push(user);
+    },
+    getUser(userId: string) {
+      return users.find((u) => u.id === userId) ?? null;
+    },
+    addUserClaim(eventId: string, userId: string, confirmationCode: string) {
+      claims.push({
+        eventId,
+        userId,
+        confirmationCode,
+        joinedAt: Date.now(),
+      });
+    },
+    hasClaimed(eventId: string, userId: string): boolean {
+      return claims.some((c) => c.eventId === eventId && c.userId === userId);
+    },
+    getUserClaims(userId: string): ClaimRecord[] {
+      return claims.filter((c) => c.userId === userId);
     },
   };
 }
