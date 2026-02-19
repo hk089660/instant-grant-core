@@ -7,12 +7,12 @@ import { httpGet, httpPost } from './http/httpClient';
 import type { SchoolEvent } from '../types/school';
 
 function getBaseUrl(): string {
-    const envBase = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
-    if (envBase) return envBase;
     if (typeof window !== 'undefined' && window.location?.origin) {
         return window.location.origin;
     }
-    return '';
+    const envBase = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
+    if (envBase) return envBase;
+    throw new Error('EXPO_PUBLIC_API_BASE_URL is required for native builds');
 }
 
 /** イベント一覧取得 */
@@ -153,4 +153,3 @@ export async function fetchMasterAuditLogs(masterPassword: string): Promise<Mast
     const json = await res.json();
     return json.logs || [];
 }
-

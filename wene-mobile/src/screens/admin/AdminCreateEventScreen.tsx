@@ -14,12 +14,12 @@ import { httpPost } from '../../api/http/httpClient';
 import type { SchoolEvent } from '../../types/school';
 
 function getAdminBaseUrl(): string {
-    const envBase = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
-    if (envBase) return envBase;
     if (typeof window !== 'undefined' && window.location?.origin) {
         return window.location.origin;
     }
-    return '';
+    const envBase = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
+    if (envBase) return envBase;
+    throw new Error('EXPO_PUBLIC_API_BASE_URL is required for native builds');
 }
 
 type Step = 'form' | 'preview' | 'done';
