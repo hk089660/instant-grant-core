@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, StyleSheet, ScrollView, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as QRCode from 'qrcode';
-import { AppText, Button, Card, AdminShell } from '../../ui/components';
+import { AppText, Button, Card, AdminShell, Loading } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
 import { fetchAdminEvent, fetchClaimants, type Claimant } from '../../api/adminApi';
 import type { SchoolEvent } from '../../types/school';
@@ -78,7 +78,7 @@ export const AdminEventDetailScreen: React.FC = () => {
     return (
       <AdminShell title="イベント詳細" role="admin">
         <View style={styles.center}>
-          <AppText style={styles.muted}>読み込み中…</AppText>
+          <Loading message="イベント詳細を読み込み中です..." size="large" />
         </View>
       </AdminShell>
     );

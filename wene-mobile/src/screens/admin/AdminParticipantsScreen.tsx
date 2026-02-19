@@ -2,10 +2,10 @@
  * Admin 参加者検索画面
  * 全イベントの参加者を一覧表示（API から取得）
  */
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { View, StyleSheet, ScrollView, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
-import { AppText, Button, Card, AdminShell } from '../../ui/components';
+import { AppText, Button, Card, AdminShell, Loading } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
 import { fetchAdminEvents, fetchClaimants, type Claimant } from '../../api/adminApi';
 
@@ -21,44 +21,71 @@ export const AdminParticipantsScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const buildParticipantLogs = useCallback(async (): Promise<ParticipantLog[]> => {
+    const events = await fetchAdminEvents();
+    const perEvent = await Promise.all(
+      events.map(async (ev) => {
+        try {
+          const res = await fetchClaimants(ev.id);
+          return res.items.map((c) => ({
+            ...c,
+            eventId: ev.id,
+            eventTitle: res.eventTitle,
+          }));
+        } catch {
+          return [];
+        }
+      })
+    );
+
+    const all = perEvent.flat();
+    all.sort((a, b) => {
+      const ta = a.claimedAt ? new Date(a.claimedAt).getTime() : 0;
+      const tb = b.claimedAt ? new Date(b.claimedAt).getTime() : 0;
+      return tb - ta;
+    });
+    return all;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
 
-    fetchAdminEvents()
-      .then(async (events) => {
-        // 各イベントの参加者を並列取得
-        const all: ParticipantLog[] = [];
-        await Promise.all(
-          events.map(async (ev) => {
-            try {
-              const res = await fetchClaimants(ev.id);
-              res.items.forEach((c) => {
-                all.push({ ...c, eventId: ev.id, eventTitle: res.eventTitle });
-              });
-            } catch {
-              // skip individual failures
-            }
-          })
-        );
-        // 新しい順
-        all.sort((a, b) => {
-          const ta = a.claimedAt ? new Date(a.claimedAt).getTime() : 0;
-          const tb = b.claimedAt ? new Date(b.claimedAt).getTime() : 0;
-          return tb - ta;
-        });
-        if (!cancelled) setLogs(all);
+    buildParticipantLogs()
+      .then((items) => {
+        if (!cancelled) {
+          setLogs(items);
+        }
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : '読み込みに失敗しました');
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : '読み込みに失敗しました');
+          setLogs([]);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
 
     return () => { cancelled = true; };
-  }, []);
+  }, [buildParticipantLogs]);
+
+  const handleRetry = () => {
+    setLoading(true);
+    setError(null);
+    buildParticipantLogs()
+      .then((items) => {
+        setLogs(items);
+      })
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : '読み込みに失敗しました');
+        setLogs([]);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  };
 
   const filtered = useMemo(() => {
     if (!query.trim()) return logs;
@@ -102,13 +129,24 @@ export const AdminParticipantsScreen: React.FC = () => {
           {loading ? '読み込み中…' : `${filtered.length} 件`}
         </AppText>
 
-        {error ? (
+        {loading ? (
+          <Card style={styles.card}>
+            <Loading message="参加者データを読み込み中です..." size="large" />
+          </Card>
+        ) : error ? (
           <Card style={styles.card}>
             <AppText style={styles.errorText}>{error}</AppText>
+            <Button
+              title="再読み込み"
+              variant="secondary"
+              dark
+              onPress={handleRetry}
+              style={styles.retryButton}
+            />
           </Card>
         ) : (
           <Card style={styles.card}>
-            {filtered.length === 0 && !loading ? (
+            {filtered.length === 0 ? (
               <AppText variant="caption" style={styles.cardMuted}>
                 該当する参加者が見つかりません
               </AppText>
@@ -181,6 +219,9 @@ const styles = StyleSheet.create({
   cardMuted: { color: adminTheme.colors.textSecondary, marginTop: 1 },
   cardDim: { color: adminTheme.colors.textTertiary, marginTop: 1, fontSize: 11 },
   errorText: { color: '#ff6b6b' },
+  retryButton: {
+    marginTop: adminTheme.spacing.sm,
+  },
   resultRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

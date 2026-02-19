@@ -8,13 +8,6 @@ import { useRouter } from 'expo-router';
 import { AppText, Button, Card, AdminShell } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
 
-const CATEGORIES = [
-  { id: 'all', label: 'すべて' },
-  { id: 'volunteer', label: 'ボランティア' },
-  { id: 'school', label: '学校行事' },
-  { id: 'other', label: '未分類（Other）' },
-];
-
 export const AdminCategoriesScreen: React.FC = () => {
   const router = useRouter();
 
@@ -33,16 +26,12 @@ export const AdminCategoriesScreen: React.FC = () => {
         </AppText>
 
         <Card style={styles.card}>
-          {CATEGORIES.map((category) => (
-            <View key={category.id} style={styles.row}>
-              <AppText variant="body" style={styles.cardText}>
-                {category.label}
-              </AppText>
-              <AppText variant="small" style={styles.cardDim}>
-                {category.id}
-              </AppText>
-            </View>
-          ))}
+          <AppText variant="body" style={styles.cardText}>
+            カテゴリ一覧は Worker API からの取得に統一予定です。
+          </AppText>
+          <AppText variant="small" style={styles.cardDim}>
+            現在この画面では静的データを表示しません。
+          </AppText>
         </Card>
       </ScrollView>
     </AdminShell>
@@ -70,11 +59,6 @@ const styles = StyleSheet.create({
     padding: adminTheme.spacing.md,
     marginBottom: adminTheme.spacing.lg,
   },
-  row: {
-    borderBottomWidth: 1,
-    borderBottomColor: adminTheme.colors.border,
-    paddingVertical: adminTheme.spacing.sm,
-  },
   cardText: { color: adminTheme.colors.text },
-  cardDim: { color: adminTheme.colors.textTertiary, marginTop: 2 },
+  cardDim: { color: adminTheme.colors.textTertiary, marginTop: adminTheme.spacing.sm },
 });

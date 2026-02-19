@@ -14,6 +14,14 @@ export interface SchoolDeps {
 
 let cached: SchoolDeps | null = null;
 
+function resolveApiMode(): 'http' {
+  const apiMode = (process.env.EXPO_PUBLIC_API_MODE ?? 'http').trim().toLowerCase();
+  if (apiMode && apiMode !== 'http') {
+    console.warn(`[createSchoolDeps] EXPO_PUBLIC_API_MODE="${apiMode}" is unsupported. Falling back to "http".`);
+  }
+  return 'http';
+}
+
 function resolveBaseUrl(): string {
   // 環境変数が明示的に設定されていればそちらを優先（ローカル開発用）
   const envBase = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
@@ -26,6 +34,8 @@ function resolveBaseUrl(): string {
 }
 
 export function createSchoolDeps(): SchoolDeps {
+  // Default mode is always "http" in production-safe configuration.
+  resolveApiMode();
   const baseUrl = resolveBaseUrl();
   return {
     eventProvider: createHttpSchoolEventProvider({ baseUrl }),

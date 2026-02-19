@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
-import { AppText, Button, CountBadge, EventRow, AdminShell, StatusBadge } from '../../ui/components';
+import { AppText, Button, CountBadge, EventRow, AdminShell, StatusBadge, Loading } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
-import { getSchoolDeps } from '../../api/createSchoolDeps';
+import { fetchAdminEvents } from '../../api/adminApi';
 import type { SchoolEvent } from '../../types/school';
 
 export const AdminEventsScreen: React.FC = () => {
@@ -18,16 +18,15 @@ export const AdminEventsScreen: React.FC = () => {
     setLoading(true);
     setError(null);
 
-    getSchoolDeps()
-      .eventProvider.getAll()
+    fetchAdminEvents()
       .then((items) => {
         if (!cancelled) {
           setEvents(items);
         }
       })
-      .catch(() => {
+      .catch((e) => {
         if (!cancelled) {
-          setError('読み込みに失敗しました。再読み込みしてください。');
+          setError(e instanceof Error ? e.message : '読み込みに失敗しました。再読み込みしてください。');
           setEvents([]);
         }
       })
@@ -46,13 +45,12 @@ export const AdminEventsScreen: React.FC = () => {
     setLoading(true);
     setError(null);
 
-    getSchoolDeps()
-      .eventProvider.getAll()
+    fetchAdminEvents()
       .then((items) => {
         setEvents(items);
       })
-      .catch(() => {
-        setError('読み込みに失敗しました。再読み込みしてください。');
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : '読み込みに失敗しました。再読み込みしてください。');
         setEvents([]);
       })
       .finally(() => {
@@ -83,7 +81,7 @@ export const AdminEventsScreen: React.FC = () => {
         <View style={styles.list}>
           {loading ? (
             <View style={styles.stateContainer}>
-              <AppText>イベントを読み込み中です…</AppText>
+              <Loading message="イベントを読み込み中です..." size="large" />
             </View>
           ) : error ? (
             <View style={styles.stateContainer}>
