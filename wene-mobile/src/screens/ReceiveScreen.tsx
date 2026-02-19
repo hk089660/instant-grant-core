@@ -415,8 +415,10 @@ ${st.balanceLamports ?? 'null'}
 
       // Web: 浅い固定パスで戻りを確実に。Native: カスタムスキーム
       const PHANTOM_CALLBACK_PATH = '/phantom-callback';
+      const isWeb = Platform.OS === 'web' && typeof window !== 'undefined' && !!window.location?.origin;
+      const appUrl = isWeb ? window.location.origin : 'https://wene.app';
       let redirectLink: string;
-      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin) {
+      if (isWeb) {
         redirectLink = window.location.origin + PHANTOM_CALLBACK_PATH;
         if (!redirectLink.startsWith('https://')) {
           console.warn('[handleConnect] redirect_link is not HTTPS on web:', redirectLink);
@@ -430,7 +432,7 @@ ${st.balanceLamports ?? 'null'}
         dappEncryptionPublicKey: usePhantomStore.getState().dappEncryptionPublicKey!,
         redirectLink,
         cluster: 'devnet',
-        appUrl: 'https://wene.app',
+        appUrl,
       });
 
       console.log('[PHANTOM] connect 送信 URL 全文:', connectUrl);
@@ -447,7 +449,7 @@ ${st.balanceLamports ?? 'null'}
         usePhantomStore.getState().dappSecretKey!,
         redirectLink,
         'devnet',
-        'https://wene.app'
+        appUrl
       );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

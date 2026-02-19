@@ -102,13 +102,19 @@ export const WalletScreen: React.FC = () => {
       await saveKeyPair(keyPair);
 
       const dappEncryptionPublicKey = Buffer.from(keyPair.publicKey).toString('base64');
-      const redirectLink = 'wene://phantom/connect';
+      const isWeb = Platform.OS === 'web' && typeof window !== 'undefined' && !!window.location?.origin;
+      const appUrl = isWeb ? window.location.origin : 'https://wene.app';
+      const redirectLink = isWeb
+        ? `${window.location.origin}/phantom-callback`
+        : 'wene://phantom/connect';
 
       // Phantom接続を開始
       await initiatePhantomConnect(
         dappEncryptionPublicKey,
         keyPair.secretKey,
-        redirectLink
+        redirectLink,
+        'devnet',
+        appUrl
       );
       setIsSettingsVisible(false);
     } catch (e) {
