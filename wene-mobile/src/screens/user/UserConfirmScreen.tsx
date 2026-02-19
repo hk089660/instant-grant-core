@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback, useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { AppText, Button, Card, Loading } from '../../ui/components';
@@ -9,13 +9,14 @@ import { schoolRoutes } from '../../lib/schoolRoutes';
 import { useEventIdFromParams } from '../../hooks/useEventIdFromParams';
 import { useAuth } from '../../contexts/AuthContext';
 import { claimEventWithUser } from '../../api/userApi';
+import { HttpError } from '../../api/http/httpClient';
 import { getSchoolDeps } from '../../api/createSchoolDeps';
 import type { SchoolEvent } from '../../types/school';
 
 export const UserConfirmScreen: React.FC = () => {
   const router = useRouter();
   const { eventId: targetEventId, isValid } = useEventIdFromParams({ redirectOnInvalid: true });
-  const { userId } = useAuth();
+  const { userId, clearUser } = useAuth();
   const [event, setEvent] = useState<SchoolEvent | null>(null);
   const [eventLoading, setEventLoading] = useState(true);
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
@@ -77,6 +78,22 @@ export const UserConfirmScreen: React.FC = () => {
       );
     } catch (e: unknown) {
       setStatus('error');
+
+      if (e instanceof HttpError && e.status === 401) {
+        const body = e.body as any;
+        if (body?.code === 'user_not_found') {
+          Alert.alert('認証エラー', 'ユーザー登録情報が見つかりません。再登録してください。', [
+            {
+              text: 'OK',
+              onPress: () => {
+                clearUser();
+              },
+            },
+          ]);
+          return;
+        }
+      }
+
       if (e && typeof e === 'object' && 'message' in e) {
         const msg = String((e as { message: string }).message);
         if (msg.includes('invalid pin')) {

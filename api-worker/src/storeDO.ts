@@ -183,11 +183,11 @@ export class SchoolStore implements DurableObject {
       }
       const userRaw = await this.ctx.storage.get(userKey(userId));
       if (!userRaw || typeof userRaw !== 'object' || !('pinHash' in userRaw)) {
-        return Response.json({ error: 'invalid pin' }, { status: 401 });
+        return Response.json({ message: 'User not found', code: 'user_not_found' }, { status: 401 });
       }
       const pinHash = await hashPin(pin);
       if ((userRaw as { pinHash: string }).pinHash !== pinHash) {
-        return Response.json({ error: 'invalid pin' }, { status: 401 });
+        return Response.json({ message: 'Invalid PIN', code: 'invalid_pin' }, { status: 401 });
       }
       return Response.json({ ok: true });
     }
@@ -231,11 +231,11 @@ export class SchoolStore implements DurableObject {
       }
       const userRaw = await this.ctx.storage.get(userKey(userId));
       if (!userRaw || typeof userRaw !== 'object' || !('pinHash' in userRaw)) {
-        return Response.json({ error: 'invalid pin' }, { status: 401 });
+        return Response.json({ message: 'User not found', code: 'user_not_found' }, { status: 401 });
       }
       const pinHash = await hashPin(pin);
       if ((userRaw as { pinHash: string }).pinHash !== pinHash) {
-        return Response.json({ error: 'invalid pin' }, { status: 401 });
+        return Response.json({ message: 'Invalid PIN', code: 'invalid_pin' }, { status: 401 });
       }
       const event = await this.store.getEvent(eventId);
       if (!event) {
