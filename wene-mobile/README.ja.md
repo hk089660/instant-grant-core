@@ -64,7 +64,8 @@ We-ne は以下を満たす「支援配布の基本プリミティブ」を提�
 
 ### School Participation Flow Refactor
 
-* API層の抽象化：`SchoolClaimClient` / `SchoolEventProvider` で mock⇄本番差し替えを容易に
+* API層の抽象化：`SchoolClaimClient` / `SchoolEventProvider` で画面依存を分離しつつ、実行時は HTTP 実装を利用
+* APIモードの固定化：`EXPO_PUBLIC_API_MODE` は `http` のみをサポートし、非対応値は警告のうえ `http` にフォールバック
 * HookでUI/ロジック分離：`useSchoolClaim` が状態遷移（idle/loading/success/already/error）を集約
 * エラー表現の統一：`SchoolClaimResult` / `SchoolClaimErrorCode` による分岐
 * eventIdの一元化：`parseEventId` / `useEventIdFromParams`

@@ -39,12 +39,15 @@ npx wrangler deploy
 
 ## CORS
 
-Pages のドメインを許可するため、Workers の環境変数で `CORS_ORIGIN` を設定する。
+この Worker は次の優先順で CORS を判定する。
 
-- **ダッシュボード**: Workers → 該当 Worker → Settings → Variables and Secrets → `CORS_ORIGIN` = `https://<your-pages>.pages.dev`
-- **wrangler.toml**: `[vars]` に `CORS_ORIGIN = "https://..."` を追加してもよい
+1. リクエスト `Origin` が `*.pages.dev` または `localhost` の場合は、その `Origin` をそのまま許可
+2. それ以外は `CORS_ORIGIN` を使用（未設定時は `https://instant-grant-core.dev`）
 
-未設定時は `https://your-pages.pages.dev` がデフォルト（要差し替え）。
+`CORS_ORIGIN` を明示したい場合:
+
+- **ダッシュボード**: Workers → 該当 Worker → Settings → Variables and Secrets → `CORS_ORIGIN` = `https://<your-domain>`
+- **wrangler.toml**: `[vars]` に `CORS_ORIGIN = "https://<your-domain>"` を追加
 
 ## ストレージ（Durable Objects）
 

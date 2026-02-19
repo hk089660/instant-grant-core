@@ -23,7 +23,8 @@ These updates focus on stability, operational safety, and real-world school usag
 
 School participation flow logic, types, and error handling have been restructured for clarity and easy replacement.
 
-* **API layer abstraction:** `SchoolClaimClient` / `SchoolEventProvider` interfaces separate mock from production; swapping to a fetch-based implementation is straightforward.
+* **API layer abstraction:** `SchoolClaimClient` / `SchoolEventProvider` keep screens decoupled while runtime uses HTTP implementation.
+* **API mode hardening:** `EXPO_PUBLIC_API_MODE` is treated as `http` only; unsupported values fall back to HTTP with a warning.
 * **UI/logic separation via Hook:** `useSchoolClaim` centralizes `idle/loading/success/already/error` states; screens depend only on `state` and `handleClaim`.
 * **Unified error representation:** `SchoolClaimResult` (`Success | Failure`), `SchoolClaimErrorCode` (`retryable / invalid_input / not_found`) enable clear logic-side branching. `errorInfo / isRetryable` identify retryable errors.
 * **eventId centralization:** `parseEventId / useEventIdFromParams` consolidate query/route parsing and validation; invalid `eventId` redirects to `/u`.
@@ -72,16 +73,17 @@ Phantom strictly validates cluster consistency (**devnet / testnet / mainnet**).
 
 | Concept                | Description                                                                                                                         |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `SchoolClaimClient`    | Interface for the claim API client. Mock can be replaced with a fetch-based implementation                                          |
+| `SchoolClaimClient`    | Interface for the claim API client. Runtime is HTTP-based; tests can still inject custom implementations                              |
 | `useSchoolClaim`       | Hook encapsulating claim logic. Exposes status (`idle/loading/success/already/error`), `handleClaim`, `onSuccess`                   |
 | `SchoolClaimResult`    | Discriminated union: success `{ success: true, eventName, alreadyJoined? }`, failure `{ success: false, error: { code, message } }` |
 | `useEventIdFromParams` | Parses and validates `eventId` from query/route. `redirectOnInvalid: true` replaces to `/u` when invalid                            |
 | `schoolRoutes`         | Route constants: `home/events/scan/confirm/success/schoolClaim`                                                                     |
 
-### Mock cases (for testing)
+### Demo API cases (for testing)
 
 * `evt-001`: Success
 * `evt-002`: Already joined (`alreadyJoined`) → navigates to success screen
+* `evt-003`: Retryable (`retryable`) error for retry UX verification
 
 ### Verification (static)
 
@@ -89,7 +91,7 @@ Phantom strictly validates cluster consistency (**devnet / testnet / mainnet**).
 * `useSchoolClaim` state transitions ✅
 * Routing consistency (`eventId` unified via `useEventIdFromParams`) ✅
 
-For future fetch implementation: map HTTP errors to Result (`404→not_found`, `5xx/network→retryable`)
+HTTP errors are mapped to Result (`404→not_found`, `5xx/network→retryable`)
 
 → Details:
 
@@ -137,9 +139,9 @@ The Expo app is the primary flow for Phantom stability; Web/PWA is not used for 
    * Verified: `npm run build` and `npm run test` (or `scripts/build-all.sh build/test`) succeed in the supported environment
    * Verified: CI and `DEVELOPMENT.md`
 
-3. **School participation UI flow with mock claim states**
+3. **School participation UI flow with API-driven claim states**
 
-   * Verified: `/u → /u/scan → /u/confirm → /u/success` and mock cases `evt-001/002/003` behave as specified
+   * Verified: `/u → /u/scan → /u/confirm → /u/success` and API demo cases `evt-001/002/003` behave as specified
    * Verified: `STATIC_VERIFICATION_REPORT.md`
 
 4. **Print-ready QR and role-restricted admin UI for school devices**
