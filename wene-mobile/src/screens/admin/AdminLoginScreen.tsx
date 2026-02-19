@@ -132,6 +132,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   loginButton: {
-    backgroundColor: adminTheme.colors.text,
+    backgroundColor: '#000000',
+    borderWidth: 1,
+    borderColor: adminTheme.colors.border,
   },
 });

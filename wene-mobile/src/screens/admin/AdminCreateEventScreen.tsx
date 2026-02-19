@@ -357,7 +357,9 @@ const styles = StyleSheet.create({
     },
     actionButton: {
         marginTop: adminTheme.spacing.lg,
-        backgroundColor: adminTheme.colors.text,
+        backgroundColor: '#000000',
+        borderWidth: 1,
+        borderColor: adminTheme.colors.border,
     },
     buttonRow: {
         flexDirection: 'row',
