@@ -9,8 +9,9 @@ import { useRouter } from 'expo-router';
 import { AppText, Button, Card } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
 
-// TODO: 本番では API による認証に切り替え
-const ADMIN_PASSCODE = '1234';
+import { verifyAdminPassword } from '../../api/adminApi';
+
+// ...
 
 export const AdminLoginScreen: React.FC = () => {
   const router = useRouter();
@@ -25,12 +26,17 @@ export const AdminLoginScreen: React.FC = () => {
       return;
     }
     setLoading(true);
-    // 簡易パスコード認証（本番では API に置き換え）
-    await new Promise((r) => setTimeout(r, 300));
-    if (passcode === ADMIN_PASSCODE) {
-      router.replace('/admin' as any);
-    } else {
-      setError('パスコードが正しくありません');
+
+    // API による認証
+    try {
+      const isValid = await verifyAdminPassword(passcode);
+      if (isValid) {
+        router.replace('/admin' as any);
+      } else {
+        setError('パスコードが正しくありません');
+      }
+    } catch (e) {
+      setError('認証エラーが発生しました');
     }
     setLoading(false);
   };
@@ -48,16 +54,15 @@ export const AdminLoginScreen: React.FC = () => {
         </View>
 
         <Card style={styles.card}>
-          <AppText variant="caption" style={styles.label}>パスコード</AppText>
+          <AppText variant="caption" style={styles.label}>パスワード</AppText>
           <TextInput
             style={styles.input}
             value={passcode}
             onChangeText={setPasscode}
-            placeholder="4桁のパスコード"
+            placeholder="パスワードを入力"
             placeholderTextColor={adminTheme.colors.textTertiary}
             secureTextEntry
-            keyboardType="number-pad"
-            maxLength={8}
+            keyboardType="default"
             onSubmitEditing={handleLogin}
           />
           {error ? (
@@ -72,6 +77,19 @@ export const AdminLoginScreen: React.FC = () => {
           disabled={loading}
           style={styles.loginButton}
         />
+
+        {/* Demo Login Button */}
+        <View style={styles.demoContainer}>
+          <View style={styles.divider} />
+          <AppText variant="caption" style={styles.demoNote}>
+            ※審査・デモ環境用
+          </AppText>
+          <Button
+            title="デモ管理者としてログイン"
+            onPress={() => router.replace('/admin' as any)}
+            style={styles.demoButton}
+          />
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -97,6 +115,8 @@ const styles = StyleSheet.create({
     color: adminTheme.colors.text,
     marginBottom: adminTheme.spacing.xs,
     textAlign: 'center',
+    fontSize: 24,
+    fontWeight: 'bold',
   },
   subtitle: {
     color: adminTheme.colors.textSecondary,
@@ -120,11 +140,10 @@ const styles = StyleSheet.create({
     borderRadius: adminTheme.radius.sm,
     paddingHorizontal: adminTheme.spacing.md,
     paddingVertical: adminTheme.spacing.sm,
-    fontSize: 20,
+    fontSize: 16,
     color: adminTheme.colors.text,
     backgroundColor: adminTheme.colors.background,
-    textAlign: 'center',
-    letterSpacing: 8,
+    height: 48,
   },
   errorText: {
     color: '#ff6b6b',
@@ -135,5 +154,29 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
     borderWidth: 1,
     borderColor: adminTheme.colors.border,
+    height: 50,
+    justifyContent: 'center',
+  },
+  demoContainer: {
+    marginTop: 40,
+    alignItems: 'center',
+  },
+  divider: {
+    height: 1,
+    width: '100%',
+    backgroundColor: adminTheme.colors.border,
+    opacity: 0.3,
+    marginBottom: 20,
+  },
+  demoNote: {
+    color: adminTheme.colors.textTertiary,
+    marginBottom: 8,
+    fontSize: 12,
+  },
+  demoButton: {
+    backgroundColor: '#2c3e50', // Slightly lighter drak grey for demo
+    width: '100%',
+    borderWidth: 0,
+    height: 44,
   },
 });

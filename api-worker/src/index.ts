@@ -21,7 +21,7 @@ function addCorsHeaders(response: Response, origin: string): Response {
   const headers = new Headers(response.headers);
   headers.set('Access-Control-Allow-Origin', origin);
   headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  headers.set('Access-Control-Allow-Headers', 'Content-Type, Accept');
+  headers.set('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization');
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -39,7 +39,7 @@ app.use(
       return origin.endsWith('.pages.dev') || origin.includes('localhost') ? origin : (DEFAULT_CORS);
     },
     allowMethods: ['GET', 'POST', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Accept'],
+    allowHeaders: ['Content-Type', 'Accept', 'Authorization'],
   })
 );
 

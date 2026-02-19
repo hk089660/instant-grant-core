@@ -61,12 +61,27 @@ export function createV1SchoolRouter(deps: V1SchoolDeps): Router {
       return;
     }
     const claims = storage.getClaims(req.params.eventId);
-    const items = claims.map((c) => ({
-      subject: c.walletAddress ?? 'anonymous',
-      displayName: c.walletAddress ? c.walletAddress.slice(0, 8) + '…' : '匿名',
-      confirmationCode: Math.random().toString(36).slice(2, 8).toUpperCase(),
-      claimedAt: new Date(c.joinedAt).toISOString(),
-    }));
+    const items = claims.map((c) => {
+      let displayName = '匿名';
+      let subject = c.walletAddress ?? 'anonymous';
+
+      if (c.userId) {
+        const user = storage.getUser(c.userId);
+        if (user) {
+          displayName = user.displayName;
+          subject = user.id;
+        }
+      } else if (c.walletAddress) {
+        displayName = c.walletAddress.slice(0, 8) + '…';
+      }
+
+      return {
+        subject,
+        displayName,
+        confirmationCode: c.confirmationCode ?? Math.random().toString(36).slice(2, 8).toUpperCase(),
+        claimedAt: new Date(c.joinedAt).toISOString(),
+      };
+    });
     res.json({ eventId: req.params.eventId, eventTitle: event.title, items });
   });
 

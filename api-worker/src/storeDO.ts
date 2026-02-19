@@ -1,5 +1,4 @@
 
-
 import type { ClaimBody, RegisterBody, UserClaimBody, UserClaimResponse, SchoolClaimResult } from './types';
 import { ClaimStore, type IClaimStorage } from './claimLogic';
 import type { AuditActor, AuditEvent } from './audit/types';
@@ -9,6 +8,10 @@ const USER_PREFIX = 'user:';
 
 function userKey(userId: string): string {
   return USER_PREFIX + userId;
+}
+
+function adminCodeKey(code: string): string {
+  return 'admin_code:' + code;
 }
 
 async function hashPin(pin: string): Promise<string> {
@@ -27,6 +30,7 @@ function genConfirmationCode(): string {
 
 export interface Env {
   CORS_ORIGIN?: string;
+  ADMIN_PASSWORD?: string;
 }
 
 function doStorageAdapter(ctx: DurableObjectState): IClaimStorage {
@@ -47,7 +51,7 @@ function doStorageAdapter(ctx: DurableObjectState): IClaimStorage {
 export class SchoolStore implements DurableObject {
   private store: ClaimStore;
 
-  constructor(private ctx: DurableObjectState, _env: Env) {
+  constructor(private ctx: DurableObjectState, private env: Env) {
     this.store = new ClaimStore(doStorageAdapter(ctx));
   }
 
@@ -79,6 +83,11 @@ export class SchoolStore implements DurableObject {
       // Atomically update the hash chain
       await this.ctx.storage.put(lastHashKey, entry_hash);
 
+      // Store history for Master Dashboard
+      // Key format: audit_history:<timestamp>:<hash> to allow reverse chronological listing
+      const historyKey = `audit_history:${ts}:${entry_hash}`;
+      await this.ctx.storage.put(historyKey, fullEntry);
+
       return fullEntry;
     });
 
@@ -88,9 +97,102 @@ export class SchoolStore implements DurableObject {
     return task;
   }
 
+  async getAuditLogs(): Promise<AuditEvent[]> {
+    // List latest 50 logs (reverse order)
+    const result = await this.ctx.storage.list({ prefix: 'audit_history:', limit: 50, reverse: true });
+    return Array.from(result.values()) as AuditEvent[];
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    // GET /api/master/audit-logs (Master Password required)
+    if (path === '/api/master/audit-logs' && request.method === 'GET') {
+      const authHeader = request.headers.get('Authorization');
+      const masterPassword = this.env.ADMIN_PASSWORD;
+      if (!masterPassword || authHeader !== `Bearer ${masterPassword}`) {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+      const logs = await this.getAuditLogs();
+      return Response.json({ logs });
+    }
+
+    // POST /api/admin/invite (Master Password required)
+    if (path === '/api/admin/invite' && request.method === 'POST') {
+      const authHeader = request.headers.get('Authorization');
+      const masterPassword = this.env.ADMIN_PASSWORD;
+      if (!masterPassword || authHeader !== `Bearer ${masterPassword}`) {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+
+      let body: { name?: string };
+      try {
+        body = (await request.json()) as any;
+      } catch {
+        return Response.json({ error: 'invalid body' }, { status: 400 });
+      }
+      const name = typeof body?.name === 'string' ? body.name.trim() : 'Unknown Admin';
+
+      // Generate secure random code
+      const code = crypto.randomUUID().replace(/-/g, '');
+      await this.ctx.storage.put(adminCodeKey(code), {
+        name,
+        createdAt: new Date().toISOString(),
+      });
+
+      return Response.json({ code, name });
+    }
+
+    // POST /api/admin/revoke (Master Password required)
+    if (path === '/api/admin/revoke' && request.method === 'POST') {
+      const authHeader = request.headers.get('Authorization');
+      const masterPassword = this.env.ADMIN_PASSWORD;
+      if (!masterPassword || authHeader !== `Bearer ${masterPassword}`) {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+      let body: { code?: string };
+      try {
+        body = (await request.json()) as any;
+      } catch {
+        return Response.json({ error: 'invalid body' }, { status: 400 });
+      }
+      if (typeof body?.code !== 'string') {
+        return Response.json({ error: 'code required' }, { status: 400 });
+      }
+      const deleted = await this.ctx.storage.delete(adminCodeKey(body.code));
+      return Response.json({ success: deleted });
+    }
+
+    // POST /api/admin/login
+    if (path === '/api/admin/login' && request.method === 'POST') {
+      let body: { password?: string };
+      try {
+        body = (await request.json()) as { password?: string };
+      } catch {
+        return Response.json({ error: 'invalid body' }, { status: 400 });
+      }
+
+      const password = typeof body?.password === 'string' ? body.password : '';
+      const masterPassword = this.env.ADMIN_PASSWORD;
+
+      if (!masterPassword) {
+        return Response.json({ error: 'server configuration error' }, { status: 500 });
+      }
+
+      // 1. Check Master Password
+      if (password === masterPassword) {
+        return Response.json({ ok: true, role: 'master' });
+      }
+
+      // 2. Check Issued Admin Codes
+      const adminData = await this.ctx.storage.get(adminCodeKey(password));
+      if (adminData) {
+        return Response.json({ ok: true, role: 'admin', info: adminData });
+      }
+
+      return Response.json({ error: 'invalid password' }, { status: 401 });
+    }
 
     if (path === '/v1/school/events' && request.method === 'GET') {
       const items = await this.store.getEvents();
@@ -253,6 +355,16 @@ export class SchoolStore implements DurableObject {
       const confirmationCode = genConfirmationCode();
       await this.store.addClaim(eventId, userId, confirmationCode);
       return Response.json({ status: 'created', confirmationCode } as UserClaimResponse);
+    }
+
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': this.env.CORS_ORIGIN || '*',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        },
+      });
     }
 
     return new Response('Not Found', { status: 404 });
