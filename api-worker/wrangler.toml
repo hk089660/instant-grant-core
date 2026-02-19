@@ -13,6 +13,6 @@ new_sqlite_classes = ["SchoolStore"]
 # Pages ドメインを CORS に指定する場合はここで変数化（デプロイ時はダッシュボードで設定推奨）
 # [vars]
 [vars]
-CORS_ORIGIN = "https://instant-grant-core.pages.dev"
+CORS_ORIGIN = "https://instant-grant-core.dev"
 ADMIN_PASSWORD = "change-this-in-dashboard"
-# CORS_ORIGIN = "https://instant-grant-core.pages.dev"
+# CORS_ORIGIN = "https://instant-grant-core.dev"

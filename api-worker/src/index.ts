@@ -15,7 +15,7 @@ type Bindings = {
   AUDIT_INDEX: KVNamespace;
 };
 
-const DEFAULT_CORS = 'https://your-pages.pages.dev';
+const DEFAULT_CORS = 'https://instant-grant-core.dev';
 
 function addCorsHeaders(response: Response, origin: string): Response {
   const headers = new Headers(response.headers);
