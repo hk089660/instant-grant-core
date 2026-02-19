@@ -75,6 +75,13 @@ export const BalanceList: React.FC<BalanceListProps> = ({
             </AppText>
           </View>
         ) : null}
+        {connected && items.length === 0 ? (
+          <View style={styles.emptyWrap}>
+            <AppText variant="body" style={styles.emptyText}>
+              参加券はありません
+            </AppText>
+          </View>
+        ) : null}
         <View style={styles.listContent}>
           {items.map((item, index) => {
             const todayUsable = item.todayUsable ?? computeTodayUsable(item.expiresAt);
@@ -161,6 +168,16 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     textAlign: 'center',
     paddingHorizontal: theme.spacing.lg,
+  },
+  emptyWrap: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.divider,
+  },
+  emptyText: {
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
   },
   listContent: {
     paddingVertical: theme.spacing.xs,

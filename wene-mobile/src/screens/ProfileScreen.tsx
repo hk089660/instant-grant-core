@@ -1,12 +1,16 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ScrollView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { AppText, Button, Card, CategoryTabs, BalanceList, BALANCE_LIST_DUMMY } from '../ui/components';
+import { PublicKey } from '@solana/web3.js';
+import { AppText, Button, Card, CategoryTabs, BalanceList } from '../ui/components';
 import { theme } from '../ui/theme';
 import { useRecipientStore } from '../store/recipientStore';
 import { usePhantomStore } from '../store/phantomStore';
 import { useAuth } from '../contexts/AuthContext';
+import { getConnection } from '../solana/singleton';
+import { formatMintShort, getTokenBalances } from '../solana/wallet';
+import type { BalanceItem } from '../types/balance';
 
 const CATEGORIES = [
     { id: 'profile', label: '登録情報' },
@@ -19,6 +23,51 @@ export const ProfileScreen: React.FC = () => {
     const { clearPhantomKeys } = usePhantomStore();
     const { userId, displayName: authDisplayName, clearUser } = useAuth();
     const [activeTab, setActiveTab] = useState('profile');
+    const [ticketItems, setTicketItems] = useState<BalanceItem[]>([]);
+    const [ticketsLoading, setTicketsLoading] = useState(false);
+    const [ticketsError, setTicketsError] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (activeTab !== 'history') return;
+        if (!walletPubkey) {
+            setTicketItems([]);
+            setTicketsError(null);
+            return;
+        }
+
+        let cancelled = false;
+        const loadTickets = async () => {
+            setTicketsLoading(true);
+            setTicketsError(null);
+            try {
+                const connection = getConnection();
+                const owner = new PublicKey(walletPubkey);
+                const tokens = await getTokenBalances(connection, owner);
+                if (cancelled) return;
+                const items: BalanceItem[] = tokens.map((token, index) => ({
+                    id: `spl-ticket-${token.ata ?? token.mint}-${index}`,
+                    name: '参加券 (SPL)',
+                    issuer: `Mint: ${formatMintShort(token.mint, 8, 6)}`,
+                    amountText: token.amount,
+                    unit: token.decimals === 0 ? '枚' : 'SPL',
+                    source: 'spl',
+                    todayUsable: true,
+                }));
+                setTicketItems(items);
+            } catch (e) {
+                if (cancelled) return;
+                setTicketItems([]);
+                setTicketsError(e instanceof Error ? e.message : '参加券の同期に失敗しました');
+            } finally {
+                if (!cancelled) setTicketsLoading(false);
+            }
+        };
+
+        loadTickets();
+        return () => {
+            cancelled = true;
+        };
+    }, [activeTab, walletPubkey]);
 
     const handleLogout = async () => {
         await clearPhantomKeys();
@@ -84,9 +133,19 @@ export const ProfileScreen: React.FC = () => {
                     </View>
                 ) : (
                     <View style={styles.section}>
+                        {ticketsLoading ? (
+                            <AppText variant="caption" style={styles.helperText}>
+                                接続中ウォレットの参加券を同期しています…
+                            </AppText>
+                        ) : null}
+                        {ticketsError ? (
+                            <AppText variant="caption" style={styles.errorText}>
+                                {ticketsError}
+                            </AppText>
+                        ) : null}
                         <BalanceList
                             connected={!!walletPubkey}
-                            items={BALANCE_LIST_DUMMY}
+                            items={ticketItems}
                             style={styles.balanceList}
                         />
                     </View>
@@ -143,5 +202,13 @@ const styles = StyleSheet.create({
     },
     balanceList: {
         marginTop: 0, // BalanceList自体のマージンをリセットして調整
+    },
+    helperText: {
+        color: theme.colors.textSecondary,
+        marginBottom: theme.spacing.sm,
+    },
+    errorText: {
+        color: theme.colors.error,
+        marginBottom: theme.spacing.sm,
     },
 });
