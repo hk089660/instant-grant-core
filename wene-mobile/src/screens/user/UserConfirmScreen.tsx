@@ -9,7 +9,7 @@ import { setStarted } from '../../data/participationStore';
 import { schoolRoutes } from '../../lib/schoolRoutes';
 import { useEventIdFromParams } from '../../hooks/useEventIdFromParams';
 import { useAuth } from '../../contexts/AuthContext';
-import { claimEventWithUser } from '../../api/userApi';
+import { claimEventWithUser, verifyUserPin } from '../../api/userApi';
 import { HttpError } from '../../api/http/httpClient';
 import { getSchoolDeps } from '../../api/createSchoolDeps';
 import { useRecipientStore } from '../../store/recipientStore';
@@ -207,7 +207,10 @@ export const UserConfirmScreen: React.FC = () => {
     setError(null);
 
     try {
-      const result = await claimEventWithUser(targetEventId, userId, pinVal);
+      // 1) PIN 検証だけ先に行う（off-chain claim の副作用を先に発生させない）
+      await verifyUserPin(userId, pinVal);
+
+      // 2) on-chain claim（ここが成功してから off-chain 参加記録を確定）
       let txSignature: string | undefined;
       let receiptPubkey: string | undefined;
 
@@ -216,9 +219,14 @@ export const UserConfirmScreen: React.FC = () => {
         txSignature = onchain.txSignature;
         receiptPubkey = onchain.receiptPubkey;
       } catch (onchainError) {
-        // 既に登録済みの場合は、保存済みTXがあればそれを優先して表示
+        // 既に保存済みTXがあればそれを優先して表示（再訪/再試行で落ちないように）
         const storedTicket = getTicketByEventId(targetEventId);
-        if (result.status === 'already' && storedTicket?.txSignature) {
+        const onchainMsg = onchainError instanceof Error ? onchainError.message : String(onchainError);
+        const mayBeAlreadyClaimed =
+          onchainMsg.includes('既に受給済み') ||
+          onchainMsg.includes('already in use') ||
+          onchainMsg.includes('custom program error');
+        if (mayBeAlreadyClaimed && storedTicket?.txSignature) {
           txSignature = storedTicket.txSignature;
           receiptPubkey = storedTicket.receiptPubkey;
         } else {
@@ -226,11 +234,22 @@ export const UserConfirmScreen: React.FC = () => {
         }
       }
 
+      // 3) off-chain claim 記録（ネットワーク一時障害でも tx は保持して成功遷移）
+      let result: Awaited<ReturnType<typeof claimEventWithUser>> | null = null;
+      try {
+        result = await claimEventWithUser(targetEventId, userId, pinVal);
+      } catch (syncError) {
+        if (syncError instanceof HttpError && syncError.status === 401) {
+          throw syncError;
+        }
+        console.warn('[UserConfirmScreen] off-chain claim sync failed after on-chain success:', syncError);
+      }
+
       router.push(
         schoolRoutes.success(targetEventId, {
-          already: result.status === 'already',
-          status: result.status,
-          confirmationCode: result.confirmationCode,
+          already: result?.status === 'already',
+          status: result?.status ?? 'created',
+          confirmationCode: result?.confirmationCode,
           tx: txSignature,
           receipt: receiptPubkey,
         }) as any
@@ -251,12 +270,18 @@ export const UserConfirmScreen: React.FC = () => {
           ]);
           return;
         }
+        if (body?.code === 'invalid_pin') {
+          setError('PINが正しくありません');
+          return;
+        }
       }
 
       if (e && typeof e === 'object' && 'message' in e) {
         const msg = String((e as { message: string }).message);
         if (msg.includes('invalid pin')) {
           setError('PINが正しくありません');
+        } else if (msg.includes('既に受給済み')) {
+          setError('このウォレットは現在期間のオンチェーン配布を受給済みです。次回期間までお待ちください。');
         } else if (msg.includes('キャンセル')) {
           setError('Phantom署名がキャンセルされました');
         } else if (msg.includes('タイムアウト')) {

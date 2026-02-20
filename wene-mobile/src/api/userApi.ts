@@ -24,10 +24,20 @@ export interface UserClaimResponse {
   confirmationCode: string;
 }
 
+export interface VerifyUserResponse {
+  ok: true;
+}
+
 export async function registerUser(displayName: string, pin: string): Promise<RegisterResponse> {
   const base = getBaseUrl();
   const url = `${base}/api/users/register`;
   return httpPost<RegisterResponse>(url, { displayName, pin });
+}
+
+export async function verifyUserPin(userId: string, pin: string): Promise<VerifyUserResponse> {
+  const base = getBaseUrl();
+  const url = `${base}/api/auth/verify`;
+  return httpPost<VerifyUserResponse>(url, { userId, pin });
 }
 
 export async function claimEventWithUser(

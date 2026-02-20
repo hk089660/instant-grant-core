@@ -43,6 +43,7 @@ export interface BuildClaimTxResult {
     receiptPda: PublicKey;
     claimerAta: PublicKey;
     periodIndex: bigint;
+    mint: PublicKey;
   };
 }
 
@@ -100,6 +101,31 @@ export async function buildClaimTx(
 
   const [vaultPda] = getVaultPda(grantPda);
   const [receiptPda] = getReceiptPda(grantPda, recipientPubkey, periodIndex);
+
+  // 既存レシートがある場合は、同一期間の再受給が不可能（Program仕様）なので事前に中断
+  const existingReceipt = await connection.getAccountInfo(receiptPda, 'confirmed');
+  if (existingReceipt) {
+    const nextClaimTs = Number(startTs + (periodIndex + BigInt(1)) * periodSeconds);
+    const nextClaimIso = Number.isFinite(nextClaimTs) && nextClaimTs > 0
+      ? new Date(nextClaimTs * 1000).toISOString()
+      : null;
+    const nextClaimMsg = nextClaimIso ? ` 次回受給可能時刻: ${nextClaimIso}` : '';
+    throw new Error(
+      `このウォレットは現在の配布期間で既に受給済みです（Program仕様）。${nextClaimMsg}`
+    );
+  }
+
+  // vault が無い/空の場合は署名前に明示的にエラーにする
+  let vaultBalanceForCheck = BigInt(0);
+  try {
+    const vaultAcc = await getAccount(connection, vaultPda);
+    vaultBalanceForCheck = BigInt(vaultAcc.amount.toString());
+  } catch {
+    throw new Error('配布用Vaultが見つかりません。管理者側でGrant設定を確認してください');
+  }
+  if (vaultBalanceForCheck <= BigInt(0)) {
+    throw new Error('配布原資が不足しています。管理者側でGrantの入金（fund_grant）を実施してください');
+  }
 
   // DEV: claim 実行前の事前チェック（1ブロックで状態が分かる）
   let vaultBalanceLog = '';
@@ -181,6 +207,7 @@ export async function buildClaimTx(
       receiptPda,
       claimerAta,
       periodIndex,
+      mint,
     },
   };
 }
