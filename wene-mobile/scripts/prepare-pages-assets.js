@@ -27,8 +27,13 @@ const jsDir = path.join(distDir, '_expo', 'static', 'js', 'web');
 
 const SEARCH = '/assets/node_modules/';
 const REPLACE = '/assets/vendor/';
-const FONT_SEARCH = '/assets/vendor/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/';
 const FONT_REPLACE = '/fonts/';
+const FONT_SEARCH_PATTERNS = [
+  '/assets/vendor/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/',
+  '/assets/vendor/expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/',
+  'expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/',
+  '@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/',
+];
 
 function fail(msg) {
   console.error(`[prepare-pages-assets] ERROR: ${msg}`);
@@ -84,8 +89,15 @@ for (const filePath of jsFiles) {
   const before = fs.readFileSync(filePath, 'utf8');
   const assetRefs = before.split(SEARCH).length - 1;
   const afterAssets = assetRefs > 0 ? before.split(SEARCH).join(REPLACE) : before;
-  const fontRefs = afterAssets.split(FONT_SEARCH).length - 1;
-  const afterFonts = fontRefs > 0 ? afterAssets.split(FONT_SEARCH).join(FONT_REPLACE) : afterAssets;
+  let afterFonts = afterAssets;
+  let fontRefs = 0;
+  for (const fontSearch of FONT_SEARCH_PATTERNS) {
+    const refs = afterFonts.split(fontSearch).length - 1;
+    if (refs > 0) {
+      afterFonts = afterFonts.split(fontSearch).join(FONT_REPLACE);
+      fontRefs += refs;
+    }
+  }
   if (before === afterFonts) continue;
 
   fs.writeFileSync(filePath, afterFonts, 'utf8');
@@ -100,8 +112,17 @@ const leftoverNodeModuleRefs = jsFiles.reduce((total, filePath) => {
   return total + (content.split(SEARCH).length - 1);
 }, 0);
 
+const leftoverFontRefs = jsFiles.reduce((total, filePath) => {
+  const content = fs.readFileSync(filePath, 'utf8');
+  const refs = FONT_SEARCH_PATTERNS.reduce((sum, pattern) => sum + (content.split(pattern).length - 1), 0);
+  return total + refs;
+}, 0);
+
 if (leftoverNodeModuleRefs > 0) {
   fail(`"${SEARCH}" references still remain in JS bundles: ${leftoverNodeModuleRefs}`);
+}
+if (leftoverFontRefs > 0) {
+  fail(`vector icon font references still remain in JS bundles: ${leftoverFontRefs}`);
 }
 
 console.log(
