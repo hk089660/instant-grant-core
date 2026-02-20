@@ -543,6 +543,12 @@ export const AdminCreateEventScreen: React.FC = () => {
                                     Setup Tx: {setupTxSignatures.map((sig) => sig.slice(0, 8)).join(', ')}...
                                 </AppText>
                             )}
+                            <AppText variant="small" style={styles.cardMuted}>
+                                管理者ウォレット保持量: 1（Phantom表示確認用）
+                            </AppText>
+                            <AppText variant="small" style={styles.cardMuted}>
+                                Phantomでは devnet に切り替えて確認してください。
+                            </AppText>
 
                             <View style={styles.qrBox}>
                                 {qrDataUrl ? (

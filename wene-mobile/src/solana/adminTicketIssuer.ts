@@ -62,6 +62,7 @@ export interface IssueEventTicketTokenResult {
   solanaGrantId: string;
   amountPerPeriod: string;
   bootstrapMintAmount: string;
+  adminRetainedAmount: string;
   mintDecimals: number;
   setupSignatures: string[];
 }
@@ -162,6 +163,11 @@ export async function issueEventTicketToken(
     computeBootstrapAmount(amountPerPeriod, params.maxClaimsPerInterval),
     'bootstrapMintAmount'
   );
+  const adminRetainedAmount = BigInt(1);
+  const initialMintAmount = toU64(
+    bootstrapAmount + adminRetainedAmount,
+    'initialMintAmount'
+  );
 
   const mintDecimals = 0;
   const claimIntervalDays = Math.max(1, Math.floor(params.claimIntervalDays));
@@ -226,7 +232,7 @@ export async function issueEventTicketToken(
         mint,
         ownerAta,
         authority,
-        bootstrapAmount,
+        initialMintAmount,
         [],
         TOKEN_PROGRAM_ID
       )
@@ -308,6 +314,7 @@ export async function issueEventTicketToken(
     solanaGrantId: grantId.toString(),
     amountPerPeriod: amountPerPeriod.toString(),
     bootstrapMintAmount: bootstrapAmount.toString(),
+    adminRetainedAmount: adminRetainedAmount.toString(),
     mintDecimals,
     setupSignatures,
   };
