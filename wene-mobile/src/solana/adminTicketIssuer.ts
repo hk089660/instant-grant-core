@@ -24,17 +24,29 @@ import { getGrantPda, getVaultPda } from './grantProgram';
 import { signTransaction } from '../utils/phantom';
 import { sendSignedTx } from './sendTx';
 import { setPhantomWebReturnPath } from '../utils/phantomWebReturnPath';
+import type { PhantomExtensionProvider } from '../wallet/phantomExtension';
 
 const MAX_U64 = (BigInt(1) << BigInt(64)) - BigInt(1);
 const MIN_PREFUND_MULTIPLIER = 100;
 
-export interface AdminPhantomContext {
+interface AdminPhantomMobileContext {
+  mode: 'mobile';
   walletPubkey: string;
   phantomSession: string;
   dappEncryptionPublicKey: string;
   dappSecretKey: Uint8Array;
   phantomEncryptionPublicKey: string;
 }
+
+interface AdminPhantomExtensionContext {
+  mode: 'extension';
+  walletPubkey: string;
+  extensionProvider: PhantomExtensionProvider;
+}
+
+export type AdminPhantomContext =
+  | AdminPhantomMobileContext
+  | AdminPhantomExtensionContext;
 
 export interface IssueEventTicketTokenParams {
   phantom: AdminPhantomContext;
@@ -119,17 +131,26 @@ async function signAndSendTx(
     tx.partialSign(...extraSigners);
   }
 
-  const { redirectLink, appUrl } = buildSignRedirectContext();
-  const signedTx = await signTransaction({
-    tx,
-    session: phantom.phantomSession,
-    dappEncryptionPublicKey: phantom.dappEncryptionPublicKey,
-    dappSecretKey: phantom.dappSecretKey,
-    phantomEncryptionPublicKey: phantom.phantomEncryptionPublicKey,
-    redirectLink,
-    cluster: 'devnet',
-    appUrl,
-  });
+  let signedTx: Transaction;
+  if (phantom.mode === 'extension') {
+    const provider = phantom.extensionProvider;
+    if (!provider.isConnected) {
+      await provider.connect();
+    }
+    signedTx = await provider.signTransaction(tx);
+  } else {
+    const { redirectLink, appUrl } = buildSignRedirectContext();
+    signedTx = await signTransaction({
+      tx,
+      session: phantom.phantomSession,
+      dappEncryptionPublicKey: phantom.dappEncryptionPublicKey,
+      dappSecretKey: phantom.dappSecretKey,
+      phantomEncryptionPublicKey: phantom.phantomEncryptionPublicKey,
+      redirectLink,
+      cluster: 'devnet',
+      appUrl,
+    });
+  }
   return sendSignedTx(signedTx, { blockhash, lastValidBlockHeight });
 }
 

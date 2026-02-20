@@ -18,6 +18,7 @@ import { initiatePhantomConnect } from '../../utils/phantom';
 import { setPhantomWebReturnPath } from '../../utils/phantomWebReturnPath';
 import * as nacl from 'tweetnacl';
 import { issueEventTicketToken } from '../../solana/adminTicketIssuer';
+import { getPhantomExtensionProvider, getPhantomExtensionPubkey } from '../../wallet/phantomExtension';
 
 function getAdminBaseUrl(): string {
     if (typeof window !== 'undefined' && window.location?.origin) {
@@ -35,6 +36,8 @@ export const AdminCreateEventScreen: React.FC = () => {
     const [step, setStep] = useState<Step>('form');
     const walletPubkey = useRecipientStore((s) => s.walletPubkey);
     const phantomSession = useRecipientStore((s) => s.phantomSession);
+    const setWalletPubkey = useRecipientStore((s) => s.setWalletPubkey);
+    const setPhantomSession = useRecipientStore((s) => s.setPhantomSession);
     const dappEncryptionPublicKey = usePhantomStore((s) => s.dappEncryptionPublicKey);
     const dappSecretKey = usePhantomStore((s) => s.dappSecretKey);
     const phantomEncryptionPublicKey = usePhantomStore((s) => s.phantomEncryptionPublicKey);
@@ -50,6 +53,7 @@ export const AdminCreateEventScreen: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [setupTxSignatures, setSetupTxSignatures] = useState<string[]>([]);
+    const [connectMethod, setConnectMethod] = useState<'extension' | 'mobile' | null>(null);
 
     // 作成結果
     const [createdEvent, setCreatedEvent] = useState<SchoolEvent | null>(null);
@@ -62,13 +66,22 @@ export const AdminCreateEventScreen: React.FC = () => {
         return '';
     }, []);
 
-    const walletReady = Boolean(
+    const extensionProvider = Platform.OS === 'web' ? getPhantomExtensionProvider() : null;
+    const extensionPubkey = getPhantomExtensionPubkey(extensionProvider);
+    const extensionReady = Boolean(
+        extensionProvider &&
+        walletPubkey &&
+        extensionPubkey &&
+        extensionPubkey === walletPubkey
+    );
+    const mobileReady = Boolean(
         walletPubkey &&
         phantomSession &&
         dappEncryptionPublicKey &&
         dappSecretKey &&
         phantomEncryptionPublicKey
     );
+    const walletReady = extensionReady || mobileReady;
     const ticketTokenAmount = Number.parseInt(ticketTokenAmountInput, 10);
     const claimIntervalDays = Number.parseInt(claimIntervalDaysInput, 10);
     const unlimitedClaims = maxClaimsPerIntervalInput.trim() === '';
@@ -93,9 +106,46 @@ export const AdminCreateEventScreen: React.FC = () => {
         setStep('preview');
     }, [canSubmit]);
 
+    useEffect(() => {
+        if (extensionReady) {
+            setConnectMethod((prev) => (prev === 'extension' ? prev : 'extension'));
+            return;
+        }
+        if (mobileReady) {
+            setConnectMethod((prev) => (prev === 'mobile' ? prev : 'mobile'));
+            return;
+        }
+        setConnectMethod(null);
+    }, [extensionReady, mobileReady]);
+
     const handleConnectWallet = useCallback(async () => {
         try {
             setError(null);
+            if (Platform.OS === 'web') {
+                const webProvider = getPhantomExtensionProvider();
+                if (webProvider) {
+                    try {
+                        const res = await webProvider.connect();
+                        const pubkey =
+                            getPhantomExtensionPubkey(webProvider) ??
+                            (res?.publicKey
+                                ? (typeof res.publicKey.toBase58 === 'function'
+                                    ? res.publicKey.toBase58()
+                                    : res.publicKey.toString())
+                                : null);
+                        if (!pubkey) {
+                            throw new Error('Phantom拡張機能から公開鍵を取得できませんでした');
+                        }
+                        await setWalletPubkey(pubkey);
+                        setPhantomSession(null);
+                        setConnectMethod('extension');
+                        return;
+                    } catch (extErr) {
+                        console.warn('[AdminCreateEventScreen] extension connect failed, fallback to mobile app:', extErr);
+                    }
+                }
+            }
+
             const keyPair = nacl.box.keyPair();
             await saveKeyPair(keyPair);
 
@@ -118,11 +168,12 @@ export const AdminCreateEventScreen: React.FC = () => {
                 'devnet',
                 appUrl
             );
+            setConnectMethod('mobile');
         } catch (e: unknown) {
             const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: string }).message) : 'ウォレット接続に失敗しました';
             setError(msg);
         }
-    }, [saveKeyPair]);
+    }, [saveKeyPair, setPhantomSession, setWalletPubkey]);
 
     const handleCreate = useCallback(async () => {
         setLoading(true);
@@ -130,7 +181,7 @@ export const AdminCreateEventScreen: React.FC = () => {
         setSetupTxSignatures([]);
         try {
             const apiBase = getAdminBaseUrl();
-            if (!walletPubkey || !phantomSession || !dappEncryptionPublicKey || !dappSecretKey || !phantomEncryptionPublicKey) {
+            if (!walletPubkey) {
                 throw new Error('Phantomウォレットを接続してください。');
             }
             if (!Number.isInteger(ticketTokenAmount) || ticketTokenAmount <= 0) {
@@ -143,14 +194,42 @@ export const AdminCreateEventScreen: React.FC = () => {
                 throw new Error('上限回数は空欄（無制限）または1以上の整数で指定してください。');
             }
 
-            const onchain = await issueEventTicketToken({
-                phantom: {
+            let phantomContext:
+                | {
+                    mode: 'extension';
+                    walletPubkey: string;
+                    extensionProvider: NonNullable<typeof extensionProvider>;
+                }
+                | {
+                    mode: 'mobile';
+                    walletPubkey: string;
+                    phantomSession: string;
+                    dappEncryptionPublicKey: string;
+                    dappSecretKey: Uint8Array;
+                    phantomEncryptionPublicKey: string;
+                };
+
+            if (extensionReady && extensionProvider) {
+                phantomContext = {
+                    mode: 'extension',
+                    walletPubkey,
+                    extensionProvider,
+                };
+            } else if (phantomSession && dappEncryptionPublicKey && dappSecretKey && phantomEncryptionPublicKey) {
+                phantomContext = {
+                    mode: 'mobile',
                     walletPubkey,
                     phantomSession,
                     dappEncryptionPublicKey,
                     dappSecretKey,
                     phantomEncryptionPublicKey,
-                },
+                };
+            } else {
+                throw new Error('Phantomウォレット接続が不完全です。再接続してください。');
+            }
+
+            const onchain = await issueEventTicketToken({
+                phantom: phantomContext,
                 eventTitle: title.trim(),
                 ticketTokenAmount,
                 claimIntervalDays,
@@ -183,6 +262,8 @@ export const AdminCreateEventScreen: React.FC = () => {
         datetime,
         host,
         walletPubkey,
+        extensionProvider,
+        extensionReady,
         phantomSession,
         dappEncryptionPublicKey,
         dappSecretKey,
@@ -272,7 +353,7 @@ export const AdminCreateEventScreen: React.FC = () => {
                         <View style={styles.walletRow}>
                             <AppText variant="small" style={styles.walletStatus}>
                                 {walletReady && walletPubkey
-                                    ? `接続済み: ${walletPubkey.slice(0, 8)}...${walletPubkey.slice(-8)}`
+                                    ? `接続済み(${connectMethod === 'extension' ? '拡張機能' : 'モバイル'}): ${walletPubkey.slice(0, 8)}...${walletPubkey.slice(-8)}`
                                     : '未接続'}
                             </AppText>
                             <Button
@@ -284,7 +365,7 @@ export const AdminCreateEventScreen: React.FC = () => {
                             />
                         </View>
                         <AppText variant="small" style={styles.walletNote}>
-                            発行ごとに新規SPLトークンを作成するため、Phantom署名が必要です。
+                            接続優先順: PC拡張機能 → モバイルアプリ。発行時にPhantom署名が必要です。
                         </AppText>
 
                         <AppText variant="caption" style={styles.label}>タイトル</AppText>
