@@ -1,5 +1,13 @@
 /api/*  https://instant-grant-core.haruki-kira3.workers.dev/api/:splat  200
 /v1/*   https://instant-grant-core.haruki-kira3.workers.dev/v1/:splat   200
+#
+# Fallback for Cloudflare auto-deploy bundles that still reference
+# vector icon fonts under /assets/node_modules/.../Fonts/*.ttf.
+# Serve those from /fonts/*.ttf shipped in public/fonts.
+/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/*  /fonts/:splat  200
+/assets/node_modules/expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/*   /fonts/:splat  200
+/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/*                        /fonts/:splat  200
+/expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/*                         /fonts/:splat  200
 /_expo/*      /_expo/:splat      200
 /assets/*     /assets/:splat     200
 /fonts/*      /fonts/:splat      200
