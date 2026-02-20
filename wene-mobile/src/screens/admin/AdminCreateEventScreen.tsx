@@ -12,7 +12,12 @@ import { AppText, Button, Card } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
 import { httpPost } from '../../api/http/httpClient';
 import type { SchoolEvent } from '../../types/school';
-import { getDefaultSchoolTicketTokenConfig } from '../../solana/schoolTicketTokenConfig';
+import { useRecipientStore } from '../../store/recipientStore';
+import { usePhantomStore } from '../../store/phantomStore';
+import { initiatePhantomConnect } from '../../utils/phantom';
+import { setPhantomWebReturnPath } from '../../utils/phantomWebReturnPath';
+import * as nacl from 'tweetnacl';
+import { issueEventTicketToken } from '../../solana/adminTicketIssuer';
 
 function getAdminBaseUrl(): string {
     if (typeof window !== 'undefined' && window.location?.origin) {
@@ -28,6 +33,12 @@ type Step = 'form' | 'preview' | 'done';
 export const AdminCreateEventScreen: React.FC = () => {
     const router = useRouter();
     const [step, setStep] = useState<Step>('form');
+    const walletPubkey = useRecipientStore((s) => s.walletPubkey);
+    const phantomSession = useRecipientStore((s) => s.phantomSession);
+    const dappEncryptionPublicKey = usePhantomStore((s) => s.dappEncryptionPublicKey);
+    const dappSecretKey = usePhantomStore((s) => s.dappSecretKey);
+    const phantomEncryptionPublicKey = usePhantomStore((s) => s.phantomEncryptionPublicKey);
+    const saveKeyPair = usePhantomStore((s) => s.saveKeyPair);
 
     // フォーム状態
     const [title, setTitle] = useState('');
@@ -38,6 +49,7 @@ export const AdminCreateEventScreen: React.FC = () => {
     const [maxClaimsPerIntervalInput, setMaxClaimsPerIntervalInput] = useState('1'); // 空欄で無制限
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [setupTxSignatures, setSetupTxSignatures] = useState<string[]>([]);
 
     // 作成結果
     const [createdEvent, setCreatedEvent] = useState<SchoolEvent | null>(null);
@@ -50,7 +62,13 @@ export const AdminCreateEventScreen: React.FC = () => {
         return '';
     }, []);
 
-    const defaultTokenConfig = useMemo(() => getDefaultSchoolTicketTokenConfig(), []);
+    const walletReady = Boolean(
+        walletPubkey &&
+        phantomSession &&
+        dappEncryptionPublicKey &&
+        dappSecretKey &&
+        phantomEncryptionPublicKey
+    );
     const ticketTokenAmount = Number.parseInt(ticketTokenAmountInput, 10);
     const claimIntervalDays = Number.parseInt(claimIntervalDaysInput, 10);
     const unlimitedClaims = maxClaimsPerIntervalInput.trim() === '';
@@ -68,20 +86,52 @@ export const AdminCreateEventScreen: React.FC = () => {
         Number.isInteger(claimIntervalDays) &&
         claimIntervalDays > 0 &&
         maxClaimsValid &&
-        !!defaultTokenConfig;
+        walletReady;
 
     const handlePreview = useCallback(() => {
         if (!canSubmit) return;
         setStep('preview');
     }, [canSubmit]);
 
+    const handleConnectWallet = useCallback(async () => {
+        try {
+            setError(null);
+            const keyPair = nacl.box.keyPair();
+            await saveKeyPair(keyPair);
+
+            const dappEncryptionPk = Buffer.from(keyPair.publicKey).toString('base64');
+            const isWeb = Platform.OS === 'web' && typeof window !== 'undefined' && !!window.location?.origin;
+            const appUrl = isWeb ? window.location.origin : 'https://wene.app';
+            const redirectLink = isWeb
+                ? `${window.location.origin}/phantom-callback`
+                : 'wene://phantom/connect';
+
+            if (isWeb) {
+                const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+                setPhantomWebReturnPath(returnPath);
+            }
+
+            await initiatePhantomConnect(
+                dappEncryptionPk,
+                keyPair.secretKey,
+                redirectLink,
+                'devnet',
+                appUrl
+            );
+        } catch (e: unknown) {
+            const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: string }).message) : 'ウォレット接続に失敗しました';
+            setError(msg);
+        }
+    }, [saveKeyPair]);
+
     const handleCreate = useCallback(async () => {
         setLoading(true);
         setError(null);
+        setSetupTxSignatures([]);
         try {
             const apiBase = getAdminBaseUrl();
-            if (!defaultTokenConfig) {
-                throw new Error('SPLトークン設定がありません。EXPO_PUBLIC_SCHOOL_TICKET_* もしくは devnetConfig を設定してください。');
+            if (!walletPubkey || !phantomSession || !dappEncryptionPublicKey || !dappSecretKey || !phantomEncryptionPublicKey) {
+                throw new Error('Phantomウォレットを接続してください。');
             }
             if (!Number.isInteger(ticketTokenAmount) || ticketTokenAmount <= 0) {
                 throw new Error('発行量は1以上の整数で指定してください。');
@@ -93,14 +143,29 @@ export const AdminCreateEventScreen: React.FC = () => {
                 throw new Error('上限回数は空欄（無制限）または1以上の整数で指定してください。');
             }
 
+            const onchain = await issueEventTicketToken({
+                phantom: {
+                    walletPubkey,
+                    phantomSession,
+                    dappEncryptionPublicKey,
+                    dappSecretKey,
+                    phantomEncryptionPublicKey,
+                },
+                eventTitle: title.trim(),
+                ticketTokenAmount,
+                claimIntervalDays,
+                maxClaimsPerInterval,
+            });
+            setSetupTxSignatures(onchain.setupSignatures);
+
             const event = await httpPost<SchoolEvent>(`${apiBase}/v1/school/events`, {
                 title: title.trim(),
                 datetime: datetime.trim(),
                 host: host.trim(),
                 state: 'published',
-                solanaMint: defaultTokenConfig.solanaMint,
-                solanaAuthority: defaultTokenConfig.solanaAuthority,
-                solanaGrantId: defaultTokenConfig.solanaGrantId,
+                solanaMint: onchain.solanaMint,
+                solanaAuthority: onchain.solanaAuthority,
+                solanaGrantId: onchain.solanaGrantId,
                 ticketTokenAmount,
                 claimIntervalDays,
                 maxClaimsPerInterval,
@@ -117,7 +182,11 @@ export const AdminCreateEventScreen: React.FC = () => {
         title,
         datetime,
         host,
-        defaultTokenConfig,
+        walletPubkey,
+        phantomSession,
+        dappEncryptionPublicKey,
+        dappSecretKey,
+        phantomEncryptionPublicKey,
         ticketTokenAmount,
         claimIntervalDays,
         maxClaimsPerInterval,
@@ -157,6 +226,7 @@ export const AdminCreateEventScreen: React.FC = () => {
         setCreatedEvent(null);
         setQrDataUrl(null);
         setError(null);
+        setSetupTxSignatures([]);
     };
 
     // --- 印刷用CSS ---
@@ -197,6 +267,24 @@ export const AdminCreateEventScreen: React.FC = () => {
                     <Card style={styles.card}>
                         <AppText variant="h3" style={styles.cardTitle}>
                             新規イベント情報
+                        </AppText>
+                        <AppText variant="caption" style={styles.label}>管理者ウォレット</AppText>
+                        <View style={styles.walletRow}>
+                            <AppText variant="small" style={styles.walletStatus}>
+                                {walletReady && walletPubkey
+                                    ? `接続済み: ${walletPubkey.slice(0, 8)}...${walletPubkey.slice(-8)}`
+                                    : '未接続'}
+                            </AppText>
+                            <Button
+                                title={walletReady ? '再接続' : 'Phantom接続'}
+                                variant="secondary"
+                                dark
+                                onPress={handleConnectWallet}
+                                style={styles.walletButton}
+                            />
+                        </View>
+                        <AppText variant="small" style={styles.walletNote}>
+                            発行ごとに新規SPLトークンを作成するため、Phantom署名が必要です。
                         </AppText>
 
                         <AppText variant="caption" style={styles.label}>タイトル</AppText>
@@ -261,12 +349,6 @@ export const AdminCreateEventScreen: React.FC = () => {
                             keyboardType="number-pad"
                             maxLength={4}
                         />
-
-                        {!defaultTokenConfig && (
-                            <AppText variant="caption" style={styles.errorText}>
-                                SPLトークン設定が未構成です。EXPO_PUBLIC_SCHOOL_TICKET_* もしくは devnetConfig を設定してください。
-                            </AppText>
-                        )}
 
                         {error ? (
                             <AppText variant="caption" style={styles.errorText}>{error}</AppText>
@@ -356,7 +438,15 @@ export const AdminCreateEventScreen: React.FC = () => {
                             </AppText>
                             {createdEvent.solanaMint && (
                                 <AppText variant="small" style={styles.cardMuted}>
-                                    Token Mint: {createdEvent.solanaMint.slice(0, 8)}...
+                                    Token Mint: {createdEvent.solanaMint}
+                                </AppText>
+                            )}
+                            <AppText variant="small" style={styles.cardMuted}>
+                                Token Name: {createdEvent.title}
+                            </AppText>
+                            {createdEvent.solanaGrantId && (
+                                <AppText variant="small" style={styles.cardMuted}>
+                                    Grant ID: {createdEvent.solanaGrantId}
                                 </AppText>
                             )}
                             {typeof createdEvent.ticketTokenAmount === 'number' && (
@@ -367,6 +457,11 @@ export const AdminCreateEventScreen: React.FC = () => {
                             <AppText variant="small" style={styles.cardMuted}>
                                 受給ルール: {(createdEvent.claimIntervalDays ?? 30)}日ごと / {createdEvent.maxClaimsPerInterval == null ? '無制限' : `${createdEvent.maxClaimsPerInterval}回まで`}
                             </AppText>
+                            {setupTxSignatures.length > 0 && (
+                                <AppText variant="small" style={styles.cardMuted}>
+                                    Setup Tx: {setupTxSignatures.map((sig) => sig.slice(0, 8)).join(', ')}...
+                                </AppText>
+                            )}
 
                             <View style={styles.qrBox}>
                                 {qrDataUrl ? (
@@ -460,6 +555,24 @@ const styles = StyleSheet.create({
         color: adminTheme.colors.textSecondary,
         marginBottom: adminTheme.spacing.xs,
         marginTop: adminTheme.spacing.sm,
+    },
+    walletRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: adminTheme.spacing.sm,
+        marginBottom: adminTheme.spacing.xs,
+    },
+    walletStatus: {
+        color: adminTheme.colors.textSecondary,
+        flex: 1,
+    },
+    walletButton: {
+        minWidth: 120,
+    },
+    walletNote: {
+        color: adminTheme.colors.textTertiary,
+        marginBottom: adminTheme.spacing.sm,
     },
     input: {
         borderWidth: 1,
