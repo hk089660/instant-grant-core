@@ -41,6 +41,11 @@ export const UserConfirmScreen: React.FC = () => {
   const [pin, setPin] = useState('');
   const [showPinInput, setShowPinInput] = useState(false);
   const [waitingForPhantom, setWaitingForPhantom] = useState(false);
+  const claimIntervalDays = event?.claimIntervalDays ?? 30;
+  const maxClaimsPerInterval = event?.maxClaimsPerInterval === null
+    ? null
+    : (event?.maxClaimsPerInterval ?? 1);
+  const onchainPolicyCompatible = claimIntervalDays === 30 && maxClaimsPerInterval === 1;
   const walletReady = Boolean(
     walletPubkey &&
     phantomSession &&
@@ -210,33 +215,40 @@ export const UserConfirmScreen: React.FC = () => {
       // 1) PIN 検証だけ先に行う（off-chain claim の副作用を先に発生させない）
       await verifyUserPin(userId, pinVal);
 
-      // 2) on-chain claim（ここが成功してから off-chain 参加記録を確定）
+      // 2) on-chain claim（30日/1回ルール時のみ実行）
       let txSignature: string | undefined;
       let receiptPubkey: string | undefined;
       let result: Awaited<ReturnType<typeof claimEventWithUser>> | null = null;
 
-      try {
-        const onchain = await runOnchainClaim();
-        txSignature = onchain.txSignature;
-        receiptPubkey = onchain.receiptPubkey;
-      } catch (onchainError) {
-        // on-chain が「既に受給済み」の場合は off-chain 側も already か確認してから復元
-        const storedTicket = getTicketByEventId(targetEventId);
-        const onchainMsg = onchainError instanceof Error ? onchainError.message : String(onchainError);
-        const mayBeAlreadyClaimed =
-          onchainMsg.includes('既に受給済み') ||
-          onchainMsg.includes('already in use') ||
-          onchainMsg.includes('custom program error');
-        if (!(mayBeAlreadyClaimed && storedTicket?.txSignature)) {
-          throw onchainError;
-        }
+      if (onchainPolicyCompatible) {
+        try {
+          const onchain = await runOnchainClaim();
+          txSignature = onchain.txSignature;
+          receiptPubkey = onchain.receiptPubkey;
+        } catch (onchainError) {
+          // on-chain が「既に受給済み」の場合は off-chain 側も already か確認してから復元
+          const storedTicket = getTicketByEventId(targetEventId);
+          const onchainMsg = onchainError instanceof Error ? onchainError.message : String(onchainError);
+          const mayBeAlreadyClaimed =
+            onchainMsg.includes('既に受給済み') ||
+            onchainMsg.includes('already in use') ||
+            onchainMsg.includes('custom program error');
+          if (!(mayBeAlreadyClaimed && storedTicket?.txSignature)) {
+            throw onchainError;
+          }
 
-        result = await claimEventWithUser(targetEventId, userId, pinVal);
-        if (result.status !== 'already') {
-          throw new Error('オンチェーン上限に達しています。管理者の受給設定とオンチェーン設定を確認してください。');
+          result = await claimEventWithUser(targetEventId, userId, pinVal);
+          if (result.status !== 'already') {
+            throw new Error('オンチェーン上限に達しています。管理者の受給設定とオンチェーン設定を確認してください。');
+          }
+          txSignature = storedTicket.txSignature;
+          receiptPubkey = storedTicket.receiptPubkey;
         }
-        txSignature = storedTicket.txSignature;
-        receiptPubkey = storedTicket.receiptPubkey;
+      } else if (__DEV__) {
+        console.log('[UserConfirmScreen] skip on-chain claim due custom policy', {
+          claimIntervalDays,
+          maxClaimsPerInterval,
+        });
       }
 
       // 3) off-chain claim 記録（ネットワーク一時障害でも tx は保持して成功遷移）
@@ -287,7 +299,11 @@ export const UserConfirmScreen: React.FC = () => {
         if (msg.includes('invalid pin')) {
           setError('PINが正しくありません');
         } else if (msg.includes('既に受給済み')) {
-          setError('このウォレットは現在期間のオンチェーン配布を受給済みです。次回期間までお待ちください。');
+          setError(
+            onchainPolicyCompatible
+              ? 'このウォレットは現在期間のオンチェーン配布を受給済みです。次回期間までお待ちください。'
+              : 'この期間の受給上限に達しています。設定した期間を過ぎてから再試行してください。'
+          );
         } else if (msg.includes('キャンセル')) {
           setError('Phantom署名がキャンセルされました');
         } else if (msg.includes('タイムアウト')) {
@@ -310,6 +326,9 @@ export const UserConfirmScreen: React.FC = () => {
     getTicketByEventId,
     clearUser,
     router,
+    onchainPolicyCompatible,
+    claimIntervalDays,
+    maxClaimsPerInterval,
   ]);
 
   if (!isValid) return null;
@@ -336,6 +355,14 @@ export const UserConfirmScreen: React.FC = () => {
             <AppText variant="h3">{event.title}</AppText>
             <AppText variant="caption" style={styles.eventMeta}>{event.datetime}</AppText>
             <AppText variant="caption" style={styles.eventMeta}>主催: {event.host}</AppText>
+            <AppText variant="caption" style={styles.eventMeta}>
+              受給ルール: {claimIntervalDays}日ごと / {maxClaimsPerInterval == null ? '無制限' : `${maxClaimsPerInterval}回まで`}
+            </AppText>
+            {!onchainPolicyCompatible && (
+              <AppText variant="small" style={styles.noticeText}>
+                ※ この受給ルールは現在オフチェーン判定で適用されます（オンチェーン配布は 30日ごと1回ルールのみ対応）。
+              </AppText>
+            )}
             {event.state && event.state !== 'published' && (
               <AppText variant="small" style={styles.warningText}>
                 ※ このイベントは現在受付していません（状態: {event.state}）
@@ -481,6 +508,10 @@ const styles = StyleSheet.create({
   },
   warningText: {
     color: theme.colors.error,
+    marginTop: theme.spacing.sm,
+  },
+  noticeText: {
+    color: theme.colors.textSecondary,
     marginTop: theme.spacing.sm,
   },
   walletCard: {
