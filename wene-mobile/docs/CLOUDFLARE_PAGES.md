@@ -34,7 +34,8 @@
 2. `https://<domain>/admin/print/evt-001`
 3. `https://<domain>/u/confirm?eventId=evt-001`
 
-`dist/_redirects` に `/* /index.html 200` が含まれていれば SPA リライトが効く。
+`dist/_redirects` は **静的ファイルのパススルーを先に置いた上で** `/* /index.html 200` が最後にあることを確認する。  
+（`/assets/*` や `/_expo/*` が先にないと、画像/フォント要求が `index.html` に書き換わって表示崩れの原因になる）
 
 ## 関連
 

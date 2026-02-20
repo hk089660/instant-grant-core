@@ -1,5 +1,7 @@
 /**
- * Generate Cloudflare Pages _redirects so /api/* and /v1/* proxy to Workers.
+ * Generate Cloudflare Pages _redirects:
+ * - /api/* and /v1/* proxy to Workers
+ * - static files bypass SPA fallback (prevents image/font requests from being rewritten to index.html)
  * Required env:
  *   EXPO_PUBLIC_SCHOOL_API_BASE_URL or EXPO_PUBLIC_API_BASE_URL
  */
@@ -31,12 +33,23 @@ if (!fs.existsSync(distDir)) {
   fail(`dist directory not found. Run "npx expo export -p web" first.`);
 }
 
-const lines =
-  [
-    `/api/*  ${base}/api/:splat  200`,
-    `/v1/*   ${base}/v1/:splat   200`,
-    `/*      /index.html         200`,
-  ].join("\n") + "\n";
+const staticPassthroughRules = [
+  `/_expo/*      /_expo/:splat      200`,
+  `/assets/*     /assets/:splat     200`,
+  `/fonts/*      /fonts/:splat      200`,
+  `/favicon.ico  /favicon.ico       200`,
+  `/metadata.json /metadata.json    200`,
+  `/version.txt  /version.txt       200`,
+];
+
+const redirectRules = [
+  `/api/*  ${base}/api/:splat  200`,
+  `/v1/*   ${base}/v1/:splat   200`,
+  ...staticPassthroughRules,
+  `/*      /index.html         200`,
+];
+
+const lines = redirectRules.join("\n") + "\n";
 
 fs.writeFileSync(redirectsPath, lines, "utf8");
 console.log(`[gen-redirects] wrote ${redirectsPath}\n${lines}`);
