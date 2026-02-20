@@ -9,6 +9,7 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter, useNavigation } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PublicKey } from '@solana/web3.js';
 import { Feather } from '@expo/vector-icons';
@@ -78,6 +79,12 @@ export const WalletScreen: React.FC = () => {
   useEffect(() => {
     fetchBalances(false);
   }, [fetchBalances]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchBalances(false);
+    }, [fetchBalances])
+  );
 
   useEffect(() => {
     navigation.setOptions({

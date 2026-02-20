@@ -4,7 +4,13 @@
  */
 
 import { Connection, PublicKey } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress, getAccount } from "@solana/spl-token";
+import {
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+  getAssociatedTokenAddress,
+  getAccount,
+  getMint,
+} from "@solana/spl-token";
 
 // --- changed ---
 // Devnet: set this to a mint you actually care about (or leave TODO and rely on fallback elsewhere)
@@ -38,30 +44,70 @@ export async function getTokenBalances(
   connection: Connection,
   owner: PublicKey
 ): Promise<TokenBalanceItem[]> {
-  const res = await connection.getParsedTokenAccountsByOwner(owner, {
-    programId: TOKEN_PROGRAM_ID,
-  });
+  const programIds = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID];
+  const results = await Promise.all(
+    programIds.map(async (programId) => {
+      try {
+        return await connection.getParsedTokenAccountsByOwner(owner, { programId });
+      } catch {
+        return { value: [] as Array<any> };
+      }
+    })
+  );
 
-  return res.value
-    .filter(({ account }) => {
-      const data = account.data as { parsed?: { info?: { tokenAmount?: { uiAmountString?: string } } } } | undefined;
+  const out: TokenBalanceItem[] = [];
+  const seenAta = new Set<string>();
+  for (const res of results) {
+    for (const { pubkey, account } of res.value) {
+      const data = account.data as {
+        parsed?: {
+          info?: {
+            mint?: string;
+            tokenAmount?: {
+              amount?: string;
+              uiAmountString?: string;
+              uiAmount?: number | null;
+              decimals?: number;
+            };
+          };
+        };
+      } | undefined;
+
       const info = data?.parsed?.info;
       const tokenAmount = info?.tokenAmount;
-      if (!tokenAmount) return false;
-      const amt = tokenAmount.uiAmountString ?? '0';
-      return parseFloat(amt) > 0;
-    })
-    .map(({ pubkey, account }) => {
-      const data = account.data as { parsed: { info: { mint: string; tokenAmount: { uiAmountString: string; decimals: number } } } };
-      const info = data.parsed.info;
-      const tokenAmount = info.tokenAmount;
-      return {
-        mint: info.mint,
-        amount: tokenAmount.uiAmountString,
-        decimals: tokenAmount.decimals,
-        ata: pubkey.toBase58(),
-      };
-    });
+      const mint = info?.mint;
+      if (!tokenAmount || !mint) continue;
+
+      let rawAmount = BigInt(0);
+      try {
+        rawAmount = BigInt(tokenAmount.amount ?? '0');
+      } catch {
+        rawAmount = BigInt(0);
+      }
+      if (rawAmount <= BigInt(0)) continue;
+
+      const ata = pubkey.toBase58();
+      if (seenAta.has(ata)) continue;
+      seenAta.add(ata);
+
+      const decimals = tokenAmount.decimals ?? 0;
+      const parsedUi =
+        tokenAmount.uiAmountString ??
+        (typeof tokenAmount.uiAmount === 'number' ? String(tokenAmount.uiAmount) : '0');
+      const amount = parsedUi !== '0'
+        ? parsedUi
+        : formatAmountForDisplay(rawAmount.toString(), decimals, Math.min(6, Math.max(decimals, 0)));
+
+      out.push({
+        mint,
+        amount,
+        decimals,
+        ata,
+      });
+    }
+  }
+
+  return out;
 }
 
 /**
@@ -108,10 +154,28 @@ export async function fetchSplBalance(
   mintPubkey: PublicKey
 ): Promise<FetchSplBalanceResult> {
   try {
-    const ata = await getAssociatedTokenAddress(mintPubkey, ownerPubkey);
-    const acc = await getAccount(connection, ata);
+    const mintInfo = await connection.getAccountInfo(mintPubkey, 'confirmed');
+    const tokenProgramId =
+      mintInfo?.owner?.toBase58() === TOKEN_2022_PROGRAM_ID.toBase58()
+        ? TOKEN_2022_PROGRAM_ID
+        : TOKEN_PROGRAM_ID;
+
+    const ata = await getAssociatedTokenAddress(
+      mintPubkey,
+      ownerPubkey,
+      false,
+      tokenProgramId
+    );
+    const acc = await getAccount(connection, ata, 'confirmed', tokenProgramId);
+    let decimals = 6;
+    try {
+      const mint = await getMint(connection, mintPubkey, 'confirmed', tokenProgramId);
+      decimals = mint.decimals;
+    } catch {
+      // keep default
+    }
     // acc.amount is bigint
-    return { amount: acc.amount.toString(), decimals: 6 };
+    return { amount: acc.amount.toString(), decimals };
   } catch {
     // Fail-soft: no ATA / no balance / RPC issues => 0
     return { amount: "0", decimals: 6 };
@@ -136,18 +200,25 @@ export async function fetchAnyPositiveSplBalance(
   ownerPubkey: PublicKey
 ): Promise<{ amountText: string; unit: string } | null> {
   try {
-    const res = await connection.getParsedTokenAccountsByOwner(ownerPubkey, {
-      programId: TOKEN_PROGRAM_ID,
-    });
-    for (const { account } of res.value) {
-      const data = account.data as { parsed?: { info?: { tokenAmount?: ParsedTokenAmount } } } | undefined;
-      const tokenAmount = data?.parsed?.info?.tokenAmount;
-      if (!tokenAmount) continue;
-      const rawUi = tokenAmount.uiAmount ?? Number(tokenAmount.uiAmountString ?? "0");
-      const uiAmount = Number.isFinite(rawUi) ? rawUi : 0;
-      if (uiAmount <= 0) continue;
-      const amountText = formatAmountForDisplay(tokenAmount.amount, tokenAmount.decimals, 2);
-      return { amountText, unit: "SPL" };
+    const programIds = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID];
+    for (const programId of programIds) {
+      const res = await connection.getParsedTokenAccountsByOwner(ownerPubkey, {
+        programId,
+      });
+      for (const { account } of res.value) {
+        const data = account.data as { parsed?: { info?: { tokenAmount?: ParsedTokenAmount } } } | undefined;
+        const tokenAmount = data?.parsed?.info?.tokenAmount;
+        if (!tokenAmount) continue;
+        let rawAmount = BigInt(0);
+        try {
+          rawAmount = BigInt(tokenAmount.amount ?? '0');
+        } catch {
+          rawAmount = BigInt(0);
+        }
+        if (rawAmount <= BigInt(0)) continue;
+        const amountText = formatAmountForDisplay(tokenAmount.amount, tokenAmount.decimals, 2);
+        return { amountText, unit: "SPL" };
+      }
     }
     return null;
   } catch {

@@ -87,6 +87,32 @@ export function isTransientNetworkError(message: string): boolean {
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * 署名が confirmed/finalized になるまで短時間ポーリングする。
+ * processed のみでは成功扱いにしない。
+ */
+async function waitForConfirmedSignature(
+  signature: string,
+  maxAttempts: number = 8,
+  intervalMs: number = 900
+): Promise<boolean> {
+  const connection = getConnection();
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const { value } = await connection.getSignatureStatuses([signature]);
+    const status = value[0] ?? null;
+    if (status?.err) {
+      throw new Error(`Transaction failed: ${JSON.stringify(status.err)}`);
+    }
+    if (status?.confirmationStatus === 'confirmed' || status?.confirmationStatus === 'finalized') {
+      return true;
+    }
+    if (attempt < maxAttempts) {
+      await sleep(intervalMs);
+    }
+  }
+  return false;
+}
+
 /** Blockhash 期限切れ系エラーかどうか（自動再試行の判定用） */
 export function isBlockhashExpiredError(message: string): boolean {
   const lower = message.toLowerCase();
@@ -163,7 +189,7 @@ export async function sendSignedTx(
   // 3) sendRawTransaction（オプション固定）
   const sendOpts = {
     skipPreflight: false,
-    preflightCommitment: 'processed' as const,
+    preflightCommitment: 'confirmed' as const,
     maxRetries: 3,
   };
   const NETWORK_RETRY_MAX = 3;
@@ -199,14 +225,14 @@ export async function sendSignedTx(
             blockhash: confirmContext.blockhash,
             lastValidBlockHeight: confirmContext.lastValidBlockHeight,
           },
-          'processed'
+          'confirmed'
         );
         if (confirmation.value.err) {
           throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
         }
       } else {
         // フォールバック: blockhash を捏造せず、signature だけの API で確定
-        const confirmation = await connection.confirmTransaction(sig, 'processed');
+        const confirmation = await connection.confirmTransaction(sig, 'confirmed');
         if (confirmation.value.err) {
           throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
         }
@@ -226,22 +252,15 @@ export async function sendSignedTx(
   }
   if (confirmError) {
     try {
-      // 最終保険: confirm が throw しても、getSignatureStatuses で成功判定できれば Done 扱い
-      const { value } = await connection.getSignatureStatuses([sig]);
-      const status = value[0] ?? null;
-      const ok =
-        status != null &&
-        status.err === null &&
-        (status.confirmationStatus === 'processed' ||
-          status.confirmationStatus === 'confirmed' ||
-          status.confirmationStatus === 'finalized');
+      // 最終保険: confirm が throw しても、confirmed/finalized まで到達したら成功扱い
+      const ok = await waitForConfirmedSignature(sig);
       if (ok) {
-        console.warn('[sendSignedTx] confirmTransaction threw but getSignatureStatuses shows success:', sig);
+        console.warn('[sendSignedTx] confirmTransaction threw but signature reached confirmed/finalized:', sig);
         return sig;
       }
     } catch (statusError) {
       const statusMsg = statusError instanceof Error ? statusError.message : String(statusError);
-      console.warn('[sendSignedTx] getSignatureStatuses fallback failed:', statusMsg);
+      console.warn('[sendSignedTx] waitForConfirmedSignature fallback failed:', statusMsg);
     }
     const rawMsg = confirmError instanceof Error ? confirmError.message : String(confirmError);
     console.error('Failed to confirm transaction:', confirmError);
