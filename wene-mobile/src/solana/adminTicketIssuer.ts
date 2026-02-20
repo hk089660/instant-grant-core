@@ -120,6 +120,16 @@ function clipUtf8(input: string, maxBytes: number): string {
   return out;
 }
 
+function resolveMetadataBaseUrl(): string {
+  const envBase = (
+    process.env.EXPO_PUBLIC_API_BASE_URL ??
+    process.env.EXPO_PUBLIC_SCHOOL_API_BASE_URL ??
+    ''
+  ).trim().replace(/\/$/, '');
+  if (envBase) return envBase;
+  return 'https://instant-grant-core.haruki-kira3.workers.dev';
+}
+
 async function signAndSendTx(
   tx: Transaction,
   phantom: AdminPhantomContext,
@@ -181,7 +191,7 @@ export async function issueEventTicketToken(
   const grantId = BigInt(Date.now() * 1000 + Math.floor(Math.random() * 1000));
   const metadataName = clipUtf8(params.eventTitle.trim() || 'Event Ticket', 32);
   const metadataSymbol = clipUtf8((params.eventTitle || 'TICKET').replace(/\s+/g, '').slice(0, 10), 10) || 'TICKET';
-  const metadataUri = clipUtf8(`https://instant-grant-core.pages.dev/metadata/${mint.toBase58()}.json`, 200);
+  const metadataUri = clipUtf8(`${resolveMetadataBaseUrl()}/metadata/${mint.toBase58()}.json`, 200);
 
   const ownerAta = getAssociatedTokenAddressSync(
     mint,

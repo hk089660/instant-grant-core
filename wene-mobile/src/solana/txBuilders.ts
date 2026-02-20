@@ -14,6 +14,17 @@ import { DEFAULT_CLUSTER } from './cluster';
 import { DEVNET_GRANT_CONFIG } from './devnetConfig';
 import { RPC_URL } from './singleton';
 
+function toBigIntValue(value: unknown, field: string): bigint {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.trunc(value));
+  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return BigInt(value.trim());
+  if (value && typeof value === 'object' && 'toString' in value) {
+    const str = (value as { toString: () => string }).toString();
+    if (/^-?\d+$/.test(str.trim())) return BigInt(str.trim());
+  }
+  throw new Error(`Invalid ${field} in grant account`);
+}
+
 /**
  * Claim Transaction 構築パラメータ
  */
@@ -88,15 +99,39 @@ export async function buildClaimTx(
       ? devnetConfig.grantId
       : BigInt(1);
 
-  const startTs = devnetConfig
-    ? devnetConfig.startTs
-    : BigInt(Math.floor(Date.now() / 1000) - 86400);
-
-  const periodSeconds = devnetConfig
-    ? devnetConfig.periodSeconds
-    : BigInt(2592000);
-
   const [grantPda] = getGrantPda(authority, mint, grantId);
+  const hasExplicitGrantParams = Boolean(
+    params.solanaAuthority &&
+    params.solanaMint &&
+    params.solanaGrantId
+  );
+  let periodSource: 'grantAccount' | 'devnetConfig' | 'fallback' = 'fallback';
+  let startTs: bigint;
+  let periodSeconds: bigint;
+  try {
+    const grantAccount = await (program as any).account.grant.fetch(grantPda);
+    startTs = toBigIntValue(grantAccount.startTs, 'startTs');
+    periodSeconds = toBigIntValue(grantAccount.periodSeconds, 'periodSeconds');
+    periodSource = 'grantAccount';
+  } catch (grantFetchError) {
+    if (hasExplicitGrantParams) {
+      const msg = grantFetchError instanceof Error ? grantFetchError.message : String(grantFetchError);
+      throw new Error(`配布設定の取得に失敗しました（grant fetch failed: ${msg}）`);
+    }
+    if (devnetConfig) {
+      startTs = devnetConfig.startTs;
+      periodSeconds = devnetConfig.periodSeconds;
+      periodSource = 'devnetConfig';
+    } else {
+      startTs = BigInt(Math.floor(Date.now() / 1000) - 86400);
+      periodSeconds = BigInt(2592000);
+      periodSource = 'fallback';
+    }
+  }
+  if (periodSeconds <= BigInt(0)) {
+    throw new Error('配布設定が不正です（period_seconds <= 0）');
+  }
+
   const periodIndex = calculatePeriodIndex(startTs, periodSeconds);
 
   const [vaultPda] = getVaultPda(grantPda);
@@ -142,14 +177,15 @@ export async function buildClaimTx(
       '[DEV_ENV] cluster=' + DEFAULT_CLUSTER +
       ' rpc=' + RPC_URL +
       ' programId=' + GRANT_PROGRAM_ID.toBase58() +
-      ' source=' + (devnetConfig ? 'devnetConfig' : 'dummy')
+      ' source=' + periodSource
     );
-    if (devnetConfig) {
+    if (periodSource !== 'fallback') {
       console.log(
         '[DEV_GRANT] grantId=' + grantId.toString() +
         ' mint=' + mint.toBase58() +
         ' vault=' + vaultPda.toBase58() +
-        ' vaultBalance=' + (vaultBalanceLog || '-')
+        ' vaultBalance=' + (vaultBalanceLog || '-') +
+        ' periodIndex=' + periodIndex.toString()
       );
     }
   }
