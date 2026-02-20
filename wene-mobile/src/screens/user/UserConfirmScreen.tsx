@@ -263,10 +263,11 @@ export const UserConfirmScreen: React.FC = () => {
       } catch (onchainError) {
         const storedTicket = getTicketByEventId(targetEventId);
         const onchainMsg = onchainError instanceof Error ? onchainError.message : String(onchainError);
+        const onchainMsgLower = onchainMsg.toLowerCase();
         const mayBeAlreadyClaimed =
           onchainMsg.includes('既に受給済み') ||
-          onchainMsg.includes('already in use') ||
-          onchainMsg.includes('custom program error');
+          onchainMsgLower.includes('already in use') ||
+          onchainMsgLower.includes('account already in use');
         if (!mayBeAlreadyClaimed) {
           throw onchainError;
         }
