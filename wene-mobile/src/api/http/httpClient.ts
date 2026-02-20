@@ -6,7 +6,10 @@ import type { SchoolClaimResult } from '../../types/school';
 
 const DEFAULT_TIMEOUT_MS = 15000;
 
-export async function httpGet<T>(url: string, options?: { timeoutMs?: number }): Promise<T> {
+export async function httpGet<T>(
+  url: string,
+  options?: { timeoutMs?: number; headers?: Record<string, string> }
+): Promise<T> {
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -16,6 +19,7 @@ export async function httpGet<T>(url: string, options?: { timeoutMs?: number }):
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
+        ...(options?.headers ?? {}),
       }
     });
     clearTimeout(timeoutId);
@@ -32,7 +36,11 @@ export async function httpGet<T>(url: string, options?: { timeoutMs?: number }):
   }
 }
 
-export async function httpPost<T>(url: string, body: unknown, options?: { timeoutMs?: number }): Promise<T> {
+export async function httpPost<T>(
+  url: string,
+  body: unknown,
+  options?: { timeoutMs?: number; headers?: Record<string, string> }
+): Promise<T> {
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -42,6 +50,7 @@ export async function httpPost<T>(url: string, body: unknown, options?: { timeou
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
+        ...(options?.headers ?? {}),
       },
       body: JSON.stringify(body),
       signal: controller.signal,

@@ -10,7 +10,7 @@ import { useRouter } from 'expo-router';
 import * as QRCode from 'qrcode';
 import { AppText, Button, Card } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
-import { httpPost } from '../../api/http/httpClient';
+import { createAdminEvent } from '../../api/adminApi';
 import type { SchoolEvent } from '../../types/school';
 import { useRecipientStore } from '../../store/recipientStore';
 import { usePhantomStore } from '../../store/phantomStore';
@@ -19,15 +19,6 @@ import { setPhantomWebReturnPath } from '../../utils/phantomWebReturnPath';
 import * as nacl from 'tweetnacl';
 import { issueEventTicketToken } from '../../solana/adminTicketIssuer';
 import { getPhantomExtensionProvider, getPhantomExtensionPubkey } from '../../wallet/phantomExtension';
-
-function getAdminBaseUrl(): string {
-    if (typeof window !== 'undefined' && window.location?.origin) {
-        return window.location.origin;
-    }
-    const envBase = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
-    if (envBase) return envBase;
-    throw new Error('EXPO_PUBLIC_API_BASE_URL is required for native builds');
-}
 
 type Step = 'form' | 'preview' | 'done';
 
@@ -180,7 +171,6 @@ export const AdminCreateEventScreen: React.FC = () => {
         setError(null);
         setSetupTxSignatures([]);
         try {
-            const apiBase = getAdminBaseUrl();
             if (!walletPubkey) {
                 throw new Error('Phantomウォレットを接続してください。');
             }
@@ -237,7 +227,7 @@ export const AdminCreateEventScreen: React.FC = () => {
             });
             setSetupTxSignatures(onchain.setupSignatures);
 
-            const event = await httpPost<SchoolEvent>(`${apiBase}/v1/school/events`, {
+            const event = await createAdminEvent({
                 title: title.trim(),
                 datetime: datetime.trim(),
                 host: host.trim(),

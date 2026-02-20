@@ -97,6 +97,27 @@ We-ne is an open-source prototype/evaluation kit for verifying non-custodial aid
 - Success screen shows tx signature + receipt pubkey + Explorer link (devnet).
 - Re-application is treated as `already joined` (operation complete), no double payment.
 
+## Latest Security & Audit Updates (Feb 20, 2026)
+
+- Admin-only school routes now require Bearer operator authentication:
+  - `POST /v1/school/events`
+  - `GET /v1/school/events/:eventId/claimants`
+- Master-only APIs now reject the default placeholder password (`change-this-in-dashboard`). A real `ADMIN_PASSWORD` must be set.
+- API audit logs are now chained globally (`prev_hash`) across admin/user/system APIs, while keeping per-event stream linkage (`stream_prev_hash`) for drill-down.
+- Admin demo flow is preserved, but direct UI bypass is removed:
+  - Demo button now performs API login using `EXPO_PUBLIC_ADMIN_DEMO_PASSWORD`.
+  - `/admin/*` routes are session-guarded and redirect unauthorized users to `/admin/login`.
+  - Admin API client always attaches `Authorization` and clears session on `401`.
+- Local dev server CORS now allows `Authorization` header for parity with production behavior.
+
+### Required Configuration for These Updates
+
+- Cloudflare Worker vars (`api-worker`):
+  - `ADMIN_PASSWORD`: required, and must not be `change-this-in-dashboard`.
+  - `ADMIN_DEMO_PASSWORD`: optional (only for demo admin login).
+- App env (`wene-mobile`):
+  - `EXPO_PUBLIC_ADMIN_DEMO_PASSWORD`: required only if you want the demo login button to work.
+
 ## Trust Layer: Participation & Eligibility Gating via FairScale
 
 Status: Planned

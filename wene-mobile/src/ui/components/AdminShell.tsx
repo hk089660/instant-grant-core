@@ -3,6 +3,7 @@ import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AppText } from './AppText';
 import { adminTheme } from '../adminTheme';
+import { clearAdminSession } from '../../lib/adminAuth';
 
 interface AdminShellProps {
   title: string;
@@ -12,6 +13,10 @@ interface AdminShellProps {
 
 export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
   const router = useRouter();
+  const handleLogout = async () => {
+    await clearAdminSession();
+    router.replace('/admin/login' as any);
+  };
 
   return (
     <View style={styles.container}>
@@ -44,7 +49,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
                 Categories
               </AppText>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/admin/login' as any)}>
+            <TouchableOpacity onPress={handleLogout}>
               <AppText variant="caption" style={styles.navText}>
                 Logout
               </AppText>

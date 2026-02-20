@@ -115,4 +115,42 @@ describe('API coverage audit logs', () => {
     expect((log.data.requestBody as Record<string, unknown>).pin).toBe('[REDACTED]');
     expect(log.data.status).toBe(401);
   });
+
+  it('tracks unauthorized admin-protected school route access as operator', async () => {
+    const res = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'blocked',
+          datetime: '2026/02/20 16:00',
+          host: 'admin',
+          ticketTokenAmount: 1,
+        }),
+      })
+    );
+
+    expect(res.status).toBe(401);
+
+    const log = await latestAudit(state);
+    expect(log.event).toBe('API_POST_V1_SCHOOL_EVENTS');
+    expect(log.actor).toEqual({ type: 'operator', id: 'anonymous' });
+    expect(log.data.status).toBe(401);
+  });
+
+  it('returns server configuration error for master-only routes when default password is not replaced', async () => {
+    const localState = new MockDurableObjectState();
+    const insecureEnv: Env = { ADMIN_PASSWORD: 'change-this-in-dashboard' };
+    // @ts-expect-error mock for DurableObjectState
+    const insecureStore = new SchoolStore(localState, insecureEnv);
+
+    const res = await insecureStore.fetch(
+      new Request('https://example.com/api/master/audit-logs', {
+        method: 'GET',
+        headers: { Authorization: 'Bearer change-this-in-dashboard' },
+      })
+    );
+
+    expect(res.status).toBe(500);
+  });
 });

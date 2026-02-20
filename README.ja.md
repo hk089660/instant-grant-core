@@ -99,6 +99,27 @@ We-ne は、Solana 上で非保管型の支援配布と参加券運用を検証�
 - Success 画面で tx signature + receipt pubkey + Explorer リンク（devnet）を確認できる。
 - 再申請は \`already joined\` の運用完了として扱われ、二重支払いはしない。
 
+## 最新のセキュリティ/監査更新（2026-02-20）
+
+- 管理者専用の学校APIは Bearer 認証が必須になりました:
+  - \`POST /v1/school/events\`
+  - \`GET /v1/school/events/:eventId/claimants\`
+- Master専用APIは、既定のプレースホルダーパスワード（\`change-this-in-dashboard\`）を拒否するようになりました。実値の \`ADMIN_PASSWORD\` 設定が必須です。
+- API監査ログは、管理者/利用者/システムAPIを横断するグローバルチェーン（\`prev_hash\`）で連結しつつ、イベント単位の追跡（\`stream_prev_hash\`）も維持します。
+- 管理者デモ導線は維持しつつ、UI直通バイパスは廃止しました:
+  - デモボタンは \`EXPO_PUBLIC_ADMIN_DEMO_PASSWORD\` を使って API ログインを実行します。
+  - \`/admin/*\` はセッションガードされ、未認証時は \`/admin/login\` にリダイレクトされます。
+  - 管理者APIクライアントは常に \`Authorization\` を付与し、\`401\` ではセッションを破棄します。
+- ローカル開発サーバーの CORS は、実運用に合わせて \`Authorization\` ヘッダーを許可しました。
+
+### この更新で必要な設定
+
+- Cloudflare Worker 変数（\`api-worker\`）:
+  - \`ADMIN_PASSWORD\`: 必須（\`change-this-in-dashboard\` は不可）。
+  - \`ADMIN_DEMO_PASSWORD\`: 任意（デモ管理者ログインを有効化する場合のみ）。
+- アプリ環境変数（\`wene-mobile\`）:
+  - \`EXPO_PUBLIC_ADMIN_DEMO_PASSWORD\`: デモログインボタンを使う場合のみ必須。
+
 ## 信頼レイヤー：FairScaleによる参加・受給資格ゲート
 
 状態：予定

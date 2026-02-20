@@ -24,7 +24,7 @@ export function createServer(options: CreateServerOptions): Express {
   app.use((_req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     next();
   });
   app.options('*', (_req, res) => res.sendStatus(204));

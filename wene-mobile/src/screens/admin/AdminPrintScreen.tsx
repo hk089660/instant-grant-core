@@ -12,7 +12,6 @@ import type { SchoolEvent } from '../../types/school';
 export const AdminPrintScreen: React.FC = () => {
   const router = useRouter();
   const { eventId } = useLocalSearchParams<{ eventId: string }>();
-  const isAdmin = true;
   const printHiddenProps = { 'data-print-hidden': 'true' } as any;
   const printCardProps = { 'data-print-card': 'true' } as any;
   const printQrProps = { 'data-print-qr': 'true' } as any;
@@ -108,67 +107,54 @@ export const AdminPrintScreen: React.FC = () => {
           </View>
         </View>
 
-        {!isAdmin ? (
-          <Card style={styles.card} {...printCardProps}>
-            <AppText variant="bodyLarge" style={styles.cardText}>
-              管理者のみ印刷できます
-            </AppText>
+        <Card style={styles.card} {...printCardProps}>
+          {event && event.state && event.state !== 'published' ? (
             <AppText variant="caption" style={styles.cardMuted}>
-              閲覧モードでは印刷できません
+              無効（{event.state}）— QRは利用できません
             </AppText>
-          </Card>
-        ) : (
-          <>
-            <Card style={styles.card} {...printCardProps}>
-              {event && event.state && event.state !== 'published' ? (
-                <AppText variant="caption" style={styles.cardMuted}>
-                  無効（{event.state}）— QRは利用できません
-                </AppText>
-              ) : null}
-              <AppText variant="h3" style={styles.cardText}>
-                {event?.title ?? '…'}
-              </AppText>
-              <AppText variant="caption" style={styles.cardText}>
-                {event?.datetime ?? '—'}
-              </AppText>
-              <AppText variant="caption" style={styles.cardText}>
-                主催: {event?.host ?? '—'}
-              </AppText>
-              <AppText variant="small" style={styles.cardMuted}>
-                ID: {eventId}
-              </AppText>
-              <View style={styles.qrBox} {...printQrProps}>
-                {qrDataUrl ? (
-                  Platform.OS === 'web' ? (
-                    // @ts-ignore - web only
-                    <img src={qrDataUrl} alt="QR Code" style={{ width: 300, height: 300 }} />
-                  ) : (
-                    <Image source={{ uri: qrDataUrl }} style={styles.qrImage} />
-                  )
-                ) : (
-                  <AppText variant="caption" style={styles.cardMuted}>
-                    QR生成中...
-                  </AppText>
-                )}
-              </View>
-              {scanUrl ? (
-                <AppText variant="small" style={[styles.cardMuted, styles.qrUrl]} selectable>
-                  {scanUrl}
-                </AppText>
-              ) : null}
-              <AppText variant="small" style={styles.cardMuted}>
-                参加用QR（通常のブラウザで開く）
-              </AppText>
+          ) : null}
+          <AppText variant="h3" style={styles.cardText}>
+            {event?.title ?? '…'}
+          </AppText>
+          <AppText variant="caption" style={styles.cardText}>
+            {event?.datetime ?? '—'}
+          </AppText>
+          <AppText variant="caption" style={styles.cardText}>
+            主催: {event?.host ?? '—'}
+          </AppText>
+          <AppText variant="small" style={styles.cardMuted}>
+            ID: {eventId}
+          </AppText>
+          <View style={styles.qrBox} {...printQrProps}>
+            {qrDataUrl ? (
+              Platform.OS === 'web' ? (
+                // @ts-ignore - web only
+                <img src={qrDataUrl} alt="QR Code" style={{ width: 300, height: 300 }} />
+              ) : (
+                <Image source={{ uri: qrDataUrl }} style={styles.qrImage} />
+              )
+            ) : (
               <AppText variant="caption" style={styles.cardMuted}>
-                上記URLをQRコード化して印刷してください。生徒は通常ブラウザで開けます。署名が必要な場合は確認画面で「Phantomで開く」を利用してください。
+                QR生成中...
               </AppText>
-            </Card>
+            )}
+          </View>
+          {scanUrl ? (
+            <AppText variant="small" style={[styles.cardMuted, styles.qrUrl]} selectable>
+              {scanUrl}
+            </AppText>
+          ) : null}
+          <AppText variant="small" style={styles.cardMuted}>
+            参加用QR（通常のブラウザで開く）
+          </AppText>
+          <AppText variant="caption" style={styles.cardMuted}>
+            上記URLをQRコード化して印刷してください。生徒は通常ブラウザで開けます。署名が必要な場合は確認画面で「Phantomで開く」を利用してください。
+          </AppText>
+        </Card>
 
-            <View {...printHiddenProps}>
-              <Button title="印刷する" variant="secondary" dark onPress={handlePrint} />
-            </View>
-          </>
-        )}
+        <View {...printHiddenProps}>
+          <Button title="印刷する" variant="secondary" dark onPress={handlePrint} />
+        </View>
       </View>
     </SafeAreaView>
   );

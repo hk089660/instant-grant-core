@@ -9,7 +9,8 @@ import { useRouter } from 'expo-router';
 import { AppText, Button, Card } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
 
-import { verifyAdminPassword } from '../../api/adminApi';
+import { loginAdmin } from '../../api/adminApi';
+import { saveAdminSession } from '../../lib/adminAuth';
 
 // ...
 
@@ -18,27 +19,45 @@ export const AdminLoginScreen: React.FC = () => {
   const [passcode, setPasscode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const demoPasscode = (process.env.EXPO_PUBLIC_ADMIN_DEMO_PASSWORD ?? '').trim();
 
-  const handleLogin = async () => {
+  const performLogin = async (password: string, source: 'password' | 'demo') => {
     setError(null);
-    if (!passcode.trim()) {
+    if (!password.trim()) {
       setError('パスコードを入力してください');
       return;
     }
     setLoading(true);
 
-    // API による認証
     try {
-      const isValid = await verifyAdminPassword(passcode);
-      if (isValid) {
+      const result = await loginAdmin(password);
+      if (result.success && result.role) {
+        await saveAdminSession({
+          token: password,
+          role: result.role,
+          source,
+          createdAt: new Date().toISOString(),
+        });
         router.replace('/admin' as any);
       } else {
         setError('パスコードが正しくありません');
       }
-    } catch (e) {
+    } catch {
       setError('認証エラーが発生しました');
     }
     setLoading(false);
+  };
+
+  const handleLogin = async () => {
+    await performLogin(passcode, 'password');
+  };
+
+  const handleDemoLogin = async () => {
+    if (!demoPasscode) {
+      setError('デモログイン用コードが未設定です');
+      return;
+    }
+    await performLogin(demoPasscode, 'demo');
   };
 
   return (
@@ -86,7 +105,8 @@ export const AdminLoginScreen: React.FC = () => {
           </AppText>
           <Button
             title="デモ管理者としてログイン"
-            onPress={() => router.replace('/admin' as any)}
+            onPress={handleDemoLogin}
+            disabled={loading}
             style={styles.demoButton}
           />
         </View>

@@ -14,5 +14,6 @@ export type AuditEvent = {
   actor: AuditActor;
   data: Record<string, unknown>;
   prev_hash: string;
+  stream_prev_hash?: string;
   entry_hash: string;
 };

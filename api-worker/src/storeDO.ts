@@ -31,12 +31,15 @@ function genConfirmationCode(): string {
 export interface Env {
   CORS_ORIGIN?: string;
   ADMIN_PASSWORD?: string;
+  ADMIN_DEMO_PASSWORD?: string;
 }
 
 const AUDIT_MAX_DEPTH = 4;
 const AUDIT_MAX_ARRAY = 20;
 const AUDIT_MAX_KEYS = 50;
 const AUDIT_MAX_STRING = 160;
+const DEFAULT_ADMIN_PASSWORD = 'change-this-in-dashboard';
+const AUDIT_LAST_HASH_GLOBAL_KEY = 'audit:lastHash:global';
 const MINT_BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const TOKEN_IMAGE_URL = 'https://instant-grant-core.pages.dev/ticket-token.png';
 
@@ -68,17 +71,92 @@ export class SchoolStore implements DurableObject {
   }
 
 
-  private locks = new Map<string, Promise<void>>();
+  private auditLock: Promise<void> = Promise.resolve();
+
+  private extractBearerToken(request: Request): string | null {
+    const authHeader = request.headers.get('Authorization') ?? '';
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
+    const token = match?.[1]?.trim() ?? '';
+    return token || null;
+  }
+
+  private getConfiguredMasterPassword(): string | null {
+    const password = this.env.ADMIN_PASSWORD?.trim() ?? '';
+    if (!password || password === DEFAULT_ADMIN_PASSWORD) return null;
+    return password;
+  }
+
+  private getConfiguredDemoPassword(): string | null {
+    const password = this.env.ADMIN_DEMO_PASSWORD?.trim() ?? '';
+    return password || null;
+  }
+
+  private unauthorizedResponse(): Response {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  private serverConfigErrorResponse(): Response {
+    return Response.json({ error: 'server configuration error' }, { status: 500 });
+  }
+
+  private async authenticateOperator(
+    request: Request
+  ): Promise<{ role: 'master' | 'admin'; source: 'master' | 'invite' | 'demo' } | null> {
+    const token = this.extractBearerToken(request);
+    if (!token) return null;
+
+    const masterPassword = this.getConfiguredMasterPassword();
+    if (masterPassword && token === masterPassword) {
+      return { role: 'master', source: 'master' };
+    }
+
+    const demoPassword = this.getConfiguredDemoPassword();
+    if (demoPassword && token === demoPassword) {
+      return { role: 'admin', source: 'demo' };
+    }
+
+    const adminData = await this.ctx.storage.get(adminCodeKey(token));
+    if (adminData) {
+      return { role: 'admin', source: 'invite' };
+    }
+
+    return null;
+  }
+
+  private requireMasterAuthorization(request: Request): Response | null {
+    const masterPassword = this.getConfiguredMasterPassword();
+    if (!masterPassword) {
+      return this.serverConfigErrorResponse();
+    }
+    const token = this.extractBearerToken(request);
+    if (!token || token !== masterPassword) {
+      return this.unauthorizedResponse();
+    }
+    return null;
+  }
+
+  private async requireAdminAuthorization(request: Request): Promise<Response | null> {
+    const operator = await this.authenticateOperator(request);
+    if (!operator) {
+      return this.unauthorizedResponse();
+    }
+    return null;
+  }
+
+  private isAdminProtectedSchoolRoute(path: string, method: string): boolean {
+    const normalizedMethod = method.toUpperCase();
+    if (normalizedMethod === 'POST' && path === '/v1/school/events') return true;
+    if (normalizedMethod === 'GET' && /^\/v1\/school\/events\/[^/]+\/claimants$/.test(path)) return true;
+    return false;
+  }
 
   async appendAuditLog(event: string, actor: AuditActor, data: unknown, eventId: string): Promise<AuditEvent> {
-    // Serialize execution per eventId using a promise chain (mutex)
-    const currentLock = this.locks.get(eventId) || Promise.resolve();
-
-    const task = currentLock.then(async () => {
+    // Serialize globally so a single hash chain can cover all API logs.
+    const task = this.auditLock.then(async () => {
       const ts = new Date().toISOString();
-      // Use eventId to namespace the hash chain
-      const lastHashKey = `audit:lastHash:${eventId}`;
-      const prevHash = (await this.ctx.storage.get<string>(lastHashKey)) ?? 'GENESIS';
+      const globalPrevHash = (await this.ctx.storage.get<string>(AUDIT_LAST_HASH_GLOBAL_KEY)) ?? 'GENESIS';
+      const streamLastHashKey = `audit:lastHash:${eventId}`;
+      const streamPrevHash = (await this.ctx.storage.get<string>(streamLastHashKey)) ?? 'GENESIS';
 
       const baseEntry = {
         ts,
@@ -86,14 +164,16 @@ export class SchoolStore implements DurableObject {
         eventId,
         actor,
         data: (data as Record<string, unknown>) ?? {},
-        prev_hash: prevHash,
+        prev_hash: globalPrevHash,
+        stream_prev_hash: streamPrevHash,
       };
 
       const entry_hash = await sha256Hex(canonicalize(baseEntry));
       const fullEntry: AuditEvent = { ...baseEntry, entry_hash };
 
-      // Atomically update the hash chain
-      await this.ctx.storage.put(lastHashKey, entry_hash);
+      // Update both global and per-event stream chains.
+      await this.ctx.storage.put(AUDIT_LAST_HASH_GLOBAL_KEY, entry_hash);
+      await this.ctx.storage.put(streamLastHashKey, entry_hash);
 
       // Store history for Master Dashboard
       // Key format: audit_history:<timestamp>:<hash> to allow reverse chronological listing
@@ -103,8 +183,8 @@ export class SchoolStore implements DurableObject {
       return fullEntry;
     });
 
-    // Update lock for next caller, robust against failures
-    this.locks.set(eventId, task.then(() => { }, () => { }));
+    // Update lock for next caller, robust against failures.
+    this.auditLock = task.then(() => { }, () => { });
 
     return task;
   }
@@ -150,7 +230,12 @@ export class SchoolStore implements DurableObject {
 
   private actorForAudit(path: string, request: Request, body: unknown): AuditActor {
     if (path.startsWith('/api/admin/') || path.startsWith('/api/master/')) {
-      const hasAuth = Boolean(request.headers.get('Authorization'));
+      const hasAuth = Boolean(this.extractBearerToken(request));
+      return { type: 'operator', id: hasAuth ? 'authenticated' : 'anonymous' };
+    }
+
+    if (this.isAdminProtectedSchoolRoute(path, request.method)) {
+      const hasAuth = Boolean(this.extractBearerToken(request));
       return { type: 'operator', id: hasAuth ? 'authenticated' : 'anonymous' };
     }
 
@@ -334,10 +419,9 @@ export class SchoolStore implements DurableObject {
 
     // GET /api/master/audit-logs (Master Password required)
     if (path === '/api/master/audit-logs' && request.method === 'GET') {
-      const authHeader = request.headers.get('Authorization');
-      const masterPassword = this.env.ADMIN_PASSWORD;
-      if (!masterPassword || authHeader !== `Bearer ${masterPassword}`) {
-        return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      const authError = this.requireMasterAuthorization(request);
+      if (authError) {
+        return authError;
       }
       const logs = await this.getAuditLogs();
       return Response.json({ logs });
@@ -345,10 +429,9 @@ export class SchoolStore implements DurableObject {
 
     // POST /api/admin/invite (Master Password required)
     if (path === '/api/admin/invite' && request.method === 'POST') {
-      const authHeader = request.headers.get('Authorization');
-      const masterPassword = this.env.ADMIN_PASSWORD;
-      if (!masterPassword || authHeader !== `Bearer ${masterPassword}`) {
-        return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      const authError = this.requireMasterAuthorization(request);
+      if (authError) {
+        return authError;
       }
 
       let body: { name?: string };
@@ -371,10 +454,9 @@ export class SchoolStore implements DurableObject {
 
     // GET /api/admin/invites (Master Password required)
     if (path === '/api/admin/invites' && request.method === 'GET') {
-      const authHeader = request.headers.get('Authorization');
-      const masterPassword = this.env.ADMIN_PASSWORD;
-      if (!masterPassword || authHeader !== `Bearer ${masterPassword}`) {
-        return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      const authError = this.requireMasterAuthorization(request);
+      if (authError) {
+        return authError;
       }
 
       const result = await this.ctx.storage.list({ prefix: 'admin_code:' });
@@ -389,10 +471,9 @@ export class SchoolStore implements DurableObject {
 
     // POST /api/admin/revoke (Master Password required)
     if (path === '/api/admin/revoke' && request.method === 'POST') {
-      const authHeader = request.headers.get('Authorization');
-      const masterPassword = this.env.ADMIN_PASSWORD;
-      if (!masterPassword || authHeader !== `Bearer ${masterPassword}`) {
-        return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      const authError = this.requireMasterAuthorization(request);
+      if (authError) {
+        return authError;
       }
       let body: { code?: string };
       try {
@@ -417,18 +498,22 @@ export class SchoolStore implements DurableObject {
       }
 
       const password = typeof body?.password === 'string' ? body.password : '';
-      const masterPassword = this.env.ADMIN_PASSWORD;
+      const masterPassword = this.getConfiguredMasterPassword();
+      const demoPassword = this.getConfiguredDemoPassword();
 
-      if (!masterPassword) {
-        return Response.json({ error: 'server configuration error' }, { status: 500 });
-      }
-
-      // 1. Check Master Password
-      if (password === masterPassword) {
+      if (masterPassword && password === masterPassword) {
         return Response.json({ ok: true, role: 'master' });
       }
 
-      // 2. Check Issued Admin Codes
+      if (demoPassword && password === demoPassword) {
+        return Response.json({
+          ok: true,
+          role: 'admin',
+          info: { name: 'Demo Admin', source: 'demo' },
+        });
+      }
+
+      // Check Issued Admin Codes
       const adminData = await this.ctx.storage.get(adminCodeKey(password));
       if (adminData) {
         return Response.json({ ok: true, role: 'admin', info: adminData });
@@ -444,6 +529,11 @@ export class SchoolStore implements DurableObject {
 
     // POST /v1/school/events — イベント新規作成（admin用）
     if (path === '/v1/school/events' && request.method === 'POST') {
+      const authError = await this.requireAdminAuthorization(request);
+      if (authError) {
+        return authError;
+      }
+
       let body: {
         title?: string;
         datetime?: string;
@@ -544,6 +634,11 @@ export class SchoolStore implements DurableObject {
     // GET /v1/school/events/:eventId/claimants — 参加者一覧
     const claimantsMatch = path.match(/^\/v1\/school\/events\/([^/]+)\/claimants$/);
     if (claimantsMatch && request.method === 'GET') {
+      const authError = await this.requireAdminAuthorization(request);
+      if (authError) {
+        return authError;
+      }
+
       const eventId = claimantsMatch[1];
       const event = await this.store.getEvent(eventId);
       if (!event) {

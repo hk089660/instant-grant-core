@@ -46,6 +46,10 @@ class MockDurableObjectState {
 describe('POST /v1/school/events ticketTokenAmount validation', () => {
   let state: MockDurableObjectState;
   let store: SchoolStore;
+  const adminHeaders = {
+    'content-type': 'application/json',
+    Authorization: 'Bearer master-secret',
+  };
 
   beforeEach(() => {
     state = new MockDurableObjectState();
@@ -58,7 +62,7 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     const res = await store.fetch(
       new Request('https://example.com/v1/school/events', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: adminHeaders,
         body: JSON.stringify({
           title: 'test event',
           datetime: '2026/02/20 10:00',
@@ -74,7 +78,7 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     const numberRes = await store.fetch(
       new Request('https://example.com/v1/school/events', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: adminHeaders,
         body: JSON.stringify({
           title: 'number amount',
           datetime: '2026/02/20 11:00',
@@ -98,7 +102,7 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     const stringRes = await store.fetch(
       new Request('https://example.com/v1/school/events', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: adminHeaders,
         body: JSON.stringify({
           title: 'string amount',
           datetime: '2026/02/20 12:00',
@@ -138,7 +142,7 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     const res = await store.fetch(
       new Request('https://example.com/v1/school/events', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: adminHeaders,
         body: JSON.stringify({
           title: 'policy event',
           datetime: '2026/02/20 13:00',
@@ -166,7 +170,7 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     const createRes = await store.fetch(
       new Request('https://example.com/v1/school/events', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: adminHeaders,
         body: JSON.stringify({
           title,
           datetime: '2026/02/20 14:00',
@@ -197,5 +201,22 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     expect(body.image).toContain('/ticket-token.png');
     const mintAttr = body.attributes?.find((attr) => attr.trait_type === 'mint');
     expect(mintAttr?.value).toBe(mint);
+  });
+
+  it('rejects event create without admin authorization header', async () => {
+    const res = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'unauthorized event',
+          datetime: '2026/02/20 15:00',
+          host: 'admin',
+          ticketTokenAmount: 1,
+        }),
+      })
+    );
+
+    expect(res.status).toBe(401);
   });
 });
