@@ -10,8 +10,10 @@ Hono による最小構成の API。`wene-mobile`（Cloudflare Pages）から固
 - `GET /v1/school/events/:eventId`  
   - レスポンス: `SchoolEvent`（`claimedCount` 含む）。存在しなければ 404 + `SchoolClaimResult`（not_found）
 - `POST /v1/school/events`
-  - リクエスト: `{ title: string; datetime: string; host: string; state?: 'draft'|'published'; solanaMint?: string; solanaAuthority?: string; solanaGrantId?: string; ticketTokenAmount: number }`
+  - リクエスト: `{ title: string; datetime: string; host: string; state?: 'draft'|'published'; solanaMint?: string; solanaAuthority?: string; solanaGrantId?: string; ticketTokenAmount: number; claimIntervalDays?: number; maxClaimsPerInterval?: number | null }`
   - `ticketTokenAmount` は 1 以上の整数（数値文字列も許容）
+  - `claimIntervalDays` は 1 以上の整数（未指定時 30）
+  - `maxClaimsPerInterval` は `null`（無制限）または 1 以上の整数（未指定時 1）
   - レスポンス: 作成された `SchoolEvent`
 - `POST /v1/school/claims`  
   - リクエスト: `{ eventId: string; walletAddress?: string; joinToken?: string }`  

@@ -11,6 +11,27 @@ export const SEED_EVENTS: SchoolEvent[] = [
 ];
 
 const CLAIM_PREFIX = 'claim:';
+const EVENT_PREFIX = 'event:';
+
+const DEFAULT_CLAIM_INTERVAL_DAYS = 30;
+const DEFAULT_MAX_CLAIMS_PER_INTERVAL = 1;
+const MAX_STORED_CLAIM_HISTORY = 500;
+
+interface ClaimHistoryEntry {
+  at: number;
+  code?: string;
+}
+
+interface ClaimPolicy {
+  claimIntervalDays: number;
+  maxClaimsPerInterval: number | null;
+}
+
+interface ClaimAllowance {
+  allowed: boolean;
+  latestConfirmationCode?: string;
+  nextAvailableAt?: number;
+}
 
 export function claimKey(eventId: string, subject: string): string {
   return `${CLAIM_PREFIX}${eventId}:${subject}`;
@@ -18,6 +39,10 @@ export function claimKey(eventId: string, subject: string): string {
 
 export function claimPrefix(eventId: string): string {
   return `${CLAIM_PREFIX}${eventId}:`;
+}
+
+export function eventKey(eventId: string): string {
+  return `${EVENT_PREFIX}${eventId}`;
 }
 
 /**
@@ -36,10 +61,89 @@ export interface IClaimStorage {
   list(prefix: string): Promise<Map<string, unknown>>;
 }
 
-const EVENT_PREFIX = 'event:';
+function parsePositiveInt(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const v = Math.floor(value);
+    return v > 0 ? v : null;
+  }
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+    const v = Number.parseInt(value.trim(), 10);
+    return v > 0 ? v : null;
+  }
+  return null;
+}
 
-export function eventKey(eventId: string): string {
-  return `${EVENT_PREFIX}${eventId}`;
+function parseClaimHistory(raw: unknown): ClaimHistoryEntry[] {
+  if (raw === undefined || raw === null) return [];
+
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+    return [{ at: Math.floor(raw) }];
+  }
+
+  if (!raw || typeof raw !== 'object') return [];
+
+  const obj = raw as {
+    at?: unknown;
+    code?: unknown;
+    history?: unknown;
+  };
+
+  const out: ClaimHistoryEntry[] = [];
+
+  if (Array.isArray(obj.history)) {
+    for (const item of obj.history) {
+      if (!item || typeof item !== 'object') continue;
+      const it = item as { at?: unknown; code?: unknown };
+      const at = parsePositiveInt(it.at);
+      if (!at) continue;
+      const code = typeof it.code === 'string' && it.code.trim() ? it.code.trim() : undefined;
+      out.push({ at, code });
+    }
+  }
+
+  // 旧形式 { at, code } 互換
+  if (out.length === 0) {
+    const at = parsePositiveInt(obj.at);
+    if (at) {
+      const code = typeof obj.code === 'string' && obj.code.trim() ? obj.code.trim() : undefined;
+      out.push({ at, code });
+    }
+  }
+
+  out.sort((a, b) => a.at - b.at);
+  return out;
+}
+
+function serializeClaimHistory(entries: ClaimHistoryEntry[]): unknown {
+  if (entries.length === 0) return undefined;
+
+  const latest = entries[entries.length - 1];
+  if (entries.length === 1 && !latest.code) {
+    return latest.at;
+  }
+  return {
+    at: latest.at,
+    code: latest.code,
+    history: entries,
+  };
+}
+
+function resolveClaimPolicy(event?: SchoolEvent | null): ClaimPolicy {
+  const intervalDays = parsePositiveInt(event?.claimIntervalDays) ?? DEFAULT_CLAIM_INTERVAL_DAYS;
+
+  // null なら無制限
+  if (event?.maxClaimsPerInterval === null) {
+    return {
+      claimIntervalDays: intervalDays,
+      maxClaimsPerInterval: null,
+    };
+  }
+
+  const maxClaims = parsePositiveInt(event?.maxClaimsPerInterval) ?? DEFAULT_MAX_CLAIMS_PER_INTERVAL;
+  return {
+    claimIntervalDays: intervalDays,
+    maxClaimsPerInterval: maxClaims,
+  };
 }
 
 export class ClaimStore {
@@ -50,27 +154,81 @@ export class ClaimStore {
     return list.size;
   }
 
-  async hasClaimed(eventId: string, subject: string): Promise<boolean> {
-    const v = await this.storage.get(claimKey(eventId, subject));
-    return v !== undefined;
+  private async getClaimHistory(eventId: string, subject: string): Promise<ClaimHistoryEntry[]> {
+    const raw = await this.storage.get(claimKey(eventId, subject));
+    return parseClaimHistory(raw);
   }
 
-  /** 既存の claim レコードから confirmationCode を取得（userId フロー用） */
-  async getClaimRecord(eventId: string, subject: string): Promise<{ confirmationCode?: string } | null> {
-    const v = await this.storage.get(claimKey(eventId, subject));
-    if (v === undefined) return null;
-    if (typeof v === 'object' && v !== null && 'code' in v && typeof (v as { code?: string }).code === 'string') {
-      return { confirmationCode: (v as { code: string }).code };
+  private async checkClaimAllowance(
+    eventId: string,
+    subject: string,
+    event?: SchoolEvent | null,
+    now: number = Date.now()
+  ): Promise<ClaimAllowance> {
+    const history = await this.getClaimHistory(eventId, subject);
+    if (history.length === 0) return { allowed: true };
+
+    const latest = history[history.length - 1];
+    const policy = resolveClaimPolicy(event);
+    if (policy.maxClaimsPerInterval === null) {
+      return { allowed: true, latestConfirmationCode: latest.code };
     }
-    return {};
+
+    const windowMs = policy.claimIntervalDays * 24 * 60 * 60 * 1000;
+    const windowStart = now - windowMs;
+    const inWindow = history.filter((entry) => entry.at >= windowStart);
+    if (inWindow.length < policy.maxClaimsPerInterval) {
+      return { allowed: true, latestConfirmationCode: latest.code };
+    }
+
+    const thresholdIndex = inWindow.length - policy.maxClaimsPerInterval;
+    const thresholdEntry = inWindow[Math.max(0, thresholdIndex)];
+    const nextAvailableAt = thresholdEntry
+      ? thresholdEntry.at + windowMs
+      : undefined;
+
+    return {
+      allowed: false,
+      latestConfirmationCode: latest.code,
+      nextAvailableAt,
+    };
+  }
+
+  /**
+   * 現在のポリシーで追加受給できない場合 true。
+   * event が無い場合は「1回でも受給履歴があれば true（旧仕様互換）」で判定。
+   */
+  async hasClaimed(eventId: string, subject: string, event?: SchoolEvent | null): Promise<boolean> {
+    if (!event) {
+      const v = await this.storage.get(claimKey(eventId, subject));
+      return v !== undefined;
+    }
+    const allowance = await this.checkClaimAllowance(eventId, subject, event);
+    return !allowance.allowed;
+  }
+
+  /** 既存の claim レコードから最新 confirmationCode を取得（userId フロー用） */
+  async getClaimRecord(eventId: string, subject: string): Promise<{ confirmationCode?: string } | null> {
+    const history = await this.getClaimHistory(eventId, subject);
+    if (history.length === 0) return null;
+    const latest = history[history.length - 1];
+    return { confirmationCode: latest.code };
   }
 
   async addClaim(eventId: string, subject: string, confirmationCode?: string): Promise<void> {
-    const at = Date.now();
-    if (confirmationCode) {
-      await this.storage.put(claimKey(eventId, subject), { at, code: confirmationCode });
-    } else {
-      await this.storage.put(claimKey(eventId, subject), at);
+    const history = await this.getClaimHistory(eventId, subject);
+    history.push({
+      at: Date.now(),
+      code: confirmationCode,
+    });
+    history.sort((a, b) => a.at - b.at);
+    const trimmed =
+      history.length > MAX_STORED_CLAIM_HISTORY
+        ? history.slice(history.length - MAX_STORED_CLAIM_HISTORY)
+        : history;
+    const serialized = serializeClaimHistory(trimmed);
+    if (serialized !== undefined) {
+      await this.storage.put(claimKey(eventId, subject), serialized);
     }
   }
 
@@ -81,16 +239,13 @@ export class ClaimStore {
     const out: Array<{ subject: string; claimedAt: number; confirmationCode?: string }> = [];
     map.forEach((value, key) => {
       const subject = key.slice(prefix.length);
-      let claimedAt = 0;
-      let confirmationCode: string | undefined;
-      if (typeof value === 'number') {
-        claimedAt = value;
-      } else if (value && typeof value === 'object') {
-        const v = value as { at?: number; code?: string };
-        claimedAt = v.at ?? 0;
-        confirmationCode = v.code;
+      const history = parseClaimHistory(value);
+      if (history.length === 0) {
+        out.push({ subject, claimedAt: 0 });
+        return;
       }
-      out.push({ subject, claimedAt, confirmationCode });
+      const latest = history[history.length - 1];
+      out.push({ subject, claimedAt: latest.at, confirmationCode: latest.code });
     });
     out.sort((a, b) => a.claimedAt - b.claimedAt);
     return out;
@@ -102,7 +257,13 @@ export class ClaimStore {
     const events: SchoolEvent[] = [];
     map.forEach((value) => {
       if (value && typeof value === 'object' && 'id' in (value as any)) {
-        events.push(value as SchoolEvent);
+        const base = value as SchoolEvent;
+        const policy = resolveClaimPolicy(base);
+        events.push({
+          ...base,
+          claimIntervalDays: policy.claimIntervalDays,
+          maxClaimsPerInterval: policy.maxClaimsPerInterval,
+        });
       }
     });
     return events;
@@ -115,7 +276,13 @@ export class ClaimStore {
     const out: (SchoolEvent & { claimedCount: number })[] = [];
     for (const e of all) {
       const claimedCount = await this.getClaimedCount(e.id);
-      out.push({ ...e, claimedCount });
+      const policy = resolveClaimPolicy(e);
+      out.push({
+        ...e,
+        claimIntervalDays: policy.claimIntervalDays,
+        maxClaimsPerInterval: policy.maxClaimsPerInterval,
+        claimedCount,
+      });
     }
     return out;
   }
@@ -132,7 +299,13 @@ export class ClaimStore {
     }
     if (!event) return null;
     const claimedCount = await this.getClaimedCount(eventId);
-    return { ...event, claimedCount };
+    const policy = resolveClaimPolicy(event);
+    return {
+      ...event,
+      claimIntervalDays: policy.claimIntervalDays,
+      maxClaimsPerInterval: policy.maxClaimsPerInterval,
+      claimedCount,
+    };
   }
 
   /** イベント作成（admin 用） */
@@ -145,8 +318,15 @@ export class ClaimStore {
     solanaAuthority?: string;
     solanaGrantId?: string;
     ticketTokenAmount?: number;
+    claimIntervalDays?: number;
+    maxClaimsPerInterval?: number | null;
   }): Promise<SchoolEvent> {
     const id = `evt-${Date.now().toString(36)}`;
+    const policy = resolveClaimPolicy({
+      claimIntervalDays: data.claimIntervalDays,
+      maxClaimsPerInterval: data.maxClaimsPerInterval,
+    } as SchoolEvent);
+
     const event: SchoolEvent = {
       id,
       title: data.title,
@@ -157,6 +337,8 @@ export class ClaimStore {
       solanaAuthority: data.solanaAuthority,
       solanaGrantId: data.solanaGrantId,
       ticketTokenAmount: data.ticketTokenAmount,
+      claimIntervalDays: policy.claimIntervalDays,
+      maxClaimsPerInterval: policy.maxClaimsPerInterval,
     };
     await this.storage.put(eventKey(id), event);
     return event;
@@ -180,14 +362,13 @@ export class ClaimStore {
       return { success: false, error: { code: 'eligibility', message: 'このイベントは参加できません' } };
     }
 
-
     const subject = normalizeSubject(walletAddress, joinToken);
     if (subject === null) {
       return { success: false, error: { code: 'wallet_required', message: 'Phantomに接続してください' } };
     }
 
-    const already = await this.hasClaimed(eventId, subject);
-    if (already) {
+    const allowance = await this.checkClaimAllowance(eventId, subject, event);
+    if (!allowance.allowed) {
       return { success: true, eventName: event.title, alreadyJoined: true };
     }
 

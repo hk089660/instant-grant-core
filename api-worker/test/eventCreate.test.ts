@@ -85,8 +85,15 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     );
 
     expect(numberRes.status).toBe(201);
-    const createdNumber = (await numberRes.json()) as { id: string; ticketTokenAmount?: number };
+    const createdNumber = (await numberRes.json()) as {
+      id: string;
+      ticketTokenAmount?: number;
+      claimIntervalDays?: number;
+      maxClaimsPerInterval?: number | null;
+    };
     expect(createdNumber.ticketTokenAmount).toBe(3);
+    expect(createdNumber.claimIntervalDays).toBe(30);
+    expect(createdNumber.maxClaimsPerInterval).toBe(1);
 
     const stringRes = await store.fetch(
       new Request('https://example.com/v1/school/events', {
@@ -102,15 +109,54 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     );
 
     expect(stringRes.status).toBe(201);
-    const createdString = (await stringRes.json()) as { id: string; ticketTokenAmount?: number };
+    const createdString = (await stringRes.json()) as {
+      id: string;
+      ticketTokenAmount?: number;
+      claimIntervalDays?: number;
+      maxClaimsPerInterval?: number | null;
+    };
     expect(createdString.ticketTokenAmount).toBe(7);
+    expect(createdString.claimIntervalDays).toBe(30);
+    expect(createdString.maxClaimsPerInterval).toBe(1);
 
     const detailRes = await store.fetch(
       new Request(`https://example.com/v1/school/events/${encodeURIComponent(createdString.id)}`, {
         method: 'GET',
       })
     );
-    const detail = (await detailRes.json()) as { ticketTokenAmount?: number };
+    const detail = (await detailRes.json()) as {
+      ticketTokenAmount?: number;
+      claimIntervalDays?: number;
+      maxClaimsPerInterval?: number | null;
+    };
     expect(detail.ticketTokenAmount).toBe(7);
+    expect(detail.claimIntervalDays).toBe(30);
+    expect(detail.maxClaimsPerInterval).toBe(1);
+  });
+
+  it('accepts custom claim policy (interval + unlimited)', async () => {
+    const res = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'policy event',
+          datetime: '2026/02/20 13:00',
+          host: 'admin',
+          ticketTokenAmount: 2,
+          claimIntervalDays: 14,
+          maxClaimsPerInterval: null,
+        }),
+      })
+    );
+
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as {
+      id: string;
+      claimIntervalDays?: number;
+      maxClaimsPerInterval?: number | null;
+    };
+    expect(created.claimIntervalDays).toBe(14);
+    expect(created.maxClaimsPerInterval).toBeNull();
   });
 });

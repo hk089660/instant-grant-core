@@ -16,6 +16,10 @@ export interface SchoolEvent {
   solanaGrantId?: string;
   /** 参加完了時に配布するSPLトークン量（最小単位） */
   ticketTokenAmount?: number;
+  /** 受給可能な期間（日） */
+  claimIntervalDays?: number;
+  /** 期間内の最大受給回数（null = 無制限） */
+  maxClaimsPerInterval?: number | null;
 }
 
 /** エラー種別（HTTP契約・UI分岐は code のみで行う） */

@@ -14,6 +14,7 @@ export interface UserRecord {
 export interface ClaimRecord {
   eventId: string;
   walletAddress?: string; // 旧来の互換性のため残す
+  joinToken?: string;
   userId?: string;
   confirmationCode?: string;
   joinedAt: number;
@@ -49,7 +50,7 @@ export interface SchoolStorage {
   addUser(user: UserRecord): void;
   getUser(userId: string): UserRecord | null;
   addUserClaim(eventId: string, userId: string, confirmationCode: string): void;
-  hasClaimed(eventId: string, userId: string): boolean;
+  hasClaimed(eventId: string, userId: string, claimIntervalDays?: number, maxClaimsPerInterval?: number | null): boolean;
   getUserClaims(userId: string): ClaimRecord[];
 }
 
@@ -71,10 +72,11 @@ export function createMemoryStorage(): SchoolStorage {
     getClaims(eventId: string) {
       return claims.filter((c) => c.eventId === eventId);
     },
-    addClaim(eventId: string, walletAddress?: string, _joinToken?: string) {
+    addClaim(eventId: string, walletAddress?: string, joinToken?: string) {
       claims.push({
         eventId,
         walletAddress,
+        joinToken,
         joinedAt: Date.now(),
       });
     },
@@ -94,8 +96,19 @@ export function createMemoryStorage(): SchoolStorage {
         joinedAt: Date.now(),
       });
     },
-    hasClaimed(eventId: string, userId: string): boolean {
-      return claims.some((c) => c.eventId === eventId && c.userId === userId);
+    hasClaimed(eventId: string, userId: string, claimIntervalDays: number = 30, maxClaimsPerInterval: number | null = 1): boolean {
+      if (maxClaimsPerInterval === null) {
+        return false;
+      }
+      const intervalMs = Math.max(1, claimIntervalDays) * 24 * 60 * 60 * 1000;
+      const windowStart = Date.now() - intervalMs;
+      const inWindow = claims.filter(
+        (c) =>
+          c.eventId === eventId &&
+          c.userId === userId &&
+          c.joinedAt >= windowStart
+      );
+      return inWindow.length >= Math.max(1, maxClaimsPerInterval);
     },
     getUserClaims(userId: string): ClaimRecord[] {
       return claims.filter((c) => c.userId === userId);

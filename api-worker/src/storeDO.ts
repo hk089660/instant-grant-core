@@ -397,6 +397,8 @@ export class SchoolStore implements DurableObject {
         solanaAuthority?: string;
         solanaGrantId?: string;
         ticketTokenAmount?: number | string;
+        claimIntervalDays?: number | string;
+        maxClaimsPerInterval?: number | string | null;
       };
       try {
         body = (await request.json()) as any;
@@ -413,6 +415,22 @@ export class SchoolStore implements DurableObject {
           : typeof rawTokenAmount === 'string' && /^\d+$/.test(rawTokenAmount.trim())
             ? Number.parseInt(rawTokenAmount.trim(), 10)
             : NaN;
+      const rawClaimIntervalDays = body?.claimIntervalDays;
+      const claimIntervalDays =
+        typeof rawClaimIntervalDays === 'number' && Number.isFinite(rawClaimIntervalDays)
+          ? Math.floor(rawClaimIntervalDays)
+          : typeof rawClaimIntervalDays === 'string' && /^\d+$/.test(rawClaimIntervalDays.trim())
+            ? Number.parseInt(rawClaimIntervalDays.trim(), 10)
+            : 30;
+      const rawMaxClaimsPerInterval = body?.maxClaimsPerInterval;
+      const maxClaimsPerInterval =
+        rawMaxClaimsPerInterval === null || rawMaxClaimsPerInterval === 'unlimited'
+          ? null
+          : typeof rawMaxClaimsPerInterval === 'number' && Number.isFinite(rawMaxClaimsPerInterval)
+            ? Math.floor(rawMaxClaimsPerInterval)
+            : typeof rawMaxClaimsPerInterval === 'string' && /^\d+$/.test(rawMaxClaimsPerInterval.trim())
+              ? Number.parseInt(rawMaxClaimsPerInterval.trim(), 10)
+              : 1;
 
       if (!title || !datetime || !host) {
         return Response.json({ error: 'title, datetime, host are required' }, { status: 400 });
@@ -420,12 +438,20 @@ export class SchoolStore implements DurableObject {
       if (!Number.isInteger(ticketTokenAmount) || ticketTokenAmount <= 0) {
         return Response.json({ error: 'ticketTokenAmount must be a positive integer' }, { status: 400 });
       }
+      if (!Number.isInteger(claimIntervalDays) || claimIntervalDays <= 0) {
+        return Response.json({ error: 'claimIntervalDays must be a positive integer' }, { status: 400 });
+      }
+      if (maxClaimsPerInterval !== null && (!Number.isInteger(maxClaimsPerInterval) || maxClaimsPerInterval <= 0)) {
+        return Response.json({ error: 'maxClaimsPerInterval must be null or a positive integer' }, { status: 400 });
+      }
       const event = await this.store.createEvent({
         title, datetime, host, state: body.state,
         solanaMint: body.solanaMint,
         solanaAuthority: body.solanaAuthority,
         solanaGrantId: body.solanaGrantId,
         ticketTokenAmount,
+        claimIntervalDays,
+        maxClaimsPerInterval,
       });
       // Audit Log
       await this.appendAuditLog(
@@ -438,6 +464,8 @@ export class SchoolStore implements DurableObject {
           eventId: event.id,
           solanaMint: body.solanaMint,
           ticketTokenAmount,
+          claimIntervalDays,
+          maxClaimsPerInterval,
         },
         event.id
       );
@@ -582,7 +610,7 @@ export class SchoolStore implements DurableObject {
       if (event.state && event.state !== 'published') {
         return Response.json({ error: 'event not available' }, { status: 400 });
       }
-      const already = await this.store.hasClaimed(eventId, userId);
+      const already = await this.store.hasClaimed(eventId, userId, event);
       if (already) {
         const rec = await this.store.getClaimRecord(eventId, userId);
         const confirmationCode = rec?.confirmationCode ?? genConfirmationCode();

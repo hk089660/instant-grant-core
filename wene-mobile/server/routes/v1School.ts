@@ -23,12 +23,59 @@ export function createV1SchoolRouter(deps: V1SchoolDeps): Router {
 
   // POST /v1/school/events — イベント新規作成（admin用）
   router.post('/events', (req: Request, res: Response) => {
-    const body = req.body as { title?: string; datetime?: string; host?: string; state?: 'draft' | 'published' };
+    const body = req.body as {
+      title?: string;
+      datetime?: string;
+      host?: string;
+      state?: 'draft' | 'published';
+      solanaMint?: string;
+      solanaAuthority?: string;
+      solanaGrantId?: string;
+      ticketTokenAmount?: number | string;
+      claimIntervalDays?: number | string;
+      maxClaimsPerInterval?: number | string | null;
+    };
     const title = typeof body?.title === 'string' ? body.title.trim() : '';
     const datetime = typeof body?.datetime === 'string' ? body.datetime.trim() : '';
     const host = typeof body?.host === 'string' ? body.host.trim() : '';
+    const rawTokenAmount = body?.ticketTokenAmount;
+    const ticketTokenAmount =
+      typeof rawTokenAmount === 'number' && Number.isFinite(rawTokenAmount)
+        ? Math.floor(rawTokenAmount)
+        : typeof rawTokenAmount === 'string' && /^\d+$/.test(rawTokenAmount.trim())
+          ? Number.parseInt(rawTokenAmount.trim(), 10)
+          : NaN;
+    const rawClaimIntervalDays = body?.claimIntervalDays;
+    const claimIntervalDays =
+      typeof rawClaimIntervalDays === 'number' && Number.isFinite(rawClaimIntervalDays)
+        ? Math.floor(rawClaimIntervalDays)
+        : typeof rawClaimIntervalDays === 'string' && /^\d+$/.test(rawClaimIntervalDays.trim())
+          ? Number.parseInt(rawClaimIntervalDays.trim(), 10)
+          : 30;
+    const rawMaxClaimsPerInterval = body?.maxClaimsPerInterval;
+    const maxClaimsPerInterval =
+      rawMaxClaimsPerInterval === null || rawMaxClaimsPerInterval === 'unlimited'
+        ? null
+        : typeof rawMaxClaimsPerInterval === 'number' && Number.isFinite(rawMaxClaimsPerInterval)
+          ? Math.floor(rawMaxClaimsPerInterval)
+          : typeof rawMaxClaimsPerInterval === 'string' && /^\d+$/.test(rawMaxClaimsPerInterval.trim())
+            ? Number.parseInt(rawMaxClaimsPerInterval.trim(), 10)
+            : 1;
+
     if (!title || !datetime || !host) {
       res.status(400).json({ error: 'title, datetime, host are required' });
+      return;
+    }
+    if (!Number.isInteger(ticketTokenAmount) || ticketTokenAmount <= 0) {
+      res.status(400).json({ error: 'ticketTokenAmount must be a positive integer' });
+      return;
+    }
+    if (!Number.isInteger(claimIntervalDays) || claimIntervalDays <= 0) {
+      res.status(400).json({ error: 'claimIntervalDays must be a positive integer' });
+      return;
+    }
+    if (maxClaimsPerInterval !== null && (!Number.isInteger(maxClaimsPerInterval) || maxClaimsPerInterval <= 0)) {
+      res.status(400).json({ error: 'maxClaimsPerInterval must be null or a positive integer' });
       return;
     }
     const id = `evt-${Date.now().toString(36)}`;
@@ -38,6 +85,12 @@ export function createV1SchoolRouter(deps: V1SchoolDeps): Router {
       datetime,
       host,
       state: body.state ?? 'published',
+      solanaMint: body.solanaMint,
+      solanaAuthority: body.solanaAuthority,
+      solanaGrantId: body.solanaGrantId,
+      ticketTokenAmount,
+      claimIntervalDays,
+      maxClaimsPerInterval,
     };
     storage.addEvent(event);
     res.status(201).json(event);
@@ -119,9 +172,21 @@ export function createV1SchoolRouter(deps: V1SchoolDeps): Router {
 
 
     const existing = storage.getClaims(eventId);
-    const alreadyByWallet = walletAddress && existing.some((c) => c.walletAddress === walletAddress);
-    const alreadyByToken = joinToken && existing.some((c) => (c as { joinToken?: string }).joinToken === joinToken);
-    if (alreadyByWallet || alreadyByToken) {
+    const claimIntervalDays = event.claimIntervalDays ?? 30;
+    const maxClaimsPerInterval = event.maxClaimsPerInterval === null ? null : (event.maxClaimsPerInterval ?? 1);
+    const intervalMs = claimIntervalDays * 24 * 60 * 60 * 1000;
+    const windowStart = Date.now() - intervalMs;
+    const subjectClaims = existing.filter((c) => {
+      if (walletAddress && c.walletAddress === walletAddress) return true;
+      if (joinToken && c.joinToken === joinToken) return true;
+      return false;
+    });
+    const subjectClaimsInWindow = subjectClaims.filter((c) => c.joinedAt >= windowStart);
+    const reachedLimit =
+      maxClaimsPerInterval === null
+        ? false
+        : subjectClaimsInWindow.length >= maxClaimsPerInterval;
+    if (reachedLimit) {
       res.status(200).json({
         success: true,
         eventName: event.title,

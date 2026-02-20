@@ -1,6 +1,6 @@
 /**
- * 仕様固定: 同一 subject で2回 POST しても claimedCount が増えない
- * 異なる subject なら増える。joinToken も同様。
+ * 既定仕様: 同一 subject は 30日あたり1回（互換）
+ * カスタム仕様: event 側で interval / maxClaimsPerInterval を設定可能
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -75,5 +75,49 @@ describe('claim persistence (same subject = no count increase)', () => {
 
     event = await store.getEvent('evt-002');
     expect(event?.claimedCount).toBe(1);
+  });
+
+  it('custom policy: 7日で2回まで受給可能', async () => {
+    const event = await store.createEvent({
+      title: 'custom-limit',
+      datetime: '2026/02/20 12:00',
+      host: 'admin',
+      claimIntervalDays: 7,
+      maxClaimsPerInterval: 2,
+      ticketTokenAmount: 1,
+    });
+
+    const r1 = await store.submitClaim({ eventId: event.id, walletAddress: 'addr-limit' });
+    expect(r1.success).toBe(true);
+    expect((r1 as { alreadyJoined?: boolean }).alreadyJoined).toBe(false);
+
+    const r2 = await store.submitClaim({ eventId: event.id, walletAddress: 'addr-limit' });
+    expect(r2.success).toBe(true);
+    expect((r2 as { alreadyJoined?: boolean }).alreadyJoined).toBe(false);
+
+    const r3 = await store.submitClaim({ eventId: event.id, walletAddress: 'addr-limit' });
+    expect(r3.success).toBe(true);
+    expect((r3 as { alreadyJoined?: boolean }).alreadyJoined).toBe(true);
+  });
+
+  it('custom policy: maxClaimsPerInterval = null は無制限', async () => {
+    const event = await store.createEvent({
+      title: 'custom-unlimited',
+      datetime: '2026/02/20 13:00',
+      host: 'admin',
+      claimIntervalDays: 1,
+      maxClaimsPerInterval: null,
+      ticketTokenAmount: 1,
+    });
+
+    const r1 = await store.submitClaim({ eventId: event.id, walletAddress: 'addr-unlimited' });
+    const r2 = await store.submitClaim({ eventId: event.id, walletAddress: 'addr-unlimited' });
+    const r3 = await store.submitClaim({ eventId: event.id, walletAddress: 'addr-unlimited' });
+    expect(r1.success).toBe(true);
+    expect(r2.success).toBe(true);
+    expect(r3.success).toBe(true);
+    expect((r1 as { alreadyJoined?: boolean }).alreadyJoined).toBe(false);
+    expect((r2 as { alreadyJoined?: boolean }).alreadyJoined).toBe(false);
+    expect((r3 as { alreadyJoined?: boolean }).alreadyJoined).toBe(false);
   });
 });

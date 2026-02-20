@@ -34,6 +34,8 @@ export const AdminCreateEventScreen: React.FC = () => {
     const [datetime, setDatetime] = useState('');
     const [host, setHost] = useState('');
     const [ticketTokenAmountInput, setTicketTokenAmountInput] = useState('1');
+    const [claimIntervalDaysInput, setClaimIntervalDaysInput] = useState('30');
+    const [maxClaimsPerIntervalInput, setMaxClaimsPerIntervalInput] = useState('1'); // 空欄で無制限
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -50,12 +52,22 @@ export const AdminCreateEventScreen: React.FC = () => {
 
     const defaultTokenConfig = useMemo(() => getDefaultSchoolTicketTokenConfig(), []);
     const ticketTokenAmount = Number.parseInt(ticketTokenAmountInput, 10);
+    const claimIntervalDays = Number.parseInt(claimIntervalDaysInput, 10);
+    const unlimitedClaims = maxClaimsPerIntervalInput.trim() === '';
+    const parsedMaxClaimsPerInterval = Number.parseInt(maxClaimsPerIntervalInput, 10);
+    const maxClaimsPerInterval = unlimitedClaims ? null : parsedMaxClaimsPerInterval;
+    const maxClaimsValid =
+        unlimitedClaims ||
+        (Number.isInteger(parsedMaxClaimsPerInterval) && parsedMaxClaimsPerInterval > 0);
     const canSubmit =
         title.trim().length > 0 &&
         datetime.trim().length > 0 &&
         host.trim().length > 0 &&
         Number.isInteger(ticketTokenAmount) &&
         ticketTokenAmount > 0 &&
+        Number.isInteger(claimIntervalDays) &&
+        claimIntervalDays > 0 &&
+        maxClaimsValid &&
         !!defaultTokenConfig;
 
     const handlePreview = useCallback(() => {
@@ -74,6 +86,12 @@ export const AdminCreateEventScreen: React.FC = () => {
             if (!Number.isInteger(ticketTokenAmount) || ticketTokenAmount <= 0) {
                 throw new Error('発行量は1以上の整数で指定してください。');
             }
+            if (!Number.isInteger(claimIntervalDays) || claimIntervalDays <= 0) {
+                throw new Error('受給間隔（日）は1以上の整数で指定してください。');
+            }
+            if (!maxClaimsValid) {
+                throw new Error('上限回数は空欄（無制限）または1以上の整数で指定してください。');
+            }
 
             const event = await httpPost<SchoolEvent>(`${apiBase}/v1/school/events`, {
                 title: title.trim(),
@@ -84,6 +102,8 @@ export const AdminCreateEventScreen: React.FC = () => {
                 solanaAuthority: defaultTokenConfig.solanaAuthority,
                 solanaGrantId: defaultTokenConfig.solanaGrantId,
                 ticketTokenAmount,
+                claimIntervalDays,
+                maxClaimsPerInterval,
             });
             setCreatedEvent(event);
             setStep('done');
@@ -93,7 +113,16 @@ export const AdminCreateEventScreen: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    }, [title, datetime, host, defaultTokenConfig, ticketTokenAmount]);
+    }, [
+        title,
+        datetime,
+        host,
+        defaultTokenConfig,
+        ticketTokenAmount,
+        claimIntervalDays,
+        maxClaimsPerInterval,
+        maxClaimsValid,
+    ]);
 
     // QR生成
     const scanUrl = useMemo(() => {
@@ -123,6 +152,8 @@ export const AdminCreateEventScreen: React.FC = () => {
         setDatetime('');
         setHost('');
         setTicketTokenAmountInput('1');
+        setClaimIntervalDaysInput('30');
+        setMaxClaimsPerIntervalInput('1');
         setCreatedEvent(null);
         setQrDataUrl(null);
         setError(null);
@@ -209,6 +240,28 @@ export const AdminCreateEventScreen: React.FC = () => {
                             maxLength={9}
                         />
 
+                        <AppText variant="caption" style={styles.label}>受給間隔（日）</AppText>
+                        <TextInput
+                            style={styles.input}
+                            value={claimIntervalDaysInput}
+                            onChangeText={(t) => setClaimIntervalDaysInput(t.replace(/[^\d]/g, ''))}
+                            placeholder="例: 30"
+                            placeholderTextColor={adminTheme.colors.textTertiary}
+                            keyboardType="number-pad"
+                            maxLength={4}
+                        />
+
+                        <AppText variant="caption" style={styles.label}>期間内の上限回数（空欄で無制限）</AppText>
+                        <TextInput
+                            style={styles.input}
+                            value={maxClaimsPerIntervalInput}
+                            onChangeText={(t) => setMaxClaimsPerIntervalInput(t.replace(/[^\d]/g, ''))}
+                            placeholder="例: 1（空欄で無制限）"
+                            placeholderTextColor={adminTheme.colors.textTertiary}
+                            keyboardType="number-pad"
+                            maxLength={4}
+                        />
+
                         {!defaultTokenConfig && (
                             <AppText variant="caption" style={styles.errorText}>
                                 SPLトークン設定が未構成です。EXPO_PUBLIC_SCHOOL_TICKET_* もしくは devnetConfig を設定してください。
@@ -251,6 +304,13 @@ export const AdminCreateEventScreen: React.FC = () => {
                         <View style={styles.previewRow}>
                             <AppText variant="caption" style={styles.previewLabel}>配布量</AppText>
                             <AppText variant="body" style={styles.previewValue}>{ticketTokenAmountInput || '0'}</AppText>
+                        </View>
+                        <View style={styles.divider} />
+                        <View style={styles.previewRow}>
+                            <AppText variant="caption" style={styles.previewLabel}>受給ルール</AppText>
+                            <AppText variant="body" style={styles.previewValue}>
+                                {claimIntervalDaysInput || '0'}日ごと / {unlimitedClaims ? '無制限' : `${maxClaimsPerIntervalInput || '0'}回まで`}
+                            </AppText>
                         </View>
 
                         {error ? (
@@ -304,6 +364,9 @@ export const AdminCreateEventScreen: React.FC = () => {
                                     配布量: {createdEvent.ticketTokenAmount}
                                 </AppText>
                             )}
+                            <AppText variant="small" style={styles.cardMuted}>
+                                受給ルール: {(createdEvent.claimIntervalDays ?? 30)}日ごと / {createdEvent.maxClaimsPerInterval == null ? '無制限' : `${createdEvent.maxClaimsPerInterval}回まで`}
+                            </AppText>
 
                             <View style={styles.qrBox}>
                                 {qrDataUrl ? (

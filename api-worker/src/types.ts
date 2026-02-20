@@ -15,6 +15,16 @@ export interface SchoolEvent {
   solanaGrantId?: string;
   /** 参加完了時の配布量（表示・監査用） */
   ticketTokenAmount?: number;
+  /**
+   * 受給可能な期間（日）
+   * 例: 30 => 30日ごとに回数制限を評価
+   */
+  claimIntervalDays?: number;
+  /**
+   * 期間内の最大受給回数
+   * null の場合は無制限
+   */
+  maxClaimsPerInterval?: number | null;
 }
 
 export type SchoolClaimErrorCode =

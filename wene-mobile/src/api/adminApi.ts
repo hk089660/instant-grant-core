@@ -38,6 +38,8 @@ export async function createAdminEvent(data: {
     solanaAuthority?: string;
     solanaGrantId?: string;
     ticketTokenAmount?: number;
+    claimIntervalDays?: number;
+    maxClaimsPerInterval?: number | null;
 }): Promise<SchoolEvent> {
     const base = getBaseUrl();
     return httpPost<SchoolEvent>(`${base}/v1/school/events`, data);

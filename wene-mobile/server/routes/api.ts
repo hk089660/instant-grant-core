@@ -104,7 +104,11 @@ export function createApiRouter(deps: ApiDeps): Router {
             return;
         }
 
-        const already = storage.hasClaimed(eventId, userId);
+        const claimIntervalDays = event.claimIntervalDays ?? 30;
+        const maxClaimsPerInterval = event.maxClaimsPerInterval === null
+            ? null
+            : (event.maxClaimsPerInterval ?? 1);
+        const already = storage.hasClaimed(eventId, userId, claimIntervalDays, maxClaimsPerInterval);
         if (already) {
             // 既存のレコードから confirmationCode を探す
             const claims = storage.getUserClaims(userId);

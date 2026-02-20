@@ -213,36 +213,42 @@ export const UserConfirmScreen: React.FC = () => {
       // 2) on-chain claim（ここが成功してから off-chain 参加記録を確定）
       let txSignature: string | undefined;
       let receiptPubkey: string | undefined;
+      let result: Awaited<ReturnType<typeof claimEventWithUser>> | null = null;
 
       try {
         const onchain = await runOnchainClaim();
         txSignature = onchain.txSignature;
         receiptPubkey = onchain.receiptPubkey;
       } catch (onchainError) {
-        // 既に保存済みTXがあればそれを優先して表示（再訪/再試行で落ちないように）
+        // on-chain が「既に受給済み」の場合は off-chain 側も already か確認してから復元
         const storedTicket = getTicketByEventId(targetEventId);
         const onchainMsg = onchainError instanceof Error ? onchainError.message : String(onchainError);
         const mayBeAlreadyClaimed =
           onchainMsg.includes('既に受給済み') ||
           onchainMsg.includes('already in use') ||
           onchainMsg.includes('custom program error');
-        if (mayBeAlreadyClaimed && storedTicket?.txSignature) {
-          txSignature = storedTicket.txSignature;
-          receiptPubkey = storedTicket.receiptPubkey;
-        } else {
+        if (!(mayBeAlreadyClaimed && storedTicket?.txSignature)) {
           throw onchainError;
         }
+
+        result = await claimEventWithUser(targetEventId, userId, pinVal);
+        if (result.status !== 'already') {
+          throw new Error('オンチェーン上限に達しています。管理者の受給設定とオンチェーン設定を確認してください。');
+        }
+        txSignature = storedTicket.txSignature;
+        receiptPubkey = storedTicket.receiptPubkey;
       }
 
       // 3) off-chain claim 記録（ネットワーク一時障害でも tx は保持して成功遷移）
-      let result: Awaited<ReturnType<typeof claimEventWithUser>> | null = null;
-      try {
-        result = await claimEventWithUser(targetEventId, userId, pinVal);
-      } catch (syncError) {
-        if (syncError instanceof HttpError && syncError.status === 401) {
-          throw syncError;
+      if (!result) {
+        try {
+          result = await claimEventWithUser(targetEventId, userId, pinVal);
+        } catch (syncError) {
+          if (syncError instanceof HttpError && syncError.status === 401) {
+            throw syncError;
+          }
+          console.warn('[UserConfirmScreen] off-chain claim sync failed after on-chain success:', syncError);
         }
-        console.warn('[UserConfirmScreen] off-chain claim sync failed after on-chain success:', syncError);
       }
 
       router.push(
