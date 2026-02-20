@@ -693,6 +693,8 @@ ${st.balanceLamports ?? 'null'}
             eventId: campaignId,
             eventName: grant.title,
             joinedAt: Date.now(),
+            txSignature: signature,
+            receiptPubkey: currentResult.meta.receiptPda.toBase58(),
           }).catch(console.error);
         }
 

@@ -24,7 +24,12 @@ export const UserSuccessScreen: React.FC = () => {
   }>();
 
   const [event, setEvent] = useState<SchoolEvent | null>(null);
-  const { addTicket } = useRecipientTicketStore();
+  const { addTicket, getTicketByEventId } = useRecipientTicketStore();
+  const txSignature = typeof tx === 'string' && tx.trim() ? tx.trim() : undefined;
+  const receiptPubkey = typeof receipt === 'string' && receipt.trim() ? receipt.trim() : undefined;
+  const storedTicket = targetEventId ? getTicketByEventId(targetEventId) : undefined;
+  const resolvedTx = txSignature ?? storedTicket?.txSignature;
+  const resolvedReceipt = receiptPubkey ?? storedTicket?.receiptPubkey;
 
   useEffect(() => {
     if (!targetEventId) return;
@@ -45,16 +50,18 @@ export const UserSuccessScreen: React.FC = () => {
             eventId: ev.id,
             eventName: ev.title,
             joinedAt: Date.now(),
+            txSignature,
+            receiptPubkey,
           });
         }
       })
       .catch(() => { if (!cancelled) setEvent(null); });
     return () => { cancelled = true; };
-  }, [targetEventId, addTicket]);
+  }, [targetEventId, addTicket, txSignature, receiptPubkey]);
 
   const isAlready = already === '1' || status === 'already';
-  const explorerTxUrl = tx ? `https://explorer.solana.com/tx/${tx}?cluster=devnet` : null;
-  const explorerReceiptUrl = receipt ? `https://explorer.solana.com/address/${receipt}?cluster=devnet` : null;
+  const explorerTxUrl = resolvedTx ? `https://explorer.solana.com/tx/${resolvedTx}?cluster=devnet` : null;
+  const explorerReceiptUrl = resolvedReceipt ? `https://explorer.solana.com/address/${resolvedReceipt}?cluster=devnet` : null;
 
   if (!isValid) return null;
 
@@ -95,13 +102,13 @@ export const UserSuccessScreen: React.FC = () => {
         )}
 
         {/* Solana トランザクション情報（将来の Web3 連携用） */}
-        {tx && (
+        {resolvedTx && (
           <Card style={styles.card}>
             <AppText variant="caption" style={styles.label}>
               トランザクション署名
             </AppText>
             <AppText variant="small" style={styles.value} selectable>
-              {tx}
+              {resolvedTx}
             </AppText>
             {explorerTxUrl && (
               <Button
@@ -114,13 +121,13 @@ export const UserSuccessScreen: React.FC = () => {
           </Card>
         )}
 
-        {receipt && (
+        {resolvedReceipt && (
           <Card style={styles.card}>
             <AppText variant="caption" style={styles.label}>
               Receipt Pubkey
             </AppText>
             <AppText variant="small" style={styles.value} selectable>
-              {receipt}
+              {resolvedReceipt}
             </AppText>
             {explorerReceiptUrl && (
               <Button
@@ -134,7 +141,7 @@ export const UserSuccessScreen: React.FC = () => {
         )}
 
         {/* confirmationCode もない、tx/receipt もない場合 */}
-        {!confirmationCode && !tx && !receipt && (
+        {!confirmationCode && !resolvedTx && !resolvedReceipt && (
           <Card style={styles.card}>
             <AppText variant="caption" style={styles.label}>参加記録</AppText>
             <AppText variant="small" style={styles.codeHint}>

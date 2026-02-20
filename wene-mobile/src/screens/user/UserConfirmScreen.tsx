@@ -2,6 +2,7 @@ import React, { useEffect, useCallback, useState } from 'react';
 import { View, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { PublicKey } from '@solana/web3.js';
 import { AppText, Button, Card, Loading } from '../../ui/components';
 import { theme } from '../../ui/theme';
 import { setStarted } from '../../data/participationStore';
@@ -11,18 +12,37 @@ import { useAuth } from '../../contexts/AuthContext';
 import { claimEventWithUser } from '../../api/userApi';
 import { HttpError } from '../../api/http/httpClient';
 import { getSchoolDeps } from '../../api/createSchoolDeps';
+import { useRecipientStore } from '../../store/recipientStore';
+import { usePhantomStore } from '../../store/phantomStore';
+import { useRecipientTicketStore } from '../../store/recipientTicketStore';
+import { buildClaimTx } from '../../solana/txBuilders';
+import { sendSignedTx, isBlockhashExpiredError } from '../../solana/sendTx';
+import { signTransaction } from '../../utils/phantom';
 import type { SchoolEvent } from '../../types/school';
 
 export const UserConfirmScreen: React.FC = () => {
   const router = useRouter();
   const { eventId: targetEventId, isValid } = useEventIdFromParams({ redirectOnInvalid: true });
   const { userId, clearUser } = useAuth();
+  const walletPubkey = useRecipientStore((s) => s.walletPubkey);
+  const phantomSession = useRecipientStore((s) => s.phantomSession);
+  const dappEncryptionPublicKey = usePhantomStore((s) => s.dappEncryptionPublicKey);
+  const dappSecretKey = usePhantomStore((s) => s.dappSecretKey);
+  const phantomEncryptionPublicKey = usePhantomStore((s) => s.phantomEncryptionPublicKey);
+  const getTicketByEventId = useRecipientTicketStore((s) => s.getTicketByEventId);
   const [event, setEvent] = useState<SchoolEvent | null>(null);
   const [eventLoading, setEventLoading] = useState(true);
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [pin, setPin] = useState('');
   const [showPinInput, setShowPinInput] = useState(false);
+  const walletReady = Boolean(
+    walletPubkey &&
+    phantomSession &&
+    phantomEncryptionPublicKey &&
+    dappEncryptionPublicKey &&
+    dappSecretKey
+  );
 
   // イベント情報を API から取得
   useEffect(() => {
@@ -48,8 +68,73 @@ export const UserConfirmScreen: React.FC = () => {
     setStarted(targetEventId).catch(() => { });
   }, [targetEventId]);
 
+  const runOnchainClaim = useCallback(async (): Promise<{ txSignature: string; receiptPubkey: string }> => {
+    if (!targetEventId || !event) {
+      throw new Error('イベント情報が不足しています');
+    }
+    if (!walletPubkey || !phantomSession || !phantomEncryptionPublicKey || !dappEncryptionPublicKey || !dappSecretKey) {
+      throw new Error('Phantomウォレットを接続してください');
+    }
+
+    const recipientPubkey = new PublicKey(walletPubkey);
+    let built = await buildClaimTx({
+      campaignId: targetEventId,
+      recipientPubkey,
+      solanaMint: event.solanaMint,
+      solanaAuthority: event.solanaAuthority,
+      solanaGrantId: event.solanaGrantId,
+    });
+
+    let retried = false;
+    while (true) {
+      const signed = await signTransaction({
+        tx: built.tx,
+        session: phantomSession,
+        dappEncryptionPublicKey,
+        dappSecretKey,
+        phantomEncryptionPublicKey,
+        redirectLink: 'wene://phantom/sign?cluster=devnet',
+        cluster: 'devnet',
+        appUrl: 'https://wene.app',
+      });
+
+      try {
+        const txSignature = await sendSignedTx(signed, {
+          blockhash: built.meta.recentBlockhash,
+          lastValidBlockHeight: built.meta.lastValidBlockHeight,
+        });
+        return {
+          txSignature,
+          receiptPubkey: built.meta.receiptPda.toBase58(),
+        };
+      } catch (sendError) {
+        const msg = sendError instanceof Error ? sendError.message : String(sendError);
+        if (!retried && isBlockhashExpiredError(msg)) {
+          retried = true;
+          built = await buildClaimTx({
+            campaignId: targetEventId,
+            recipientPubkey,
+            solanaMint: event.solanaMint,
+            solanaAuthority: event.solanaAuthority,
+            solanaGrantId: event.solanaGrantId,
+          });
+          continue;
+        }
+        throw sendError;
+      }
+    }
+  }, [
+    targetEventId,
+    event,
+    walletPubkey,
+    phantomSession,
+    phantomEncryptionPublicKey,
+    dappEncryptionPublicKey,
+    dappSecretKey,
+  ]);
+
   const handleParticipate = useCallback(async () => {
-    if (!targetEventId || !userId) return;
+    if (!targetEventId || !userId || !event) return;
 
     // PIN が必要な場合は入力を促す
     if (!showPinInput) {
@@ -62,18 +147,41 @@ export const UserConfirmScreen: React.FC = () => {
       setError('PINは4〜6桁の数字で入力してください');
       return;
     }
+    if (!walletReady) {
+      setError('Phantomウォレットを接続してください');
+      return;
+    }
 
     setStatus('loading');
     setError(null);
 
     try {
       const result = await claimEventWithUser(targetEventId, userId, pinVal);
+      let txSignature: string | undefined;
+      let receiptPubkey: string | undefined;
+
+      try {
+        const onchain = await runOnchainClaim();
+        txSignature = onchain.txSignature;
+        receiptPubkey = onchain.receiptPubkey;
+      } catch (onchainError) {
+        // 既に登録済みの場合は、保存済みTXがあればそれを優先して表示
+        const storedTicket = getTicketByEventId(targetEventId);
+        if (result.status === 'already' && storedTicket?.txSignature) {
+          txSignature = storedTicket.txSignature;
+          receiptPubkey = storedTicket.receiptPubkey;
+        } else {
+          throw onchainError;
+        }
+      }
 
       router.push(
         schoolRoutes.success(targetEventId, {
           already: result.status === 'already',
           status: result.status,
           confirmationCode: result.confirmationCode,
+          tx: txSignature,
+          receipt: receiptPubkey,
         }) as any
       );
     } catch (e: unknown) {
@@ -98,6 +206,8 @@ export const UserConfirmScreen: React.FC = () => {
         const msg = String((e as { message: string }).message);
         if (msg.includes('invalid pin')) {
           setError('PINが正しくありません');
+        } else if (msg.includes('キャンセル')) {
+          setError('Phantom署名がキャンセルされました');
         } else {
           setError(msg);
         }
@@ -105,7 +215,18 @@ export const UserConfirmScreen: React.FC = () => {
         setError('参加処理に失敗しました。再試行してください。');
       }
     }
-  }, [targetEventId, userId, pin, showPinInput, router]);
+  }, [
+    targetEventId,
+    userId,
+    event,
+    pin,
+    showPinInput,
+    walletReady,
+    runOnchainClaim,
+    getTicketByEventId,
+    clearUser,
+    router,
+  ]);
 
   if (!isValid) return null;
 
@@ -145,6 +266,20 @@ export const UserConfirmScreen: React.FC = () => {
           </Card>
         )}
 
+        {!walletReady && (
+          <Card style={styles.walletCard}>
+            <AppText variant="caption" style={styles.walletHint}>
+              オンチェーン記録のため、先にPhantomウォレット接続が必要です
+            </AppText>
+            <Button
+              title="Phantomを接続する"
+              variant="secondary"
+              onPress={() => router.push('/wallet' as any)}
+              style={styles.walletButton}
+            />
+          </Card>
+        )}
+
         {showPinInput && (
           <Card style={styles.pinCard}>
             <AppText variant="caption" style={styles.pinLabel}>
@@ -175,11 +310,21 @@ export const UserConfirmScreen: React.FC = () => {
             }
             onPress={handleParticipate}
             loading={status === 'loading'}
-            disabled={status === 'loading' || !event || (event.state != null && event.state !== 'published')}
+            disabled={
+              status === 'loading' ||
+              !event ||
+              (event.state != null && event.state !== 'published') ||
+              (showPinInput && !walletReady)
+            }
           />
-          {!showPinInput && event && event.state === 'published' && (
+          {!showPinInput && event && event.state === 'published' && walletReady && (
             <AppText variant="small" style={styles.actionHint}>
               PINを入力して参加を確定します
+            </AppText>
+          )}
+          {!walletReady && (
+            <AppText variant="small" style={styles.actionHint}>
+              Phantom接続後に参加を確定できます
             </AppText>
           )}
           <Button
@@ -239,6 +384,16 @@ const styles = StyleSheet.create({
   warningText: {
     color: theme.colors.error,
     marginTop: theme.spacing.sm,
+  },
+  walletCard: {
+    marginBottom: theme.spacing.md,
+  },
+  walletHint: {
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.sm,
+  },
+  walletButton: {
+    marginTop: theme.spacing.xs,
   },
   pinCard: {
     marginBottom: theme.spacing.md,

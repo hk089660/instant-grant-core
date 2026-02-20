@@ -5,7 +5,6 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { AppText, Button, EventRow, StatusDot } from '../../ui/components';
 import { theme } from '../../ui/theme';
-import { Ionicons } from '@expo/vector-icons';
 import { useRecipientTicketStore } from '../../store/recipientTicketStore';
 import { getSchoolDeps } from '../../api/createSchoolDeps';
 import { schoolRoutes } from '../../lib/schoolRoutes';
@@ -51,6 +50,19 @@ export const UserEventsScreen: React.FC = () => {
     (event) => !isJoined(event.id) && event.state === 'published'
   );
 
+  const handleOpenJoinedTicket = useCallback(
+    (event: SchoolEvent) => {
+      const joinedTicket = tickets.find((ticket) => ticket.eventId === event.id);
+      router.push(
+        schoolRoutes.success(event.id, {
+          tx: joinedTicket?.txSignature,
+          receipt: joinedTicket?.receiptPubkey,
+        }) as any
+      );
+    },
+    [router, tickets]
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <ScrollView
@@ -86,7 +98,7 @@ export const UserEventsScreen: React.FC = () => {
                 datetime={event.datetime}
                 host={event.host}
                 leftSlot={<StatusDot color="#38b000" />}
-                onPress={() => router.push(schoolRoutes.success(event.id) as any)}
+                onPress={() => handleOpenJoinedTicket(event)}
                 solanaMint={event.solanaMint}
               />
             ))
