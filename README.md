@@ -1,7 +1,7 @@
 # Asuka Network Core (Prototype)
 > **Public Blockchain Protocol based on Proof of Process (PoP), Auditable & Made in Japan**
 
-[![Solana](https://img.shields.io/badge/Solana-Mainnet-green?style=flat&logo=solana)]
+[![Solana](https://img.shields.io/badge/Solana-Devnet-green?style=flat&logo=solana)]
 [![Edge](https://img.shields.io/badge/Edge-Cloudflare_Workers-orange?style=flat&logo=cloudflare)]
 [![License](https://img.shields.io/badge/License-MIT-blue)]
 [![Status](https://img.shields.io/badge/Status-Mitou_Applied-red)]
@@ -22,8 +22,29 @@ No installation required. Experience the lightning-fast approval process powered
 Existing public blockchains guarantee the integrity of "results (balance transfers)", but the "process (how the transaction was generated)" has remained a black box.
 This project proposes and implements a new consensus concept called **"Proof of Process (PoP)"**, where Web2-style API logs are carved into an irreversible hash chain and mathematically bound to on-chain settlements.
 
+## 📌 Current AsukaNetwork Status (Feb 20, 2026)
+
+- Runtime mode is **devnet-first** (current app runtime is fixed to Solana devnet).
+- Process-proof layer is active on Cloudflare Workers:
+  - API audit logs are chained with a global hash chain (`prev_hash`).
+  - Per-event continuity is also preserved (`stream_prev_hash`).
+- Operator security hardening is active:
+  - Admin-protected school APIs require Bearer authentication.
+  - Master-only APIs reject the default placeholder password and require a real `ADMIN_PASSWORD`.
+- Public demo delivery is active:
+  - User app: `https://instant-grant-core.pages.dev/`
+  - Admin app: `https://instant-grant-core.pages.dev/admin/login`
+- Pending protocol milestone:
+  - Contract-side mandatory PoP proof enforcement is still planned (not yet enforced at L1).
+
 ## 🏗 Architecture: Trinity of Trust
 This repository defines "accountability" in code through the following three-layer structure (Trinity Architecture).
+
+Current implementation status by layer:
+
+- Layer 1 (Solana settlement/claim): Implemented for devnet claim flow; strict L1-side mandatory PoP verification remains planned.
+- Layer 2 (API process proof): Implemented (global hash chain + per-event stream chain + operator auth controls).
+- Layer 3 (User/Admin interface): Implemented (web/mobile UX, Phantom signing/deeplink flow, admin session guard).
 
 ```mermaid
 graph TD
@@ -46,7 +67,7 @@ graph TD
 ### 2. Layer 2: The Time (Proof of Process)
 * **Tech Stack:** TypeScript, Cloudflare Workers (Edge Computing)
 * **Role:** Auditor of time and process.
-* **Innovation:** Generates an **Append-only Hash Chain** in real-time for every request, including the previous log hash.
+* **Innovation:** Generates an **Append-only Hash Chain** in real-time for every request, including global previous hash (`prev_hash`) and per-event stream linkage (`stream_prev_hash`).
     * This makes it mathematically impossible for even administrators to tamper with or conceal a single bit of past history.
 * [📂 View API Code](./api-worker)
 
@@ -64,7 +85,7 @@ Asuka Network inherits the autonomous decentralized philosophy of P2P while impl
 - [x] **Phase 1: Genesis (Completed)**
     - Integrated implementation of SVM contract (Rust) and Edge Hash Chain (TS).
     - Deployment of MVP app "We-ne" as PWA.
-- [ ] **Phase 2: Gating (In Development)**
+- [ ] **Phase 2: Gating (Planned)**
     - Implementation of logic to forcibly reject transactions on the L1 contract side if they lack a valid PoP proof from the API layer.
 - [ ] **Phase 3: Federation**
     - Expansion to a consortium model where municipalities and public institutions can participate as nodes.
@@ -80,22 +101,40 @@ Asuka Network inherits the autonomous decentralized philosophy of P2P while impl
 
 We-ne is an open-source prototype/evaluation kit for verifying non-custodial aid distribution and participation ticket operations on Solana. It emphasizes third-party verifiability using receipt records and prevention of duplicate reception.
 
-> Status (as of Feb 11, 2026): **PoC / devnet-first**. This is for reproducibility and evaluation verification, not for production mainnet operation.
+> Status (as of Feb 20, 2026): **PoC / devnet-first**. This is for reproducibility and evaluation verification, not for production mainnet operation.
 
 [Japanese README](./README.ja.md) | [Architecture](./docs/ARCHITECTURE.md) | [Devnet Setup](./docs/DEVNET_SETUP.md) | [Security](./docs/SECURITY.md)
 
 ## What this prototype solves
 
-- Non-custodial Distribution: Recipients sign with their own wallets; the app does not hold private keys.
+- Non-custodial on-chain distribution: wallet-connected users sign with their own wallets; the app does not hold private keys.
+- Wallet-optional participation: users without Phantom can still complete participation via off-chain flow.
 - Auditability: tx/receipt records can be independently verified on Solana Explorer.
 - Duplicate Prevention: Receipt logic enforces single reception; re-application in the school flow is treated as `already joined` (operation complete) rather than a double payment.
 
 ## Current PoC Status
 
 - Devnet E2E claim flow available (wallet sign -> send -> Explorer verification).
-- School event QR flow available (`/admin` -> Print QR -> `/u/scan` -> `/u/confirm` -> `/u/success`).
-- Success screen shows tx signature + receipt pubkey + Explorer link (devnet).
+- School event QR flow available (`/admin/login` -> `/admin` -> Print QR -> `/u/scan` -> `/u/confirm` -> `/u/success`).
+- Success screen shows tx signature + receipt pubkey + mint link on Solana Explorer (devnet).
 - Re-application is treated as `already joined` (operation complete), no double payment.
+
+## Current We-ne Progress (Feb 20, 2026)
+
+- Admin operation:
+  - `/admin/*` is session-guarded; unauthorized access is redirected to `/admin/login`.
+  - Admin login supports master password, issued admin invite codes, and optional demo password.
+- Event issuance:
+  - Each event issuance creates an independent SPL mint on devnet.
+  - Token metadata name follows the event title and is served from `/metadata/<mint>.json`.
+  - Claim policy is configurable per event (`claimIntervalDays`, `maxClaimsPerInterval`).
+- User claim:
+  - `UserConfirmScreen` supports on-chain claim when wallet + on-chain config are available.
+  - If wallet/on-chain config is unavailable, off-chain claim flow still works.
+  - Explorer links for tx/receipt/mint are displayed on success screen.
+- API audit and auth:
+  - Admin-only APIs (`POST /v1/school/events`, `GET /v1/school/events/:eventId/claimants`) are authenticated.
+  - Audit logs are chained globally and can be inspected from master dashboard APIs.
 
 ## Latest Security & Audit Updates (Feb 20, 2026)
 
@@ -151,24 +190,30 @@ Reviewer shortcut: Check `./wene-mobile/src/screens/user/UserScanScreen.tsx` and
 - Milestone 1 (`Status: Completed`): Implement actual scan processing (QR decode + permission handling) at `/u/scan`.
 - Milestone 2 (`Status: Planned`): Add `eventId` manual entry fallback + expired/invalid QR messages, and fix via UI/API tests.
 
-## 🔗 Deployment Flow (Strict Order)
-To run the full Asuka Network system, you **MUST** deploy the components in the following order to satisfy dependency IDs.
+## 🔗 Deployment Flow (Current)
+Use the following order for a clean deployment path.
 
 ### Step 1: Layer 1 (Solana Program)
 1. Go to `grant_program/`.
 2. Build and deploy to Devnet.
-3. **Copy** the generated `Program ID`.
+3. If you changed the program, note the generated Program ID and update `wene-mobile/src/solana/config.ts`.
 
 ### Step 2: Layer 2 (API Worker)
 1. Go to `api-worker/`.
-2. Paste the `Program ID` (from Step 1) into `wrangler.toml`.
+2. Configure Worker vars:
+   - `ADMIN_PASSWORD` (required, non-default)
+   - `ADMIN_DEMO_PASSWORD` (optional, demo login only)
+   - `CORS_ORIGIN` (recommended)
 3. Deploy to Cloudflare Workers.
-4. **Copy** your Worker's URL (e.g., `https://api.your-name.workers.dev`).
+4. Copy your Worker's URL (e.g., `https://api.your-name.workers.dev`).
 
 ### Step 3: Layer 3 (Mobile App)
 1. Go to `wene-mobile/`.
 2. Create `.env` from `.env.example`.
-3. Paste the `Worker URL` (from Step 2) and `Program ID` (from Step 1).
+3. Set app envs:
+   - `EXPO_PUBLIC_API_BASE_URL` = Worker URL
+   - `EXPO_PUBLIC_BASE_URL` = Pages domain (recommended for print/deeplink UX)
+   - `EXPO_PUBLIC_ADMIN_DEMO_PASSWORD` (only if demo login button is used)
 4. Run `npm install` (patches for web3.js will apply automatically).
 5. Start the app.
 
@@ -182,7 +227,7 @@ npm run dev:full
 
 Check after startup:
 
-- Admin Dashboard: `http://localhost:8081/admin`
+- Admin Login: `http://localhost:8081/admin/login`
 - User Scan Flow: `http://localhost:8081/u/scan?eventId=evt-001`
 
 ## Quick Start (Cloudflare Pages)
@@ -209,15 +254,16 @@ npm run verify:pages
 
 ## Demo / Reproduction Steps (1 Page)
 
-1. Open Admin Event List: `/admin`
-2. Open Event Details: `/admin/events/<eventId>` (e.g., `evt-001`, state `published` recommended).
-3. Navigate to Print Screen from "Print PDF" in details: `/admin/print/<eventId>`.
-4. Confirm Print QR link points to `/u/scan?eventId=<eventId>`.
-5. Open QR URL on User side -> `/u/confirm?eventId=<eventId>` -> claim -> `/u/success?eventId=<eventId>`.
-6. Confirm Explorer links for tx signature and receipt pubkey on Success screen:
+1. Open Admin Login: `/admin/login` and authenticate.
+2. Open Admin Event List: `/admin`.
+3. Open Event Details: `/admin/events/<eventId>` (e.g., `evt-001`, state `published` recommended).
+4. Navigate to Print Screen from "Print PDF" in details: `/admin/print/<eventId>`.
+5. Confirm Print QR link points to `/u/scan?eventId=<eventId>`.
+6. Open QR URL on User side -> `/u/confirm?eventId=<eventId>` -> claim -> `/u/success?eventId=<eventId>`.
+7. Confirm Explorer links for tx signature and receipt pubkey on Success screen:
 - `https://explorer.solana.com/tx/<signature>?cluster=devnet`
 - `https://explorer.solana.com/address/<receiptPubkey>?cluster=devnet`
-7. Claim again with same QR: Expected behavior is `already joined` (operation complete), no double payment.
+8. Claim again with same QR: Expected behavior is `already joined` (operation complete), no double payment.
 
 ## Verification Commands
 

@@ -1,7 +1,7 @@
 # Asuka Network Core (Prototype)
 > **Proof of Process (PoP) に基づく、日本発の監査可能な公共ブロックチェーン・プロトコル**
 
-[![Solana](https://img.shields.io/badge/Solana-Mainnet-green?style=flat&logo=solana)]
+[![Solana](https://img.shields.io/badge/Solana-Devnet-green?style=flat&logo=solana)]
 [![Edge](https://img.shields.io/badge/Edge-Cloudflare_Workers-orange?style=flat&logo=cloudflare)]
 [![License](https://img.shields.io/badge/License-MIT-blue)]
 [![Status](https://img.shields.io/badge/Status-Mitou_Applied-red)]
@@ -22,8 +22,29 @@ Asuka Network上で稼働する最初の行政・公共向けリファレンス�
 既存のパブリックチェーンは「結果（残高の移動）」の整合性は保証しますが、「過程（どのような手続きを経てそのトランザクションが生成されたか）」はブラックボックスでした。
 本プロジェクトでは、Web2的なAPIログを不可逆なハッシュチェーンとして刻み、それをオンチェーンの決済と数学的に結合させる **「Proof of Process (PoP)」** という新たなコンセンサス概念を提唱・実装します。
 
+## 📌 AsukaNetwork の現状（2026-02-20）
+
+- 稼働モードは **devnet-first** です（現行アプリ実行時のクラスターは devnet 固定）。
+- Cloudflare Workers 上のプロセス証明レイヤーは稼働中です:
+  - API監査ログをグローバルチェーン（`prev_hash`）で連結
+  - かつイベント単位の連鎖（`stream_prev_hash`）も保持
+- オペレーター向け認可強化は適用済みです:
+  - 管理者向け学校APIは Bearer 認証必須
+  - Master専用APIは既定値ではなく実値の `ADMIN_PASSWORD` を必須化
+- 公開デモは稼働中です:
+  - 利用者アプリ: `https://instant-grant-core.pages.dev/`
+  - 管理者アプリ: `https://instant-grant-core.pages.dev/admin/login`
+- 未完了のプロトコル項目:
+  - PoP証明の L1 コントラクト強制検証は planned（L1 強制は未実装）
+
 ## 🏗 アーキテクチャ：三位一体の信頼基盤
 本リポジトリは、以下の3層構造（Trinity Architecture）によって「責任の所在」をコードで定義します。
+
+レイヤー別の実装状況:
+
+- Layer 1（Solana決済/claim）: devnet claim フローは実装済み。L1 側での PoP 証明強制検証は planned。
+- Layer 2（APIプロセス証明）: 実装済み（グローバルハッシュチェーン + イベント単位連鎖 + 管理者認可）。
+- Layer 3（利用者/管理者UI）: 実装済み（Web/Mobile UX、Phantom署名/deeplink、管理者セッションガード）。
 
 
 
@@ -48,7 +69,7 @@ graph TD
 ### 2. Layer 2: The Time (過程の証明)
 * **技術スタック:** TypeScript, Cloudflare Workers (Edge Computing)
 * **役割:** 時間とプロセスの監査人。
-* **革新点:** 全てのリクエストに対し、直前のログハッシュを含む **Append-only Hash Chain** をリアルタイムに生成します。
+* **革新点:** 全てのリクエストに対し、グローバル直前ハッシュ（`prev_hash`）とイベント単位連鎖（`stream_prev_hash`）を含む **Append-only Hash Chain** をリアルタイムに生成します。
     * これにより、たとえ管理者であっても、過去の履歴を1ビットたりとも改ざん・隠蔽することは数学的に不可能です。
 * [📂 View API Code](./api-worker)
 
@@ -66,7 +87,7 @@ Asuka Networkは、P2Pの自律分散思想を継承しつつ、**「Proof of Pr
 - [x] **Phase 1: Genesis (完了)**
     - SVMコントラクト(Rust)とエッジハッシュチェーン(TS)の統合実装。
     - MVPアプリ「We-ne」のPWAデプロイ。
-- [ ] **Phase 2: Gating (開発中)**
+- [ ] **Phase 2: Gating (予定)**
     - API層からの有効なPoP証明がないトランザクションを、L1コントラクト側で強制的に拒絶するロジックの実装。
 - [ ] **Phase 3: Federation**
     - 自治体や公共機関がノードとして参加可能な、コンソーシアム・モデルへの拡張。
@@ -82,22 +103,40 @@ Asuka Networkは、P2Pの自律分散思想を継承しつつ、**「Proof of Pr
 
 We-ne は、Solana 上で非保管型の支援配布と参加券運用を検証するための、オープンソースのプロトタイプ/評価キットです。receipt 記録を用いた第三者検証性と重複受取防止を重視しています。
 
-> ステータス（2026年2月11日時点）: **PoC / devnet-first**。本番 mainnet 運用ではなく、再現性と審査向け検証を目的としています。
+> ステータス（2026年2月20日時点）: **PoC / devnet-first**。本番 mainnet 運用ではなく、再現性と審査向け検証を目的としています。
 
 [English README](./README.md) | [Architecture](./docs/ARCHITECTURE.md) | [Devnet Setup](./docs/DEVNET_SETUP.md) | [Security](./docs/SECURITY.md)
 
 ## このプロトタイプが解決すること
 
-- 非保管型配布: 受取者は自分のウォレットで署名し、アプリは秘密鍵を保持しない。
+- 非保管型オンチェーン配布: ウォレット接続利用者は自分のウォレットで署名し、アプリは秘密鍵を保持しない。
+- ウォレット任意参加: Phantom 未所持ユーザーでもオフチェーン参加フローで利用可能。
 - 監査可能性: tx/receipt 記録は Solana Explorer で独立して検証できる。
 - 重複受取防止: receipt ロジックで 1 回受取を強制し、学校フローでの再申請は二重支払いではなく \`already joined\` の運用完了扱いになる。
 
 ## 現在の PoC ステータス
 
 - Devnet E2E claim フローが利用可能（wallet sign -> send -> Explorer 検証）。
-- 学校イベント QR フローが利用可能（\`/admin\` -> 印刷 QR -> \`/u/scan\` -> \`/u/confirm\` -> \`/u/success\`）。
-- Success 画面で tx signature + receipt pubkey + Explorer リンク（devnet）を確認できる。
+- 学校イベント QR フローが利用可能（\`/admin/login\` -> \`/admin\` -> 印刷 QR -> \`/u/scan\` -> \`/u/confirm\` -> \`/u/success\`）。
+- Success 画面で tx signature + receipt pubkey + mint の Explorer リンク（devnet）を確認できる。
 - 再申請は \`already joined\` の運用完了として扱われ、二重支払いはしない。
+
+## We-ne の進捗（2026-02-20）
+
+- 管理者運用:
+  - \`/admin/*\` はセッションガードされ、未認証アクセスは \`/admin/login\` にリダイレクトされます。
+  - 管理者ログインは master password / 招待コード / 任意のデモパスワードに対応しています。
+- 参加券発行:
+  - イベント発行ごとに devnet 上で独立した SPL mint を新規作成します。
+  - トークンメタデータ名はイベントタイトルに同期し、`/metadata/<mint>.json` で配信されます。
+  - 受給ルール（\`claimIntervalDays\`, \`maxClaimsPerInterval\`）をイベント単位で設定できます。
+- 利用者 claim:
+  - \`UserConfirmScreen\` は、ウォレット接続 + on-chain 設定がある場合に on-chain claim を実行します。
+  - ウォレット未接続/on-chain設定不足でも、off-chain claim フローで参加完了できます。
+  - Success 画面で tx/receipt/mint の Explorer リンクを表示します。
+- API 監査と認可:
+  - 管理者専用API（\`POST /v1/school/events\`, \`GET /v1/school/events/:eventId/claimants\`）は認証必須です。
+  - 監査ログはグローバルチェーンで連結され、master dashboard API から確認できます。
 
 ## 最新のセキュリティ/監査更新（2026-02-20）
 
@@ -153,24 +192,30 @@ Reviewer shortcut: \`./wene-mobile/src/screens/user/UserScanScreen.tsx\` と \`.
 - マイルストーン1（\`状態：完了\`）: \`/u/scan\` に実スキャン処理（QRデコード + 権限ハンドリング）を実装。
 - マイルストーン2（\`状態：予定\`）: \`eventId\` 手入力フォールバック + 期限切れ/無効 QR メッセージを追加し、UI/API テストで固定する。
 
-## 🔗 デプロイメントフロー（厳格な順序）
-Asuka Networkの全システムを動作させるには、依存関係IDを満たすために、以下の順序でコンポーネントをデプロイする**必要**があります。
+## 🔗 デプロイメントフロー（現行）
+現行構成でのデプロイは、以下の順序で実行してください。
 
 ### Step 1: Layer 1 (Solana Program)
 1. `grant_program/` に移動します。
 2. ビルドし、Devnetへデプロイします。
-3. 生成された `Program ID` を**コピー**します。
+3. Program を更新した場合は、生成された Program ID を `wene-mobile/src/solana/config.ts` に反映します。
 
 ### Step 2: Layer 2 (API Worker)
 1. `api-worker/` に移動します。
-2. `wrangler.toml` に Step 1 の `Program ID` を貼り付けます。
+2. Worker変数を設定します:
+   - `ADMIN_PASSWORD`（必須、既定値不可）
+   - `ADMIN_DEMO_PASSWORD`（任意、デモログイン用）
+   - `CORS_ORIGIN`（推奨）
 3. Cloudflare Workersへデプロイします。
-4. WorkerのURL（例: `https://api.your-name.workers.dev`）を**コピー**します。
+4. WorkerのURL（例: `https://api.your-name.workers.dev`）を控えます。
 
 ### Step 3: Layer 3 (Mobile App)
 1. `wene-mobile/` に移動します。
 2. `.env.example` から `.env` を作成します。
-3. `Worker URL` (Step 2由来) と `Program ID` (Step 1由来) を貼り付けます。
+3. アプリ環境変数を設定します:
+   - `EXPO_PUBLIC_API_BASE_URL` = Worker URL
+   - `EXPO_PUBLIC_BASE_URL` = Pages ドメイン（印刷/DeepLink UX のため推奨）
+   - `EXPO_PUBLIC_ADMIN_DEMO_PASSWORD`（デモログインボタンを使う場合のみ）
 4. `npm install` を実行します（web3.jsのパッチが自動的に適用されます）。
 5. アプリを起動します。
 
@@ -184,7 +229,7 @@ npm run dev:full
 
 起動後の確認先:
 
-- 管理画面一覧: \`http://localhost:8081/admin\`
+- 管理者ログイン: \`http://localhost:8081/admin/login\`
 - 利用者スキャン導線: \`http://localhost:8081/u/scan?eventId=evt-001\`
 
 ## クイックスタート（Cloudflare Pages）
@@ -211,15 +256,16 @@ npm run verify:pages
 
 ## デモ / 再現手順（1ページ）
 
-1. 管理者イベント一覧を開く: \`/admin\`
-2. イベント詳細を開く: \`/admin/events/<eventId>\`（例: \`evt-001\`、state は \`published\` 推奨）。
-3. 詳細画面の「印刷用PDF」から印刷画面へ遷移: \`/admin/print/<eventId>\`。
-4. 印刷 QR のリンク先が \`/u/scan?eventId=<eventId>\` であることを確認。
-5. 利用者側で QR URL を開く -> \`/u/confirm?eventId=<eventId>\` -> claim -> \`/u/success?eventId=<eventId>\`。
-6. Success 画面で tx signature と receipt pubkey の Explorer リンクを確認:
+1. 管理者ログイン画面を開き、認証する: \`/admin/login\`
+2. 管理者イベント一覧を開く: \`/admin\`
+3. イベント詳細を開く: \`/admin/events/<eventId>\`（例: \`evt-001\`、state は \`published\` 推奨）。
+4. 詳細画面の「印刷用PDF」から印刷画面へ遷移: \`/admin/print/<eventId>\`。
+5. 印刷 QR のリンク先が \`/u/scan?eventId=<eventId>\` であることを確認。
+6. 利用者側で QR URL を開く -> \`/u/confirm?eventId=<eventId>\` -> claim -> \`/u/success?eventId=<eventId>\`。
+7. Success 画面で tx signature と receipt pubkey の Explorer リンクを確認:
 - \`https://explorer.solana.com/tx/<signature>?cluster=devnet\`
 - \`https://explorer.solana.com/address/<receiptPubkey>?cluster=devnet\`
-7. 同じ QR で再度 claim: 期待挙動は \`already joined\` の運用完了扱い（重複支払いなし）。
+8. 同じ QR で再度 claim: 期待挙動は \`already joined\` の運用完了扱い（重複支払いなし）。
 
 ## 検証コマンド
 
