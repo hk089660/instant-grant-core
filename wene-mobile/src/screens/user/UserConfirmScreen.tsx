@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback, useState } from 'react';
-import { View, StyleSheet, Alert } from 'react-native';
+import { View, StyleSheet, Alert, Platform, ToastAndroid } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { PublicKey } from '@solana/web3.js';
@@ -18,7 +18,10 @@ import { useRecipientTicketStore } from '../../store/recipientTicketStore';
 import { buildClaimTx } from '../../solana/txBuilders';
 import { sendSignedTx, isBlockhashExpiredError } from '../../solana/sendTx';
 import { signTransaction } from '../../utils/phantom';
+import { rejectPendingSignTx } from '../../utils/phantomSignTxPending';
 import type { SchoolEvent } from '../../types/school';
+
+const SIGN_TIMEOUT_MS = 120_000;
 
 export const UserConfirmScreen: React.FC = () => {
   const router = useRouter();
@@ -36,6 +39,7 @@ export const UserConfirmScreen: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [pin, setPin] = useState('');
   const [showPinInput, setShowPinInput] = useState(false);
+  const [waitingForPhantom, setWaitingForPhantom] = useState(false);
   const walletReady = Boolean(
     walletPubkey &&
     phantomSession &&
@@ -68,6 +72,24 @@ export const UserConfirmScreen: React.FC = () => {
     setStarted(targetEventId).catch(() => { });
   }, [targetEventId]);
 
+  const buildSignRedirectContext = useCallback((): { redirectLink: string; appUrl: string } => {
+    return {
+      redirectLink: 'wene://phantom/sign?cluster=devnet',
+      appUrl: 'https://wene.app',
+    };
+  }, []);
+
+  const handleCancelPhantomWait = useCallback(() => {
+    const msg = 'Phantom署名待機を中断しました。もう一度「参加を確定する」を押してください。';
+    rejectPendingSignTx(new Error(msg));
+    setWaitingForPhantom(false);
+    setStatus('error');
+    setError(msg);
+    if (Platform.OS === 'android') {
+      ToastAndroid.show('署名待機を中断しました', ToastAndroid.SHORT);
+    }
+  }, []);
+
   const runOnchainClaim = useCallback(async (): Promise<{ txSignature: string; receiptPubkey: string }> => {
     if (!targetEventId || !event) {
       throw new Error('イベント情報が不足しています');
@@ -87,16 +109,34 @@ export const UserConfirmScreen: React.FC = () => {
 
     let retried = false;
     while (true) {
-      const signed = await signTransaction({
-        tx: built.tx,
-        session: phantomSession,
-        dappEncryptionPublicKey,
-        dappSecretKey,
-        phantomEncryptionPublicKey,
-        redirectLink: 'wene://phantom/sign?cluster=devnet',
-        cluster: 'devnet',
-        appUrl: 'https://wene.app',
-      });
+      const { redirectLink, appUrl } = buildSignRedirectContext();
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      let signed: Awaited<ReturnType<typeof signTransaction>>;
+      try {
+        setWaitingForPhantom(true);
+        signed = await Promise.race([
+          signTransaction({
+            tx: built.tx,
+            session: phantomSession,
+            dappEncryptionPublicKey,
+            dappSecretKey,
+            phantomEncryptionPublicKey,
+            redirectLink,
+            cluster: 'devnet',
+            appUrl,
+          }),
+          new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => {
+              const timeoutMsg = 'Phantom署名がタイムアウトしました。Phantomからこのアプリに戻って再試行してください。';
+              rejectPendingSignTx(new Error(timeoutMsg));
+              reject(new Error(timeoutMsg));
+            }, SIGN_TIMEOUT_MS);
+          }),
+        ]);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+        setWaitingForPhantom(false);
+      }
 
       try {
         const txSignature = await sendSignedTx(signed, {
@@ -131,6 +171,7 @@ export const UserConfirmScreen: React.FC = () => {
     phantomEncryptionPublicKey,
     dappEncryptionPublicKey,
     dappSecretKey,
+    buildSignRedirectContext,
   ]);
 
   const handleParticipate = useCallback(async () => {
@@ -208,6 +249,8 @@ export const UserConfirmScreen: React.FC = () => {
           setError('PINが正しくありません');
         } else if (msg.includes('キャンセル')) {
           setError('Phantom署名がキャンセルされました');
+        } else if (msg.includes('タイムアウト')) {
+          setError('Phantom署名がタイムアウトしました。Phantomからこのアプリに戻って再試行してください。');
         } else {
           setError(msg);
         }
@@ -296,6 +339,20 @@ export const UserConfirmScreen: React.FC = () => {
           <AppText variant="caption" style={styles.apiErrorText}>
             {error}
           </AppText>
+        ) : null}
+
+        {status === 'loading' && waitingForPhantom ? (
+          <Card style={styles.fallbackCard}>
+            <AppText variant="caption" style={styles.fallbackText}>
+              Phantomで署名後にこの画面へ戻ってください。戻れない場合は待機を中断して再試行できます。
+            </AppText>
+            <Button
+              title="署名待機を中断する"
+              variant="secondary"
+              onPress={handleCancelPhantomWait}
+              style={styles.fallbackButton}
+            />
+          </Card>
         ) : null}
 
         {/* アクションボタン群 */}
@@ -432,5 +489,15 @@ const styles = StyleSheet.create({
     color: theme.colors.error,
     marginTop: theme.spacing.sm,
     marginBottom: theme.spacing.sm,
+  },
+  fallbackCard: {
+    marginBottom: theme.spacing.md,
+  },
+  fallbackText: {
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.sm,
+  },
+  fallbackButton: {
+    marginTop: theme.spacing.xs,
   },
 });
