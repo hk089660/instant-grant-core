@@ -19,6 +19,9 @@ export const schoolRoutes = {
       /** userId+pin フロー: created | already */
       status?: 'created' | 'already';
       confirmationCode?: string;
+      mint?: string;
+      reflected?: boolean;
+      onchainBlocked?: boolean;
     }
   ) => {
     const base = `/u/success?eventId=${encodeURIComponent(eventId)}`;
@@ -29,6 +32,9 @@ export const schoolRoutes = {
     if (params?.status) query.push(`status=${encodeURIComponent(params.status)}`);
     if (params?.confirmationCode)
       query.push(`confirmationCode=${encodeURIComponent(params.confirmationCode)}`);
+    if (params?.mint) query.push(`mint=${encodeURIComponent(params.mint)}`);
+    if (params?.reflected) query.push('reflected=1');
+    if (params?.onchainBlocked) query.push('onchainBlocked=1');
     return query.length > 0 ? `${base}&${query.join('&')}` : base;
   },
   schoolClaim: (eventId: string) => `/r/school/${eventId}`,

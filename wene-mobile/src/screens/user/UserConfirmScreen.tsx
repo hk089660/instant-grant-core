@@ -17,6 +17,8 @@ import { usePhantomStore } from '../../store/phantomStore';
 import { useRecipientTicketStore } from '../../store/recipientTicketStore';
 import { buildClaimTx } from '../../solana/txBuilders';
 import { sendSignedTx, isBlockhashExpiredError } from '../../solana/sendTx';
+import { getConnection } from '../../solana/singleton';
+import { fetchSplBalance } from '../../solana/wallet';
 import { signTransaction } from '../../utils/phantom';
 import { rejectPendingSignTx } from '../../utils/phantomSignTxPending';
 import { setPhantomWebReturnPath } from '../../utils/phantomWebReturnPath';
@@ -105,7 +107,7 @@ export const UserConfirmScreen: React.FC = () => {
     }
   }, []);
 
-  const runOnchainClaim = useCallback(async (): Promise<{ txSignature: string; receiptPubkey: string }> => {
+  const runOnchainClaim = useCallback(async (): Promise<{ txSignature: string; receiptPubkey: string; mint: string }> => {
     if (!targetEventId || !event) {
       throw new Error('イベント情報が不足しています');
     }
@@ -161,6 +163,7 @@ export const UserConfirmScreen: React.FC = () => {
         return {
           txSignature,
           receiptPubkey: built.meta.receiptPda.toBase58(),
+          mint: built.meta.mint.toBase58(),
         };
       } catch (sendError) {
         const msg = sendError instanceof Error ? sendError.message : String(sendError);
@@ -189,8 +192,36 @@ export const UserConfirmScreen: React.FC = () => {
     buildSignRedirectContext,
   ]);
 
+  const waitForMintReflection = useCallback(async (
+    mintAddress: string,
+    ownerAddress: string,
+    timeoutMs: number = 15_000
+  ): Promise<boolean> => {
+    try {
+      const connection = getConnection();
+      const ownerPubkey = new PublicKey(ownerAddress);
+      const mintPubkey = new PublicKey(mintAddress);
+      const deadline = Date.now() + timeoutMs;
+
+      while (Date.now() <= deadline) {
+        const result = await fetchSplBalance(connection, ownerPubkey, mintPubkey);
+        try {
+          if (BigInt(result.amount) > BigInt(0)) {
+            return true;
+          }
+        } catch {
+          // noop
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const handleParticipate = useCallback(async () => {
-    if (!targetEventId || !userId || !event) return;
+    if (!targetEventId || !userId || !event || !walletPubkey) return;
 
     // PIN が必要な場合は入力を促す
     if (!showPinInput) {
@@ -215,43 +246,54 @@ export const UserConfirmScreen: React.FC = () => {
       // 1) PIN 検証だけ先に行う（off-chain claim の副作用を先に発生させない）
       await verifyUserPin(userId, pinVal);
 
-      // 2) on-chain claim（30日/1回ルール時のみ実行）
+      // 2) on-chain claim（失敗時は off-chain 判定へフォールバック）
       let txSignature: string | undefined;
       let receiptPubkey: string | undefined;
+      let distributedMint: string | undefined;
+      let tokenReflectedInWallet = false;
+      let onchainBlockedByPeriod = false;
       let result: Awaited<ReturnType<typeof claimEventWithUser>> | null = null;
 
-      if (onchainPolicyCompatible) {
-        try {
-          const onchain = await runOnchainClaim();
-          txSignature = onchain.txSignature;
-          receiptPubkey = onchain.receiptPubkey;
-        } catch (onchainError) {
-          // on-chain が「既に受給済み」の場合は off-chain 側も already か確認してから復元
-          const storedTicket = getTicketByEventId(targetEventId);
-          const onchainMsg = onchainError instanceof Error ? onchainError.message : String(onchainError);
-          const mayBeAlreadyClaimed =
-            onchainMsg.includes('既に受給済み') ||
-            onchainMsg.includes('already in use') ||
-            onchainMsg.includes('custom program error');
-          if (!(mayBeAlreadyClaimed && storedTicket?.txSignature)) {
-            throw onchainError;
-          }
+      try {
+        const onchain = await runOnchainClaim();
+        txSignature = onchain.txSignature;
+        receiptPubkey = onchain.receiptPubkey;
+        distributedMint = onchain.mint;
+        tokenReflectedInWallet = await waitForMintReflection(onchain.mint, walletPubkey);
+      } catch (onchainError) {
+        const storedTicket = getTicketByEventId(targetEventId);
+        const onchainMsg = onchainError instanceof Error ? onchainError.message : String(onchainError);
+        const mayBeAlreadyClaimed =
+          onchainMsg.includes('既に受給済み') ||
+          onchainMsg.includes('already in use') ||
+          onchainMsg.includes('custom program error');
+        if (!mayBeAlreadyClaimed) {
+          throw onchainError;
+        }
 
-          result = await claimEventWithUser(targetEventId, userId, pinVal);
-          if (result.status !== 'already') {
-            throw new Error('オンチェーン上限に達しています。管理者の受給設定とオンチェーン設定を確認してください。');
-          }
+        onchainBlockedByPeriod = true;
+        if (storedTicket?.txSignature) {
           txSignature = storedTicket.txSignature;
           receiptPubkey = storedTicket.receiptPubkey;
         }
-      } else if (__DEV__) {
-        console.log('[UserConfirmScreen] skip on-chain claim due custom policy', {
+        distributedMint = event.solanaMint ?? undefined;
+        if (__DEV__) {
+          console.log('[UserConfirmScreen] on-chain distribution blocked by period', {
+            eventId: targetEventId,
+            onchainPolicyCompatible,
+            hasStoredTicket: Boolean(storedTicket?.txSignature),
+          });
+        }
+      }
+
+      if (!onchainPolicyCompatible && __DEV__) {
+        console.log('[UserConfirmScreen] custom policy active (on-chain still attempted)', {
           claimIntervalDays,
           maxClaimsPerInterval,
         });
       }
 
-      // 3) off-chain claim 記録（ネットワーク一時障害でも tx は保持して成功遷移）
+      // 3) off-chain claim 記録（on-chain 成功時のみ一時障害を許容）
       if (!result) {
         try {
           result = await claimEventWithUser(targetEventId, userId, pinVal);
@@ -259,8 +301,16 @@ export const UserConfirmScreen: React.FC = () => {
           if (syncError instanceof HttpError && syncError.status === 401) {
             throw syncError;
           }
+          if (!txSignature) {
+            throw syncError;
+          }
           console.warn('[UserConfirmScreen] off-chain claim sync failed after on-chain success:', syncError);
         }
+      }
+
+      // 標準ルール時は on-chain 側 already と off-chain 判定の不整合を許容しない
+      if (onchainPolicyCompatible && onchainBlockedByPeriod && result?.status !== 'already') {
+        throw new Error('オンチェーン上限に達しています。管理者の受給設定とオンチェーン設定を確認してください。');
       }
 
       router.push(
@@ -270,6 +320,9 @@ export const UserConfirmScreen: React.FC = () => {
           confirmationCode: result?.confirmationCode,
           tx: txSignature,
           receipt: receiptPubkey,
+          mint: distributedMint,
+          reflected: tokenReflectedInWallet,
+          onchainBlocked: onchainBlockedByPeriod,
         }) as any
       );
     } catch (e: unknown) {
@@ -319,10 +372,12 @@ export const UserConfirmScreen: React.FC = () => {
     targetEventId,
     userId,
     event,
+    walletPubkey,
     pin,
     showPinInput,
     walletReady,
     runOnchainClaim,
+    waitForMintReflection,
     getTicketByEventId,
     clearUser,
     router,
@@ -360,7 +415,7 @@ export const UserConfirmScreen: React.FC = () => {
             </AppText>
             {!onchainPolicyCompatible && (
               <AppText variant="small" style={styles.noticeText}>
-                ※ この受給ルールは現在オフチェーン判定で適用されます（オンチェーン配布は 30日ごと1回ルールのみ対応）。
+                ※ カスタム受給ルール時は、オンチェーン配布が同一期間で上限に達した場合にオフチェーン記録のみ更新されることがあります。
               </AppText>
             )}
             {event.state && event.state !== 'published' && (

@@ -15,18 +15,24 @@ import type { SchoolEvent } from '../../types/school';
 export const UserSuccessScreen: React.FC = () => {
   const router = useRouter();
   const { eventId: targetEventId, isValid } = useEventIdFromParams({ redirectOnInvalid: true });
-  const { tx, receipt, already, confirmationCode, status } = useLocalSearchParams<{
+  const { tx, receipt, already, confirmationCode, status, mint, reflected, onchainBlocked } = useLocalSearchParams<{
     tx?: string;
     receipt?: string;
     already?: string;
     confirmationCode?: string;
     status?: string;
+    mint?: string;
+    reflected?: string;
+    onchainBlocked?: string;
   }>();
 
   const [event, setEvent] = useState<SchoolEvent | null>(null);
   const { addTicket, getTicketByEventId } = useRecipientTicketStore();
   const txSignature = typeof tx === 'string' && tx.trim() ? tx.trim() : undefined;
   const receiptPubkey = typeof receipt === 'string' && receipt.trim() ? receipt.trim() : undefined;
+  const mintAddress = typeof mint === 'string' && mint.trim() ? mint.trim() : undefined;
+  const reflectedOnchain = reflected === '1';
+  const onchainBlockedByPeriod = onchainBlocked === '1';
   const storedTicket = targetEventId ? getTicketByEventId(targetEventId) : undefined;
   const resolvedTx = txSignature ?? storedTicket?.txSignature;
   const resolvedReceipt = receiptPubkey ?? storedTicket?.receiptPubkey;
@@ -62,6 +68,7 @@ export const UserSuccessScreen: React.FC = () => {
   const isAlready = already === '1' || status === 'already';
   const explorerTxUrl = resolvedTx ? `https://explorer.solana.com/tx/${resolvedTx}?cluster=devnet` : null;
   const explorerReceiptUrl = resolvedReceipt ? `https://explorer.solana.com/address/${resolvedReceipt}?cluster=devnet` : null;
+  const explorerMintUrl = mintAddress ? `https://explorer.solana.com/address/${mintAddress}?cluster=devnet` : null;
 
   if (!isValid) return null;
 
@@ -140,8 +147,34 @@ export const UserSuccessScreen: React.FC = () => {
           </Card>
         )}
 
+        {mintAddress && (
+          <Card style={styles.card}>
+            <AppText variant="caption" style={styles.label}>
+              配布トークン Mint
+            </AppText>
+            <AppText variant="small" style={styles.value} selectable>
+              {mintAddress}
+            </AppText>
+            <AppText variant="small" style={styles.codeHint}>
+              {reflectedOnchain
+                ? 'オンチェーン残高を確認しました。Phantom側の表示更新に数十秒かかる場合があります。'
+                : onchainBlockedByPeriod
+                  ? 'この期間はオンチェーン配布上限に達しているため、追加配布は行われません。'
+                  : 'トークン反映中です。Phantomでネットワークがdevnetになっているか確認してください。'}
+            </AppText>
+            {explorerMintUrl && (
+              <Button
+                title="Explorer で見る（Mint）"
+                variant="secondary"
+                onPress={() => Linking.openURL(explorerMintUrl)}
+                style={styles.explorerButton}
+              />
+            )}
+          </Card>
+        )}
+
         {/* confirmationCode もない、tx/receipt もない場合 */}
-        {!confirmationCode && !resolvedTx && !resolvedReceipt && (
+        {!confirmationCode && !resolvedTx && !resolvedReceipt && !mintAddress && (
           <Card style={styles.card}>
             <AppText variant="caption" style={styles.label}>参加記録</AppText>
             <AppText variant="small" style={styles.codeHint}>
