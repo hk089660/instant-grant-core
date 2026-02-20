@@ -8,6 +8,7 @@ import { ToastAndroid } from 'react-native';
 import { usePhantomStore } from '../store/phantomStore';
 import { useRecipientStore } from '../store/recipientStore';
 import { handlePhantomConnectRedirect, handleRedirect } from './phantom';
+import { rejectPendingSignTx } from './phantomSignTxPending';
 
 async function waitForDappSecretKey(timeoutMs: number): Promise<boolean> {
   const startTime = Date.now();
@@ -34,14 +35,18 @@ export async function processPhantomUrl(url: string, source: 'event' | 'initial'
   }
   const hasKey = await waitForDappSecretKey(5000);
   if (!hasKey) {
-    recipientStore.setError('キーが利用できません');
+    const msg = 'キーが利用できません';
+    recipientStore.setError(msg);
+    rejectPendingSignTx(new Error(msg));
     if (Platform.OS === 'android') ToastAndroid.show('接続エラー: キーが利用できません', ToastAndroid.LONG);
     return;
   }
 
   const { dappSecretKey } = usePhantomStore.getState();
   if (!dappSecretKey) {
-    recipientStore.setError('キーが利用できません');
+    const msg = 'キーが利用できません';
+    recipientStore.setError(msg);
+    rejectPendingSignTx(new Error(msg));
     if (Platform.OS === 'android') ToastAndroid.show('接続エラー: キーが利用できません', ToastAndroid.LONG);
     return;
   }
@@ -76,12 +81,15 @@ export async function processPhantomUrl(url: string, source: 'event' | 'initial'
       }
     } else {
       console.warn('[PhantomDeeplink] unknown path:', url.substring(0, 80));
-      recipientStore.setError('不明なリダイレクトです');
+      const msg = '不明なリダイレクトです';
+      recipientStore.setError(msg);
+      rejectPendingSignTx(new Error(msg));
     }
   } catch (e) {
     const msg = (e as Error)?.message ?? String(e);
     console.error('[PhantomDeeplink] exception:', msg);
     recipientStore.setError(msg);
+    rejectPendingSignTx(new Error(msg));
     if (Platform.OS === 'android') ToastAndroid.show(`エラー: ${msg.substring(0, 50)}`, ToastAndroid.LONG);
   } finally {
     const current = useRecipientStore.getState().state;
