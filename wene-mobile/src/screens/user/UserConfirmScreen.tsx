@@ -221,7 +221,7 @@ export const UserConfirmScreen: React.FC = () => {
   }, []);
 
   const handleParticipate = useCallback(async () => {
-    if (!targetEventId || !userId || !event || !walletPubkey) return;
+    if (!targetEventId || !userId || !event) return;
 
     // PIN が必要な場合は入力を促す
     if (!showPinInput) {
@@ -232,10 +232,6 @@ export const UserConfirmScreen: React.FC = () => {
     const pinVal = pin.trim();
     if (!/^\d{4,6}$/.test(pinVal)) {
       setError('PINは4〜6桁の数字で入力してください');
-      return;
-    }
-    if (!walletReady) {
-      setError('Phantomウォレットを接続してください');
       return;
     }
 
@@ -253,42 +249,61 @@ export const UserConfirmScreen: React.FC = () => {
       let tokenReflectedInWallet = false;
       let onchainBlockedByPeriod = false;
       let result: Awaited<ReturnType<typeof claimEventWithUser>> | null = null;
+      const shouldAttemptOnchain = Boolean(
+        walletReady &&
+        walletPubkey &&
+        event.solanaMint &&
+        event.solanaAuthority &&
+        event.solanaGrantId
+      );
 
-      try {
-        const onchain = await runOnchainClaim();
-        txSignature = onchain.txSignature;
-        receiptPubkey = onchain.receiptPubkey;
-        distributedMint = onchain.mint;
-        tokenReflectedInWallet = await waitForMintReflection(onchain.mint, walletPubkey);
-      } catch (onchainError) {
-        const storedTicket = getTicketByEventId(targetEventId);
-        const onchainMsg = onchainError instanceof Error ? onchainError.message : String(onchainError);
-        const onchainMsgLower = onchainMsg.toLowerCase();
-        const mayBeAlreadyClaimed =
-          onchainMsg.includes('既に受給済み') ||
-          onchainMsgLower.includes('already in use') ||
-          onchainMsgLower.includes('account already in use');
-        if (!mayBeAlreadyClaimed) {
-          throw onchainError;
+      if (shouldAttemptOnchain) {
+        const ownerWallet = walletPubkey;
+        if (!ownerWallet) {
+          throw new Error('Phantomウォレットを接続してください');
         }
+        try {
+          const onchain = await runOnchainClaim();
+          txSignature = onchain.txSignature;
+          receiptPubkey = onchain.receiptPubkey;
+          distributedMint = onchain.mint;
+          tokenReflectedInWallet = await waitForMintReflection(onchain.mint, ownerWallet);
+        } catch (onchainError) {
+          const storedTicket = getTicketByEventId(targetEventId);
+          const onchainMsg = onchainError instanceof Error ? onchainError.message : String(onchainError);
+          const onchainMsgLower = onchainMsg.toLowerCase();
+          const mayBeAlreadyClaimed =
+            onchainMsg.includes('既に受給済み') ||
+            onchainMsgLower.includes('already in use') ||
+            onchainMsgLower.includes('account already in use');
+          if (!mayBeAlreadyClaimed) {
+            throw onchainError;
+          }
 
-        onchainBlockedByPeriod = true;
-        if (storedTicket?.txSignature) {
-          txSignature = storedTicket.txSignature;
-          receiptPubkey = storedTicket.receiptPubkey;
+          onchainBlockedByPeriod = true;
+          if (storedTicket?.txSignature) {
+            txSignature = storedTicket.txSignature;
+            receiptPubkey = storedTicket.receiptPubkey;
+          }
+          distributedMint = event.solanaMint ?? undefined;
+          if (__DEV__) {
+            console.log('[UserConfirmScreen] on-chain distribution blocked by period', {
+              eventId: targetEventId,
+              onchainPolicyCompatible,
+              hasStoredTicket: Boolean(storedTicket?.txSignature),
+            });
+          }
         }
-        distributedMint = event.solanaMint ?? undefined;
-        if (__DEV__) {
-          console.log('[UserConfirmScreen] on-chain distribution blocked by period', {
-            eventId: targetEventId,
-            onchainPolicyCompatible,
-            hasStoredTicket: Boolean(storedTicket?.txSignature),
-          });
-        }
+      } else if (__DEV__) {
+        console.log('[UserConfirmScreen] on-chain claim skipped (off-chain only mode)', {
+          eventId: targetEventId,
+          walletReady,
+          hasWalletPubkey: Boolean(walletPubkey),
+          hasOnchainConfig: Boolean(event.solanaMint && event.solanaAuthority && event.solanaGrantId),
+        });
       }
-
       if (!onchainPolicyCompatible && __DEV__) {
-        console.log('[UserConfirmScreen] custom policy active (on-chain still attempted)', {
+        console.log('[UserConfirmScreen] custom policy active', {
           claimIntervalDays,
           maxClaimsPerInterval,
         });
@@ -373,7 +388,6 @@ export const UserConfirmScreen: React.FC = () => {
     targetEventId,
     userId,
     event,
-    walletPubkey,
     pin,
     showPinInput,
     walletReady,
@@ -436,10 +450,10 @@ export const UserConfirmScreen: React.FC = () => {
         {!walletReady && (
           <Card style={styles.walletCard}>
             <AppText variant="caption" style={styles.walletHint}>
-              オンチェーン記録のため、先にPhantomウォレット接続が必要です
+              Phantom未接続でも参加できます。接続するとSPL参加券がウォレットに配布されます。
             </AppText>
             <Button
-              title="Phantomを接続する"
+              title="Phantomを接続（任意）"
               variant="secondary"
               onPress={() => router.push('/wallet' as any)}
               style={styles.walletButton}
@@ -494,8 +508,7 @@ export const UserConfirmScreen: React.FC = () => {
             disabled={
               status === 'loading' ||
               !event ||
-              (event.state != null && event.state !== 'published') ||
-              (showPinInput && !walletReady)
+              (event.state != null && event.state !== 'published')
             }
           />
           {!showPinInput && event && event.state === 'published' && walletReady && (
@@ -505,7 +518,7 @@ export const UserConfirmScreen: React.FC = () => {
           )}
           {!walletReady && (
             <AppText variant="small" style={styles.actionHint}>
-              Phantom接続後に参加を確定できます
+              Phantom未接続時はオフチェーン参加として確定されます
             </AppText>
           )}
           <Button
