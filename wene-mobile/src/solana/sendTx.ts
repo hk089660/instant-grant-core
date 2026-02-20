@@ -45,6 +45,14 @@ export interface ConfirmContext {
  */
 export function formatSendError(message: string): string {
   const lower = message.toLowerCase();
+  if (
+    lower.includes('network request failed') ||
+    lower.includes('failed to fetch') ||
+    lower.includes('fetch failed') ||
+    lower.includes('network error')
+  ) {
+    return 'ネットワークエラーが発生しました。通信状態を確認して再試行してください';
+  }
   if (lower.includes('insufficient funds')) {
     return '手数料SOLが不足しています';
   }
@@ -56,6 +64,28 @@ export function formatSendError(message: string): string {
   }
   return message;
 }
+
+/**
+ * 一時的なネットワーク障害かどうか
+ */
+export function isTransientNetworkError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('network request failed') ||
+    lower.includes('failed to fetch') ||
+    lower.includes('fetch failed') ||
+    lower.includes('network error') ||
+    lower.includes('timed out') ||
+    lower.includes('timeout') ||
+    lower.includes('econnreset') ||
+    lower.includes('enotfound') ||
+    lower.includes('503') ||
+    lower.includes('429')
+  );
+}
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Blockhash 期限切れ系エラーかどうか（自動再試行の判定用） */
 export function isBlockhashExpiredError(message: string): boolean {
@@ -136,50 +166,82 @@ export async function sendSignedTx(
     preflightCommitment: 'processed' as const,
     maxRetries: 3,
   };
+  const NETWORK_RETRY_MAX = 3;
 
-  let sig: string;
-  try {
-    sig = await connection.sendRawTransaction(raw, sendOpts);
-  } catch (error) {
-    const rawMsg = error instanceof Error ? error.message : String(error);
-    console.error('Failed to send transaction:', error);
-    throw new Error(formatSendError(rawMsg));
+  let sig: string | null = null;
+  for (let attempt = 1; attempt <= NETWORK_RETRY_MAX; attempt += 1) {
+    try {
+      sig = await connection.sendRawTransaction(raw, sendOpts);
+      break;
+    } catch (error) {
+      const rawMsg = error instanceof Error ? error.message : String(error);
+      if (isTransientNetworkError(rawMsg) && attempt < NETWORK_RETRY_MAX) {
+        console.warn(`[sendSignedTx] sendRawTransaction network retry ${attempt}/${NETWORK_RETRY_MAX}:`, rawMsg);
+        await sleep(attempt * 800);
+        continue;
+      }
+      console.error('Failed to send transaction:', error);
+      throw new Error(formatSendError(rawMsg));
+    }
+  }
+  if (!sig) {
+    throw new Error('送信に失敗しました。時間をおいて再試行してください');
   }
 
   // 4) confirmTransaction（confirmContext を優先。無い場合のみ signature 単体の API で確定）
-  try {
-    if (confirmContext?.blockhash && confirmContext?.lastValidBlockHeight != null) {
-      const confirmation = await connection.confirmTransaction(
-        {
-          signature: sig,
-          blockhash: confirmContext.blockhash,
-          lastValidBlockHeight: confirmContext.lastValidBlockHeight,
-        },
-        'processed'
-      );
-      if (confirmation.value.err) {
-        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+  let confirmError: unknown = null;
+  for (let attempt = 1; attempt <= NETWORK_RETRY_MAX; attempt += 1) {
+    try {
+      if (confirmContext?.blockhash && confirmContext?.lastValidBlockHeight != null) {
+        const confirmation = await connection.confirmTransaction(
+          {
+            signature: sig,
+            blockhash: confirmContext.blockhash,
+            lastValidBlockHeight: confirmContext.lastValidBlockHeight,
+          },
+          'processed'
+        );
+        if (confirmation.value.err) {
+          throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+        }
+      } else {
+        // フォールバック: blockhash を捏造せず、signature だけの API で確定
+        const confirmation = await connection.confirmTransaction(sig, 'processed');
+        if (confirmation.value.err) {
+          throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+        }
       }
-    } else {
-      // フォールバック: blockhash を捏造せず、signature だけの API で確定
-      const confirmation = await connection.confirmTransaction(sig, 'processed');
-      if (confirmation.value.err) {
-        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+      confirmError = null;
+      break;
+    } catch (e) {
+      confirmError = e;
+      const msg = e instanceof Error ? e.message : String(e);
+      if (isTransientNetworkError(msg) && attempt < NETWORK_RETRY_MAX) {
+        console.warn(`[sendSignedTx] confirmTransaction network retry ${attempt}/${NETWORK_RETRY_MAX}:`, msg);
+        await sleep(attempt * 800);
+        continue;
       }
+      break;
     }
-  } catch (confirmError) {
-    // 最終保険: confirm が throw しても、getSignatureStatuses で成功判定できれば Done 扱い
-    const { value } = await connection.getSignatureStatuses([sig]);
-    const status = value[0] ?? null;
-    const ok =
-      status != null &&
-      status.err === null &&
-      (status.confirmationStatus === 'processed' ||
-        status.confirmationStatus === 'confirmed' ||
-        status.confirmationStatus === 'finalized');
-    if (ok) {
-      console.warn('[sendSignedTx] confirmTransaction threw but getSignatureStatuses shows success:', sig);
-      return sig;
+  }
+  if (confirmError) {
+    try {
+      // 最終保険: confirm が throw しても、getSignatureStatuses で成功判定できれば Done 扱い
+      const { value } = await connection.getSignatureStatuses([sig]);
+      const status = value[0] ?? null;
+      const ok =
+        status != null &&
+        status.err === null &&
+        (status.confirmationStatus === 'processed' ||
+          status.confirmationStatus === 'confirmed' ||
+          status.confirmationStatus === 'finalized');
+      if (ok) {
+        console.warn('[sendSignedTx] confirmTransaction threw but getSignatureStatuses shows success:', sig);
+        return sig;
+      }
+    } catch (statusError) {
+      const statusMsg = statusError instanceof Error ? statusError.message : String(statusError);
+      console.warn('[sendSignedTx] getSignatureStatuses fallback failed:', statusMsg);
     }
     const rawMsg = confirmError instanceof Error ? confirmError.message : String(confirmError);
     console.error('Failed to confirm transaction:', confirmError);
