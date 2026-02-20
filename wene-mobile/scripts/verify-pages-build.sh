@@ -116,13 +116,36 @@ if [ "${EVENTS_STATUS_CODE}" != "200" ]; then
 fi
 
 if printf '%s\n' "$EVENTS_CT_RAW" | grep -qi 'application/json'; then
-  log "OK: /v1/school/events returns application/json (likely hitting Workers API)."
+log "OK: /v1/school/events returns application/json (likely hitting Workers API)."
 else
   fail "/v1/school/events does not return application/json (likely hitting Pages/HTML)."
 fi
 
 ############################################
-# Step 5: POST /api/users/register の挙動確認
+# Step 5: GET /metadata/:mint.json の到達先確認
+############################################
+METADATA_URL="${PAGES_BASE_URL}/metadata/So11111111111111111111111111111111111111112.json"
+METADATA_HEADERS="$(curl -sSIL "${METADATA_URL}" 2>/dev/null || true)"
+if [ -z "$METADATA_HEADERS" ]; then
+  fail "Could not reach ${METADATA_URL}"
+fi
+
+METADATA_STATUS_CODE="$(printf '%s\n' "$METADATA_HEADERS" | awk '/^HTTP/{code=$2} END{print code}')"
+METADATA_CT_RAW="$(printf '%s\n' "$METADATA_HEADERS" | grep -i '^content-type:' | tail -n 1 | sed -E 's/^content-type:\s*//I' | tr -d '\r')"
+
+log "CHECK: GET /metadata/:mint.json status=${METADATA_STATUS_CODE} content-type=${METADATA_CT_RAW}"
+
+if [ "${METADATA_STATUS_CODE}" != "200" ]; then
+  fail "Expected HTTP 200 from /metadata/:mint.json but got ${METADATA_STATUS_CODE}."
+fi
+if ! printf '%s\n' "$METADATA_CT_RAW" | grep -qi 'application/json'; then
+  fail "/metadata/:mint.json does not return application/json."
+fi
+
+log "OK: /metadata/:mint.json returns application/json."
+
+############################################
+# Step 6: POST /api/users/register の挙動確認
 ############################################
 REGISTER_URL="${PAGES_BASE_URL}/api/users/register"
 REGISTER_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \

@@ -37,6 +37,13 @@ const AUDIT_MAX_DEPTH = 4;
 const AUDIT_MAX_ARRAY = 20;
 const AUDIT_MAX_KEYS = 50;
 const AUDIT_MAX_STRING = 160;
+const MINT_BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const TOKEN_IMAGE_URL = 'https://instant-grant-core.pages.dev/ticket-token.png';
+
+function buildTokenSymbol(title: string): string {
+  const cleaned = title.replace(/\s+/g, '').slice(0, 10).toUpperCase();
+  return cleaned || 'TICKET';
+}
 
 function doStorageAdapter(ctx: DurableObjectState): IClaimStorage {
   return {
@@ -275,6 +282,55 @@ export class SchoolStore implements DurableObject {
   }
 
   private async handleRequest(request: Request, path: string): Promise<Response> {
+
+    const metadataMatch = path.match(/^\/metadata\/([^/]+)\.json$/);
+    if (metadataMatch && request.method === 'GET') {
+      const mint = metadataMatch[1]?.trim() ?? '';
+      if (!MINT_BASE58_RE.test(mint)) {
+        return Response.json({ error: 'invalid mint' }, { status: 400 });
+      }
+
+      const events = await this.store.getEvents();
+      const linked = events.find((event) => event.solanaMint === mint);
+
+      const title = linked?.title?.trim() || `We-ne Ticket ${mint.slice(0, 6)}`;
+      const symbol = buildTokenSymbol(linked?.title?.trim() || '');
+      const description = linked
+        ? `${linked.title} の参加券トークン`
+        : 'we-ne participation ticket token';
+
+      const metadata = {
+        name: title,
+        symbol,
+        description,
+        image: TOKEN_IMAGE_URL,
+        external_url: 'https://instant-grant-core.pages.dev/',
+        attributes: [
+          { trait_type: 'mint', value: mint },
+          { trait_type: 'event_id', value: linked?.id ?? 'unknown' },
+          { trait_type: 'host', value: linked?.host ?? 'unknown' },
+          { trait_type: 'datetime', value: linked?.datetime ?? 'unknown' },
+          { trait_type: 'claim_interval_days', value: linked?.claimIntervalDays ?? 30 },
+          {
+            trait_type: 'max_claims_per_interval',
+            value: linked?.maxClaimsPerInterval === null
+              ? 'unlimited'
+              : (linked?.maxClaimsPerInterval ?? 1),
+          },
+        ],
+        properties: {
+          category: 'image',
+          files: [{ uri: TOKEN_IMAGE_URL, type: 'image/png' }],
+        },
+      };
+
+      return new Response(JSON.stringify(metadata), {
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'public, max-age=300',
+        },
+      });
+    }
 
     // GET /api/master/audit-logs (Master Password required)
     if (path === '/api/master/audit-logs' && request.method === 'GET') {

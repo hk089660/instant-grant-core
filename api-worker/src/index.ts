@@ -57,6 +57,7 @@ async function forwardToDo(c: any): Promise<Response> {
 
 app.all('/v1/school/*', forwardToDo);
 app.all('/api/*', forwardToDo);
+app.all('/metadata/*', forwardToDo);
 
 // 監査ログは DO 転送の外で処理
 app.route('/', auditRouter);

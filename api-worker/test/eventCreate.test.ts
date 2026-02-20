@@ -159,4 +159,43 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     expect(created.claimIntervalDays).toBe(14);
     expect(created.maxClaimsPerInterval).toBeNull();
   });
+
+  it('serves token metadata JSON for issued mint', async () => {
+    const mint = 'So11111111111111111111111111111111111111112';
+    const title = 'metadata event';
+    const createRes = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          datetime: '2026/02/20 14:00',
+          host: 'admin',
+          ticketTokenAmount: 1,
+          solanaMint: mint,
+        }),
+      })
+    );
+    expect(createRes.status).toBe(201);
+
+    const metadataRes = await store.fetch(
+      new Request(`https://example.com/metadata/${mint}.json`, {
+        method: 'GET',
+      })
+    );
+    expect(metadataRes.status).toBe(200);
+    expect(metadataRes.headers.get('content-type')).toContain('application/json');
+
+    const body = (await metadataRes.json()) as {
+      name?: string;
+      symbol?: string;
+      image?: string;
+      attributes?: Array<{ trait_type?: string; value?: string | number }>;
+    };
+    expect(body.name).toBe(title);
+    expect(body.symbol).toBe('METADATAEV');
+    expect(body.image).toContain('/ticket-token.png');
+    const mintAttr = body.attributes?.find((attr) => attr.trait_type === 'mint');
+    expect(mintAttr?.value).toBe(mint);
+  });
 });

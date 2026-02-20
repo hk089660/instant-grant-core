@@ -45,6 +45,7 @@ const staticPassthroughRules = [
 const redirectRules = [
   `/api/*  ${base}/api/:splat  200`,
   `/v1/*   ${base}/v1/:splat   200`,
+  `/metadata/*   ${base}/metadata/:splat   200`,
   ...staticPassthroughRules,
   `/*      /index.html         200`,
 ];
