@@ -19,6 +19,7 @@ import { buildClaimTx } from '../../solana/txBuilders';
 import { sendSignedTx, isBlockhashExpiredError } from '../../solana/sendTx';
 import { signTransaction } from '../../utils/phantom';
 import { rejectPendingSignTx } from '../../utils/phantomSignTxPending';
+import { setPhantomWebReturnPath } from '../../utils/phantomWebReturnPath';
 import type { SchoolEvent } from '../../types/school';
 
 const SIGN_TIMEOUT_MS = 120_000;
@@ -73,6 +74,15 @@ export const UserConfirmScreen: React.FC = () => {
   }, [targetEventId]);
 
   const buildSignRedirectContext = useCallback((): { redirectLink: string; appUrl: string } => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && !!window.location?.origin) {
+      const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      setPhantomWebReturnPath(returnPath);
+      return {
+        redirectLink: `${window.location.origin}/phantom/signTransaction`,
+        appUrl: window.location.origin,
+      };
+    }
+
     return {
       redirectLink: 'wene://phantom/sign?cluster=devnet',
       appUrl: 'https://wene.app',
