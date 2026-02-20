@@ -10,9 +10,10 @@ export async function onRequest(context: PagesFunctionContext): Promise<Response
   // Proxy only these prefixes to Worker
   const isApi = url.pathname.startsWith("/api/");
   const isV1 = url.pathname.startsWith("/v1/");
+  const isMetadata = url.pathname.startsWith("/metadata/");
   const isHealth = url.pathname === "/health";
 
-  if (!(isApi || isV1 || isHealth)) {
+  if (!(isApi || isV1 || isMetadata || isHealth)) {
     return context.next();
   }
 
