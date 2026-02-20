@@ -8,11 +8,13 @@ import {
 } from '@solana/web3.js';
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
+  AuthorityType,
   MINT_SIZE,
   TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountInstruction,
   createInitializeMintInstruction,
   createMintToInstruction,
+  createSetAuthorityInstruction,
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token';
 import {
@@ -304,7 +306,31 @@ export async function issueEventTicketToken(
       })
       .instruction();
 
-    const tx2 = new Transaction().add(createGrantIx, metadataIx, fundGrantIx);
+    const revokeMintAuthorityIx = createSetAuthorityInstruction(
+      mint,
+      authority,
+      AuthorityType.MintTokens,
+      null,
+      [],
+      TOKEN_PROGRAM_ID
+    );
+
+    const revokeFreezeAuthorityIx = createSetAuthorityInstruction(
+      mint,
+      authority,
+      AuthorityType.FreezeAccount,
+      null,
+      [],
+      TOKEN_PROGRAM_ID
+    );
+
+    const tx2 = new Transaction().add(
+      createGrantIx,
+      metadataIx,
+      fundGrantIx,
+      revokeMintAuthorityIx,
+      revokeFreezeAuthorityIx
+    );
     setupSignatures.push(await signAndSendTx(tx2, params.phantom));
   }
 
