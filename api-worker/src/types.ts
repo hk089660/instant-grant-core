@@ -10,6 +10,9 @@ export interface SchoolEvent {
   state?: 'draft' | 'published' | 'ended';
   /** 参加済み数（管理者用） */
   claimedCount?: number;
+  solanaMint?: string;
+  solanaAuthority?: string;
+  solanaGrantId?: string;
 }
 
 export type SchoolClaimErrorCode =

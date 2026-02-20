@@ -5,6 +5,8 @@ import { AppText } from '../../src/ui/components';
 import { theme } from '../../src/ui/theme';
 import { AuthProvider, useAuth } from '../../src/contexts/AuthContext';
 import { schoolRoutes } from '../../src/lib/schoolRoutes';
+import { Ionicons } from '@expo/vector-icons';
+import { TouchableOpacity } from 'react-native';
 
 /**
  * Web で表示。生徒用は専用アプリ利用を案内（Webは管理者・補助用）
@@ -40,11 +42,31 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 export default function ULayout() {
+  const router = useRouter();
   return (
     <View style={styles.container}>
       <WebOnlyBanner />
       <AuthGate>
-        <Stack screenOptions={{ headerShown: false }} />
+        <Stack screenOptions={{
+          headerShown: true,
+          headerTitle: '',
+          headerStyle: {
+            backgroundColor: theme.colors.background,
+          },
+          headerShadowVisible: false,
+          headerLeft: () => (
+            <TouchableOpacity
+              onPress={() => router.replace('/')}
+              activeOpacity={0.8}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <View style={styles.pill}>
+                <Ionicons name="settings-sharp" size={14} color="#ffffff" />
+                <AppText variant="body" style={styles.pillLabel}>we-ne</AppText>
+              </View>
+            </TouchableOpacity>
+          ),
+        }} />
       </AuthGate>
     </View>
   );
@@ -62,5 +84,26 @@ const styles = StyleSheet.create({
   bannerText: {
     color: theme.colors.textSecondary,
     textAlign: 'center',
+  },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.gray600,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    gap: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 3,
+    marginLeft: Platform.OS === 'web' ? theme.spacing.md : 0,
+  },
+  pillLabel: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
 });

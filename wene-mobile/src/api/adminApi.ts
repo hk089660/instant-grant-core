@@ -34,6 +34,9 @@ export async function createAdminEvent(data: {
     datetime: string;
     host: string;
     state?: 'draft' | 'published';
+    solanaMint?: string;
+    solanaAuthority?: string;
+    solanaGrantId?: string;
 }): Promise<SchoolEvent> {
     const base = getBaseUrl();
     return httpPost<SchoolEvent>(`${base}/v1/school/events`, data);
@@ -110,6 +113,20 @@ export async function createInviteCode(masterPassword: string, name: string): Pr
     return res.json();
 }
 
+/** 招待コード一覧取得 (Master Only) */
+export async function fetchInviteCodes(masterPassword: string): Promise<{ code: string; name: string; createdAt: string }[]> {
+    const base = getBaseUrl();
+    const res = await fetch(`${base}/api/admin/invites`, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${masterPassword}`
+        }
+    });
+
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.invites || [];
+}
 
 /** 招待コード無効化 (Master Only) */
 export async function revokeInviteCode(masterPassword: string, code: string): Promise<boolean> {

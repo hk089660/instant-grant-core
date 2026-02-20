@@ -12,6 +12,7 @@ import { AppText, Button, Card } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
 import { httpPost } from '../../api/http/httpClient';
 import type { SchoolEvent } from '../../types/school';
+import { Keypair } from '@solana/web3.js';
 
 function getAdminBaseUrl(): string {
     if (typeof window !== 'undefined' && window.location?.origin) {
@@ -58,11 +59,17 @@ export const AdminCreateEventScreen: React.FC = () => {
         setError(null);
         try {
             const apiBase = getAdminBaseUrl();
+            const mintKp = Keypair.generate();
+            const grantId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString();
+
             const event = await httpPost<SchoolEvent>(`${apiBase}/v1/school/events`, {
                 title: title.trim(),
                 datetime: datetime.trim(),
                 host: host.trim(),
                 state: 'published',
+                solanaMint: mintKp.publicKey.toBase58(),
+                solanaAuthority: mintKp.publicKey.toBase58(), // using the same for dummy auth
+                solanaGrantId: grantId,
             });
             setCreatedEvent(event);
             setStep('done');
@@ -250,6 +257,11 @@ export const AdminCreateEventScreen: React.FC = () => {
                             <AppText variant="small" style={styles.cardMuted}>
                                 ID: {createdEvent.id}
                             </AppText>
+                            {createdEvent.solanaMint && (
+                                <AppText variant="small" style={styles.cardMuted}>
+                                    Token Mint: {createdEvent.solanaMint.slice(0, 8)}...
+                                </AppText>
+                            )}
 
                             <View style={styles.qrBox}>
                                 {qrDataUrl ? (

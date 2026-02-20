@@ -21,6 +21,9 @@ export interface BuildClaimTxParams {
   campaignId: string;
   code?: string;
   recipientPubkey: PublicKey;
+  solanaMint?: string | null;
+  solanaAuthority?: string | null;
+  solanaGrantId?: string | null;
 }
 
 /**
@@ -66,16 +69,28 @@ export async function buildClaimTx(
   // devnetConfig: DEV+devnet 時は本物の Grant を使用。未設定時は dummy にフォールバック
   const devnetConfig = DEFAULT_CLUSTER === 'devnet' ? DEVNET_GRANT_CONFIG : null;
 
-  const authority = devnetConfig
-    ? devnetConfig.authority
-    : new PublicKey('11111111111111111111111111111111');
-  const mint = devnetConfig
-    ? devnetConfig.mint
-    : new PublicKey('So11111111111111111111111111111111111111112');
-  const grantId = devnetConfig ? devnetConfig.grantId : BigInt(1);
+  const authority = params.solanaAuthority
+    ? new PublicKey(params.solanaAuthority)
+    : devnetConfig
+      ? devnetConfig.authority
+      : new PublicKey('11111111111111111111111111111111');
+
+  const mint = params.solanaMint
+    ? new PublicKey(params.solanaMint)
+    : devnetConfig
+      ? devnetConfig.mint
+      : new PublicKey('So11111111111111111111111111111111111111112');
+
+  const grantId = params.solanaGrantId
+    ? BigInt(params.solanaGrantId)
+    : devnetConfig
+      ? devnetConfig.grantId
+      : BigInt(1);
+
   const startTs = devnetConfig
     ? devnetConfig.startTs
     : BigInt(Math.floor(Date.now() / 1000) - 86400);
+
   const periodSeconds = devnetConfig
     ? devnetConfig.periodSeconds
     : BigInt(2592000);

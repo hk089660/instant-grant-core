@@ -3,10 +3,14 @@
  * API・画面表示で共通利用
  */
 export interface Grant {
-  campaignId: string;
+  campaignId: string; // Campaign ID
   title: string;
   description: string;
   issuerName?: string;
+  logoUrl?: string; // e.g. "https://..."
+  solanaMint?: string;
+  solanaAuthority?: string;
+  solanaGrantId?: string;
   /** 期限（JST固定）。YYYY-MM-DD 形式。23:59表示に利用 */
   goalDeadlineJst?: string;
   /** 残り日数（表示用）。goalDeadline から算出可 */

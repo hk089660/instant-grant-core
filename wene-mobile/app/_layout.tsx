@@ -7,6 +7,32 @@ import { usePhantomStore } from '../src/store/phantomStore';
 import { useRecipientStore } from '../src/store/recipientStore';
 import { processPhantomUrl } from '../src/utils/phantomDeeplinkListener';
 import { AuthProvider } from '../src/contexts/AuthContext';
+import { TouchableOpacity, View, Text } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { theme } from '../src/ui/theme';
+
+const headerPillStyle = {
+  pill: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: theme.colors.gray600,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    gap: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  pillLabel: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700' as const,
+    letterSpacing: 0.3,
+  },
+};
 
 export default function RootLayout() {
   const initRef = useRef(false);
@@ -57,9 +83,72 @@ export default function RootLayout() {
           }}
         >
           <Stack.Screen name="(drawer)" />
-          <Stack.Screen name="r/[campaignId]" />
-          <Stack.Screen name="r/school/[eventId]" />
-          <Stack.Screen name="use/[campaignId]" />
+          <Stack.Screen
+            name="r/[campaignId]"
+            options={({ navigation }) => ({
+              headerShown: true,
+              headerTitle: '',
+              headerStyle: { backgroundColor: theme.colors.background },
+              headerShadowVisible: false,
+              headerLeft: () => (
+                <TouchableOpacity
+                  onPress={() => navigation.navigate('(drawer)')}
+                  activeOpacity={0.8}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={{ marginLeft: 8 }}
+                >
+                  <View style={headerPillStyle.pill}>
+                    <Ionicons name="settings-sharp" size={14} color="#ffffff" />
+                    <Text style={headerPillStyle.pillLabel}>we-ne</Text>
+                  </View>
+                </TouchableOpacity>
+              )
+            })}
+          />
+          <Stack.Screen
+            name="r/school/[eventId]"
+            options={({ navigation }) => ({
+              headerShown: true,
+              headerTitle: '',
+              headerStyle: { backgroundColor: theme.colors.background },
+              headerShadowVisible: false,
+              headerLeft: () => (
+                <TouchableOpacity
+                  onPress={() => navigation.navigate('(drawer)')}
+                  activeOpacity={0.8}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={{ marginLeft: 8 }}
+                >
+                  <View style={headerPillStyle.pill}>
+                    <Ionicons name="settings-sharp" size={14} color="#ffffff" />
+                    <Text style={headerPillStyle.pillLabel}>we-ne</Text>
+                  </View>
+                </TouchableOpacity>
+              )
+            })}
+          />
+          <Stack.Screen
+            name="use/[campaignId]"
+            options={({ navigation }) => ({
+              headerShown: true,
+              headerTitle: '',
+              headerStyle: { backgroundColor: theme.colors.background },
+              headerShadowVisible: false,
+              headerLeft: () => (
+                <TouchableOpacity
+                  onPress={() => navigation.navigate('(drawer)')}
+                  activeOpacity={0.8}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={{ marginLeft: 8 }}
+                >
+                  <View style={headerPillStyle.pill}>
+                    <Ionicons name="settings-sharp" size={14} color="#ffffff" />
+                    <Text style={headerPillStyle.pillLabel}>we-ne</Text>
+                  </View>
+                </TouchableOpacity>
+              )
+            })}
+          />
           <Stack.Screen name="phantom/[action]" />
           <Stack.Screen name="phantom-callback" />
           {/* 追加: ユーザー画面・管理者画面 */}

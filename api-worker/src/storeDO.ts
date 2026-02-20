@@ -144,6 +144,24 @@ export class SchoolStore implements DurableObject {
       return Response.json({ code, name });
     }
 
+    // GET /api/admin/invites (Master Password required)
+    if (path === '/api/admin/invites' && request.method === 'GET') {
+      const authHeader = request.headers.get('Authorization');
+      const masterPassword = this.env.ADMIN_PASSWORD;
+      if (!masterPassword || authHeader !== `Bearer ${masterPassword}`) {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+
+      const result = await this.ctx.storage.list({ prefix: 'admin_code:' });
+      const invites = Array.from(result.entries()).map(([k, v]) => {
+        const code = k.replace('admin_code:', '');
+        return { code, ...(v as any) };
+      });
+      invites.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      return Response.json({ invites });
+    }
+
     // POST /api/admin/revoke (Master Password required)
     if (path === '/api/admin/revoke' && request.method === 'POST') {
       const authHeader = request.headers.get('Authorization');
@@ -201,7 +219,7 @@ export class SchoolStore implements DurableObject {
 
     // POST /v1/school/events — イベント新規作成（admin用）
     if (path === '/v1/school/events' && request.method === 'POST') {
-      let body: { title?: string; datetime?: string; host?: string; state?: 'draft' | 'published' };
+      let body: { title?: string; datetime?: string; host?: string; state?: 'draft' | 'published'; solanaMint?: string; solanaAuthority?: string; solanaGrantId?: string };
       try {
         body = (await request.json()) as any;
       } catch {
@@ -213,7 +231,14 @@ export class SchoolStore implements DurableObject {
       if (!title || !datetime || !host) {
         return Response.json({ error: 'title, datetime, host are required' }, { status: 400 });
       }
-      const event = await this.store.createEvent({ title, datetime, host, state: body.state });
+      const event = await this.store.createEvent({
+        title, datetime, host, state: body.state,
+        solanaMint: body.solanaMint,
+        solanaAuthority: body.solanaAuthority,
+        solanaGrantId: body.solanaGrantId
+      });
+      // Audit Log
+      await this.appendAuditLog('EVENT_CREATE', { type: 'admin', id: 'admin' }, { title, datetime, host, eventId: event.id, solanaMint: body.solanaMint }, event.id);
       return Response.json(event, { status: 201 });
     }
 
@@ -267,6 +292,11 @@ export class SchoolStore implements DurableObject {
         } as SchoolClaimResult);
       }
       const result = await this.store.submitClaim(body);
+
+      // Audit Log
+      if (result.success && !result.alreadyJoined) {
+        await this.appendAuditLog('WALLET_CLAIM', { type: 'wallet', id: body.walletAddress || body.joinToken || 'unknown' }, body, body.eventId || 'unknown');
+      }
       return Response.json(result);
     }
 
@@ -313,6 +343,10 @@ export class SchoolStore implements DurableObject {
       const userId = crypto.randomUUID();
       const pinHash = await hashPin(pin);
       await this.ctx.storage.put(userKey(userId), { pinHash, displayName });
+
+      // Audit Log
+      await this.appendAuditLog('USER_REGISTER', { type: 'user', id: userId }, { displayName }, 'system');
+
       return Response.json({ userId });
     }
 
@@ -354,6 +388,10 @@ export class SchoolStore implements DurableObject {
       }
       const confirmationCode = genConfirmationCode();
       await this.store.addClaim(eventId, userId, confirmationCode);
+
+      // Audit Log
+      await this.appendAuditLog('USER_CLAIM', { type: 'user', id: userId }, { eventId, status: 'created', confirmationCode }, eventId);
+
       return Response.json({ status: 'created', confirmationCode } as UserClaimResponse);
     }
 

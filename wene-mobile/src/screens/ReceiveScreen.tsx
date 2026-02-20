@@ -5,9 +5,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { PublicKey } from '@solana/web3.js';
 import { useRecipientStore } from '../store/recipientStore';
 import { usePhantomStore } from '../store/phantomStore';
-import { getGrantByCampaignId } from '../api/getGrant';
 import type { Grant } from '../types/grant';
-// --- changed ---
+import { getGrantByCampaignId } from '../api/getGrant';
+import { useRecipientTicketStore } from '../store/recipientTicketStore';
 
 import { AppText, BalanceList, BALANCE_LIST_DUMMY, Button, Card, Pill } from '../ui/components';
 import type { BalanceItem } from '../types/balance';
@@ -29,7 +29,7 @@ export const ReceiveScreen: React.FC = () => {
     code?: string;
   }>();
   const router = useRouter();
-  
+
   const {
     state,
     lastError,
@@ -55,6 +55,9 @@ export const ReceiveScreen: React.FC = () => {
     checkClaimed,
     markAsClaimed,
   } = useRecipientStore();
+
+  const { addTicket } = useRecipientTicketStore();
+
   const {
     dappEncryptionPublicKey,
     dappSecretKey,
@@ -136,19 +139,19 @@ export const ReceiveScreen: React.FC = () => {
           if (cancelled) return;
           const item: BalanceItem = fallback
             ? {
-                id: "spl-1",
-                name: "SPLトークン",
-                issuer: "Solana (devnet)",
-                amountText: fallback.amountText,
-                unit: fallback.unit,
-                source: "spl",
-                todayUsable: true,
-              }
+              id: "spl-1",
+              name: "SPLトークン",
+              issuer: "Solana (devnet)",
+              amountText: fallback.amountText,
+              unit: fallback.unit,
+              source: "spl",
+              todayUsable: true,
+            }
             : {
-                ...loadingRow,
-                amountText: "0.00",
-                unit: "SPL",
-              };
+              ...loadingRow,
+              amountText: "0.00",
+              unit: "SPL",
+            };
           applySplRow(item);
         })
         .catch(() => {
@@ -533,6 +536,9 @@ ${st.balanceLamports ?? 'null'}
           campaignId: campaignId || '',
           code,
           recipientPubkey,
+          solanaMint: grant?.solanaMint,
+          solanaAuthority: grant?.solanaAuthority,
+          solanaGrantId: grant?.solanaGrantId,
         });
         console.log('[CLAIM] checkpoint 5: buildClaimTx done');
       } catch (e) {
@@ -642,6 +648,9 @@ ${st.balanceLamports ?? 'null'}
                 campaignId: campaignId || '',
                 code,
                 recipientPubkey: new PublicKey(walletPubkey),
+                solanaMint: grant?.solanaMint,
+                solanaAuthority: grant?.solanaAuthority,
+                solanaGrantId: grant?.solanaGrantId,
               });
               const signRedirectLink = 'wene://phantom/sign?cluster=devnet';
               currentSigned = await Promise.race([
@@ -677,6 +686,16 @@ ${st.balanceLamports ?? 'null'}
         setLastSignature(signature);
         setLastDoneAt(Date.now());
         setState('Done');
+
+        // Add to the UserEventsScreen ticket list
+        if (campaignId && grant) {
+          addTicket({
+            eventId: campaignId,
+            eventName: grant.title,
+            joinedAt: Date.now(),
+          }).catch(console.error);
+        }
+
       } catch (e) {
         if (__DEV__ && isSimulationFailedError(e)) {
           setSimulationFailed(
@@ -768,322 +787,322 @@ ${st.balanceLamports ?? 'null'}
           <Button title="ホームに戻る" onPress={() => router.replace('/')} variant="secondary" style={styles.claimedButton} />
         </View>
       ) : (
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.content}>
-          <AppText variant="h2" style={styles.title}>
-            {grant ? grant.title : 'クレジットを受け取る'}
-          </AppText>
-
-          {getStatePill() && <View style={styles.pillContainer}>{getStatePill()}</View>}
-
-          <Card style={styles.mainCard}>
-            <AppText variant="body" style={styles.cardDescription}>
-              {grant ? grant.description : 'このリンクから支援クレジットを受け取ることができます。'}
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.content}>
+            <AppText variant="h2" style={styles.title}>
+              {grant ? grant.title : 'クレジットを受け取る'}
             </AppText>
-            {grant?.issuerName && (
-              <AppText variant="caption" style={styles.issuerName}>
-                {grant.issuerName}
-              </AppText>
-            )}
 
-            <TouchableOpacity
-              onPress={() => setShowDetails(!showDetails)}
-              style={styles.detailsToggle}
-            >
-              <AppText variant="caption" style={styles.detailsToggleText}>
-                {showDetails ? '詳細を閉じる' : '詳細を表示'}
-              </AppText>
-            </TouchableOpacity>
+            {getStatePill() && <View style={styles.pillContainer}>{getStatePill()}</View>}
 
-            {showDetails && (
-              <View style={styles.details}>
-                <View style={styles.detailRow}>
-                  <AppText variant="caption" style={styles.detailLabel}>
-                    Campaign ID
-                  </AppText>
-                  <AppText variant="body" style={styles.detailValue}>
-                    {campaignId || 'N/A'}
-                  </AppText>
-                </View>
-                {code && (
+            <Card style={styles.mainCard}>
+              <AppText variant="body" style={styles.cardDescription}>
+                {grant ? grant.description : 'このリンクから支援クレジットを受け取ることができます。'}
+              </AppText>
+              {grant?.issuerName && (
+                <AppText variant="caption" style={styles.issuerName}>
+                  {grant.issuerName}
+                </AppText>
+              )}
+
+              <TouchableOpacity
+                onPress={() => setShowDetails(!showDetails)}
+                style={styles.detailsToggle}
+              >
+                <AppText variant="caption" style={styles.detailsToggleText}>
+                  {showDetails ? '詳細を閉じる' : '詳細を表示'}
+                </AppText>
+              </TouchableOpacity>
+
+              {showDetails && (
+                <View style={styles.details}>
                   <View style={styles.detailRow}>
                     <AppText variant="caption" style={styles.detailLabel}>
-                      Code
+                      Campaign ID
                     </AppText>
                     <AppText variant="body" style={styles.detailValue}>
-                      {code}
+                      {campaignId || 'N/A'}
                     </AppText>
                   </View>
-                )}
-              </View>
-            )}
-          </Card>
-
-          {/* 状態メッセージ: Signing / Sending / Error / Done */}
-          {getClaimStatusMessage() != null && (
-            <Card style={state === 'Error' ? styles.errorCard : styles.statusCard}>
-              <AppText variant="body" style={state === 'Error' ? styles.errorTitle : styles.statusTitle}>
-                {getClaimStatusMessage()}
-              </AppText>
-              {state === 'Error' && lastError && (
-                <AppText variant="caption" style={styles.errorText}>
-                  {lastError}
-                </AppText>
+                  {code && (
+                    <View style={styles.detailRow}>
+                      <AppText variant="caption" style={styles.detailLabel}>
+                        Code
+                      </AppText>
+                      <AppText variant="body" style={styles.detailValue}>
+                        {code}
+                      </AppText>
+                    </View>
+                  )}
+                </View>
               )}
-              {state === 'Done' && lastSignature && (
-                <>
-                  <AppText variant="caption" style={styles.txidText}>
-                    txid: {lastSignature.length > 16 ? lastSignature.slice(0, 8) + '…' + lastSignature.slice(-8) : lastSignature}
+            </Card>
+
+            {/* 状態メッセージ: Signing / Sending / Error / Done */}
+            {getClaimStatusMessage() != null && (
+              <Card style={state === 'Error' ? styles.errorCard : styles.statusCard}>
+                <AppText variant="body" style={state === 'Error' ? styles.errorTitle : styles.statusTitle}>
+                  {getClaimStatusMessage()}
+                </AppText>
+                {state === 'Error' && lastError && (
+                  <AppText variant="caption" style={styles.errorText}>
+                    {lastError}
                   </AppText>
+                )}
+                {state === 'Done' && lastSignature && (
+                  <>
+                    <AppText variant="caption" style={styles.txidText}>
+                      txid: {lastSignature.length > 16 ? lastSignature.slice(0, 8) + '…' + lastSignature.slice(-8) : lastSignature}
+                    </AppText>
+                    <TouchableOpacity
+                      onPress={() => Linking.openURL(`https://explorer.solana.com/tx/${lastSignature}?cluster=devnet`)}
+                      style={styles.explorerLinkTouch}
+                    >
+                      <AppText variant="caption" style={styles.explorerLinkText}>
+                        Devnet Explorer で見る
+                      </AppText>
+                    </TouchableOpacity>
+                    {lastDoneAt != null && (
+                      <AppText variant="caption" style={styles.doneAtText}>
+                        成功時刻: {new Date(lastDoneAt).toLocaleString('ja-JP')}
+                      </AppText>
+                    )}
+                  </>
+                )}
+                {state === 'Error' && (
+                  <Button
+                    title="再試行"
+                    onPress={() => {
+                      clearError();
+                      setState('Idle');
+                    }}
+                    variant="secondary"
+                    style={styles.retryButton}
+                  />
+                )}
+              </Card>
+            )}
+
+            {txDebugInfo && (state === 'Signing' || state === 'Sending' || state === 'Claiming') && (
+              <Card style={styles.debugCard}>
+                <AppText variant="caption" style={styles.debugLabel}>
+                  TX構築情報（デバッグ）
+                </AppText>
+                <AppText variant="small" style={styles.debugText}>
+                  {txDebugInfo}
+                </AppText>
+              </Card>
+            )}
+            {__DEV__ && (state === 'Signing' || state === 'Claiming' || state === 'Connecting') && (phantomUrlDebug?.signUrl || phantomUrlDebug?.connectUrl) && (
+              <Card style={styles.debugCard}>
+                <AppText variant="caption" style={styles.debugLabel}>
+                  Phantom URL（コピー用）
+                </AppText>
+                {phantomUrlDebug.signUrl ? (
+                  <AppText variant="small" style={styles.debugText} selectable>
+                    {phantomUrlDebug.signUrl}
+                  </AppText>
+                ) : null}
+                {phantomUrlDebug.connectUrl ? (
+                  <AppText variant="small" style={styles.debugText} selectable>
+                    {phantomUrlDebug.connectUrl}
+                  </AppText>
+                ) : null}
+                <AppText variant="caption" style={[styles.debugLabel, { marginTop: 8 }]}>
+                  redirect_link raw: {phantomUrlDebug.redirectRaw}
+                </AppText>
+                <AppText variant="caption" style={styles.debugText}>
+                  redirect_link encoded(1回): {phantomUrlDebug.redirectEncoded}
+                </AppText>
+              </Card>
+            )}
+
+            {__DEV__ && (rpcEndpoint != null || balanceLamports != null || simulationErr != null || (simulationLogs != null && simulationLogs.length > 0)) ? (
+              <Card style={styles.debugCard}>
+                <AppText variant="caption" style={styles.debugLabel}>
+                  [DEV] 送信前・シミュレーション
+                </AppText>
+                {rpcEndpoint != null ? (
+                  <AppText variant="small" style={styles.debugText} selectable numberOfLines={2}>
+                    rpcEndpoint: {rpcEndpoint}
+                  </AppText>
+                ) : null}
+                {balanceLamports != null ? (
+                  <>
+                    <AppText variant="small" style={styles.debugText}>
+                      balanceLamports: {balanceLamports}
+                    </AppText>
+                    {balanceLamports < 10_000_000 ? (
+                      <AppText variant="caption" style={styles.simWarningText}>
+                        警告: 残高が 0.01 SOL 未満です
+                      </AppText>
+                    ) : null}
+                  </>
+                ) : null}
+                {simulationErr != null ? (
+                  <AppText variant="caption" style={styles.debugLabel}>
+                    simulationErr:
+                  </AppText>
+                ) : null}
+                {simulationErr != null ? (
+                  <AppText variant="small" style={styles.debugText} selectable numberOfLines={10}>
+                    {simulationErr}
+                  </AppText>
+                ) : null}
+                {simulationUnitsConsumed != null ? (
+                  <AppText variant="small" style={styles.debugText}>
+                    unitsConsumed: {simulationUnitsConsumed}
+                  </AppText>
+                ) : null}
+                {simulationLogs != null && simulationLogs.length > 0 ? (
+                  <>
+                    <AppText variant="caption" style={styles.debugLabel}>
+                      simulationLogs（スクロール・コピー可）:
+                    </AppText>
+                    <ScrollView style={styles.simLogsScroll} nestedScrollEnabled>
+                      <AppText variant="small" style={styles.debugText} selectable>
+                        {simulationLogs.join('\n')}
+                      </AppText>
+                    </ScrollView>
+                  </>
+                ) : null}
+                <AppText variant="caption" style={[styles.debugLabel, { marginTop: theme.spacing.sm }]}>
+                  コピー用（そのまま貼り付け可）:
+                </AppText>
+                <AppText variant="small" style={styles.debugCopyBlock} selectable>
+                  {buildDevDebugBlock('copy', {
+                    simulationErr,
+                    simulationLogs,
+                    simulationUnitsConsumed,
+                    rpcEndpoint,
+                    balanceLamports,
+                  })}
+                </AppText>
+              </Card>
+            ) : null}
+
+            {Platform.OS === 'web' && (
+              <Card style={styles.pcNoticeCard}>
+                <AppText variant="caption" style={styles.pcNoticeText}>
+                  生徒用は専用アプリ（iOS TestFlight / Android APK）をご利用ください。{'\n'}Webは管理者・補助用です。
+                </AppText>
+              </Card>
+            )}
+            {(!walletPubkey || !phantomSession || !phantomEncryptionPublicKey) && !(isClaimed || state === 'Claimed') ? (
+              <Card style={styles.debugCard}>
+                <AppText variant="caption" style={styles.debugLabel}>
+                  Phantomに接続してください
+                </AppText>
+                <AppText variant="small" style={styles.debugText}>
+                  接続後に「このクレジットを受け取る」で受給できます。
+                </AppText>
+                <Button
+                  title={
+                    state === 'Connecting'
+                      ? '接続中…'
+                      : walletPubkey
+                        ? '接続済み'
+                        : 'Phantomを開いて接続'
+                  }
+                  onPress={handleConnect}
+                  variant="secondary"
+                  loading={state === 'Connecting'}
+                  disabled={state === 'Connecting' || !!walletPubkey}
+                  style={styles.claimButton}
+                />
+                {Platform.OS === 'web' ? (
                   <TouchableOpacity
-                    onPress={() => Linking.openURL(`https://explorer.solana.com/tx/${lastSignature}?cluster=devnet`)}
-                    style={styles.explorerLinkTouch}
+                    onPress={() => router.push('/phantom-callback' as any)}
+                    style={styles.fallbackLinkTouch}
                   >
-                    <AppText variant="caption" style={styles.explorerLinkText}>
-                      Devnet Explorer で見る
+                    <AppText variant="caption" style={styles.fallbackLinkText}>
+                      戻れない場合はこちら
                     </AppText>
                   </TouchableOpacity>
-                  {lastDoneAt != null && (
-                    <AppText variant="caption" style={styles.doneAtText}>
-                      成功時刻: {new Date(lastDoneAt).toLocaleString('ja-JP')}
+                ) : null}
+                {__DEV__ ? (
+                  <TouchableOpacity
+                    onPress={async () => {
+                      await clearPhantomKeys();
+                      setState('Idle');
+                      setError('');
+                    }}
+                    style={styles.devResetTouch}
+                  >
+                    <AppText variant="caption" style={styles.devResetText}>
+                      Phantomキーリセット (v0 debug)
                     </AppText>
-                  )}
-                </>
-              )}
-              {state === 'Error' && (
+                  </TouchableOpacity>
+                ) : null}
+              </Card>
+            ) : null}
+
+            <BalanceList
+              connected={!!(walletPubkey && phantomSession)}
+              items={balanceItems}
+            />
+
+            {(isClaimed || state === 'Claimed' || state === 'Done') ? (
+              <View style={styles.claimedActions}>
+                {state === 'Done' && (
+                  <AppText variant="body" style={styles.successMessage}>
+                    受け取りが完了しました
+                  </AppText>
+                )}
+                {lastSignature ? (
+                  <Card style={styles.debugCard}>
+                    <AppText variant="caption" style={styles.debugLabel}>
+                      {state === 'Done' ? 'txid (送信成功)' : '署名 (devnet)'}
+                    </AppText>
+                    <AppText variant="small" style={styles.debugText} numberOfLines={2}>
+                      {lastSignature}
+                    </AppText>
+                  </Card>
+                ) : null}
+                {__DEV__ && signedTxSize != null && (
+                  <AppText variant="small" style={styles.devText}>
+                    [DEV] 署名済みTxサイズ: {signedTxSize} bytes
+                  </AppText>
+                )}
+                {__DEV__ && state === 'Error' && lastError && (
+                  <AppText variant="small" style={styles.devText} numberOfLines={5}>
+                    [DEV] エラー全文: {lastError}
+                  </AppText>
+                )}
                 <Button
-                  title="再試行"
-                  onPress={() => {
-                    clearError();
-                    setState('Idle');
+                  title="ウォレットを見る"
+                  onPress={async () => {
+                    if (state === 'Done' && campaignId && walletPubkey) {
+                      await markAsClaimed(campaignId, walletPubkey);
+                      setState('Claimed');
+                    }
+                    router.replace('/wallet' as any);
                   }}
-                  variant="secondary"
-                  style={styles.retryButton}
+                  variant="primary"
+                  style={styles.claimedButton}
                 />
-              )}
-            </Card>
-          )}
-
-          {txDebugInfo && (state === 'Signing' || state === 'Sending' || state === 'Claiming') && (
-            <Card style={styles.debugCard}>
-              <AppText variant="caption" style={styles.debugLabel}>
-                TX構築情報（デバッグ）
-              </AppText>
-              <AppText variant="small" style={styles.debugText}>
-                {txDebugInfo}
-              </AppText>
-            </Card>
-          )}
-          {__DEV__ && (state === 'Signing' || state === 'Claiming' || state === 'Connecting') && (phantomUrlDebug?.signUrl || phantomUrlDebug?.connectUrl) && (
-            <Card style={styles.debugCard}>
-              <AppText variant="caption" style={styles.debugLabel}>
-                Phantom URL（コピー用）
-              </AppText>
-              {phantomUrlDebug.signUrl ? (
-                <AppText variant="small" style={styles.debugText} selectable>
-                  {phantomUrlDebug.signUrl}
-                </AppText>
-              ) : null}
-              {phantomUrlDebug.connectUrl ? (
-                <AppText variant="small" style={styles.debugText} selectable>
-                  {phantomUrlDebug.connectUrl}
-                </AppText>
-              ) : null}
-              <AppText variant="caption" style={[styles.debugLabel, { marginTop: 8 }]}>
-                redirect_link raw: {phantomUrlDebug.redirectRaw}
-              </AppText>
-              <AppText variant="caption" style={styles.debugText}>
-                redirect_link encoded(1回): {phantomUrlDebug.redirectEncoded}
-              </AppText>
-            </Card>
-          )}
-
-          {__DEV__ && (rpcEndpoint != null || balanceLamports != null || simulationErr != null || (simulationLogs != null && simulationLogs.length > 0)) ? (
-            <Card style={styles.debugCard}>
-              <AppText variant="caption" style={styles.debugLabel}>
-                [DEV] 送信前・シミュレーション
-              </AppText>
-              {rpcEndpoint != null ? (
-                <AppText variant="small" style={styles.debugText} selectable numberOfLines={2}>
-                  rpcEndpoint: {rpcEndpoint}
-                </AppText>
-              ) : null}
-              {balanceLamports != null ? (
-                <>
-                  <AppText variant="small" style={styles.debugText}>
-                    balanceLamports: {balanceLamports}
-                  </AppText>
-                  {balanceLamports < 10_000_000 ? (
-                    <AppText variant="caption" style={styles.simWarningText}>
-                      警告: 残高が 0.01 SOL 未満です
-                    </AppText>
-                  ) : null}
-                </>
-              ) : null}
-              {simulationErr != null ? (
-                <AppText variant="caption" style={styles.debugLabel}>
-                  simulationErr:
-                </AppText>
-              ) : null}
-              {simulationErr != null ? (
-                <AppText variant="small" style={styles.debugText} selectable numberOfLines={10}>
-                  {simulationErr}
-                </AppText>
-              ) : null}
-              {simulationUnitsConsumed != null ? (
-                <AppText variant="small" style={styles.debugText}>
-                  unitsConsumed: {simulationUnitsConsumed}
-                </AppText>
-              ) : null}
-              {simulationLogs != null && simulationLogs.length > 0 ? (
-                <>
-                  <AppText variant="caption" style={styles.debugLabel}>
-                    simulationLogs（スクロール・コピー可）:
-                  </AppText>
-                  <ScrollView style={styles.simLogsScroll} nestedScrollEnabled>
-                    <AppText variant="small" style={styles.debugText} selectable>
-                      {simulationLogs.join('\n')}
-                    </AppText>
-                  </ScrollView>
-                </>
-              ) : null}
-              <AppText variant="caption" style={[styles.debugLabel, { marginTop: theme.spacing.sm }]}>
-                コピー用（そのまま貼り付け可）:
-              </AppText>
-              <AppText variant="small" style={styles.debugCopyBlock} selectable>
-                {buildDevDebugBlock('copy', {
-                  simulationErr,
-                  simulationLogs,
-                  simulationUnitsConsumed,
-                  rpcEndpoint,
-                  balanceLamports,
-                })}
-              </AppText>
-            </Card>
-          ) : null}
-
-          {Platform.OS === 'web' && (
-            <Card style={styles.pcNoticeCard}>
-                <AppText variant="caption" style={styles.pcNoticeText}>
-                生徒用は専用アプリ（iOS TestFlight / Android APK）をご利用ください。{'\n'}Webは管理者・補助用です。
-              </AppText>
-            </Card>
-          )}
-          {(!walletPubkey || !phantomSession || !phantomEncryptionPublicKey) && !(isClaimed || state === 'Claimed') ? (
-            <Card style={styles.debugCard}>
-              <AppText variant="caption" style={styles.debugLabel}>
-                Phantomに接続してください
-              </AppText>
-              <AppText variant="small" style={styles.debugText}>
-                接続後に「このクレジットを受け取る」で受給できます。
-              </AppText>
+                <Button
+                  title="ホームに戻る"
+                  onPress={() => router.replace('/')}
+                  variant="secondary"
+                  style={styles.claimedButton}
+                />
+              </View>
+            ) : (
               <Button
-                title={
-                  state === 'Connecting'
-                    ? '接続中…'
-                    : walletPubkey
-                    ? '接続済み'
-                    : 'Phantomを開いて接続'
-                }
-                onPress={handleConnect}
-                variant="secondary"
-                loading={state === 'Connecting'}
-                disabled={state === 'Connecting' || !!walletPubkey}
+                title={getButtonTitle()}
+                onPress={handleClaimSolana}
+                variant="primary"
+                loading={state === 'Signing' || state === 'Sending' || state === 'Claiming' || state === 'Connecting'}
+                disabled={state === 'Expired' || state === 'Claiming' || state === 'Connecting' || state === 'Signing' || state === 'Sending'}
                 style={styles.claimButton}
               />
-              {Platform.OS === 'web' ? (
-                <TouchableOpacity
-                  onPress={() => router.push('/phantom-callback' as any)}
-                  style={styles.fallbackLinkTouch}
-                >
-                  <AppText variant="caption" style={styles.fallbackLinkText}>
-                    戻れない場合はこちら
-                  </AppText>
-                </TouchableOpacity>
-              ) : null}
-              {__DEV__ ? (
-                <TouchableOpacity
-                  onPress={async () => {
-                    await clearPhantomKeys();
-                    setState('Idle');
-                    setError('');
-                  }}
-                  style={styles.devResetTouch}
-                >
-                  <AppText variant="caption" style={styles.devResetText}>
-                    Phantomキーリセット (v0 debug)
-                  </AppText>
-                </TouchableOpacity>
-              ) : null}
-            </Card>
-          ) : null}
-
-          <BalanceList
-            connected={!!(walletPubkey && phantomSession)}
-            items={balanceItems}
-          />
-
-          {(isClaimed || state === 'Claimed' || state === 'Done') ? (
-            <View style={styles.claimedActions}>
-              {state === 'Done' && (
-                <AppText variant="body" style={styles.successMessage}>
-                  受け取りが完了しました
-                </AppText>
-              )}
-              {lastSignature ? (
-                <Card style={styles.debugCard}>
-                  <AppText variant="caption" style={styles.debugLabel}>
-                    {state === 'Done' ? 'txid (送信成功)' : '署名 (devnet)'}
-                  </AppText>
-                  <AppText variant="small" style={styles.debugText} numberOfLines={2}>
-                    {lastSignature}
-                  </AppText>
-                </Card>
-              ) : null}
-              {__DEV__ && signedTxSize != null && (
-                <AppText variant="small" style={styles.devText}>
-                  [DEV] 署名済みTxサイズ: {signedTxSize} bytes
-                </AppText>
-              )}
-              {__DEV__ && state === 'Error' && lastError && (
-                <AppText variant="small" style={styles.devText} numberOfLines={5}>
-                  [DEV] エラー全文: {lastError}
-                </AppText>
-              )}
-              <Button
-                title="ウォレットを見る"
-                onPress={async () => {
-                  if (state === 'Done' && campaignId && walletPubkey) {
-                    await markAsClaimed(campaignId, walletPubkey);
-                    setState('Claimed');
-                  }
-                  router.replace('/wallet' as any);
-                }}
-                variant="primary"
-                style={styles.claimedButton}
-              />
-              <Button
-                title="ホームに戻る"
-                onPress={() => router.replace('/')}
-                variant="secondary"
-                style={styles.claimedButton}
-              />
-            </View>
-          ) : (
-            <Button
-              title={getButtonTitle()}
-              onPress={handleClaimSolana}
-              variant="primary"
-              loading={state === 'Signing' || state === 'Sending' || state === 'Claiming' || state === 'Connecting'}
-              disabled={state === 'Expired' || state === 'Claiming' || state === 'Connecting' || state === 'Signing' || state === 'Sending'}
-              style={styles.claimButton}
-            />
-          )}
-        </View>
-      </ScrollView>
+            )}
+          </View>
+        </ScrollView>
       )}
     </SafeAreaView>
   );

@@ -136,7 +136,7 @@ export class ClaimStore {
   }
 
   /** イベント作成（admin 用） */
-  async createEvent(data: { title: string; datetime: string; host: string; state?: SchoolEvent['state'] }): Promise<SchoolEvent> {
+  async createEvent(data: { title: string; datetime: string; host: string; state?: SchoolEvent['state']; solanaMint?: string; solanaAuthority?: string; solanaGrantId?: string }): Promise<SchoolEvent> {
     const id = `evt-${Date.now().toString(36)}`;
     const event: SchoolEvent = {
       id,
@@ -144,6 +144,9 @@ export class ClaimStore {
       datetime: data.datetime,
       host: data.host,
       state: data.state ?? 'published',
+      solanaMint: data.solanaMint,
+      solanaAuthority: data.solanaAuthority,
+      solanaGrantId: data.solanaGrantId,
     };
     await this.storage.put(eventKey(id), event);
     return event;

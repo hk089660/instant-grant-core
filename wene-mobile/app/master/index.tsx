@@ -4,7 +4,7 @@ import { View, StyleSheet, FlatList, TextInput, Alert, TouchableOpacity } from '
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText, Button, Card } from '../../src/ui/components';
 import { masterTheme } from '../../src/ui/masterTheme';
-import { createInviteCode, revokeInviteCode, fetchMasterAuditLogs, MasterAuditLog } from '../../src/api/adminApi';
+import { createInviteCode, revokeInviteCode, fetchMasterAuditLogs, MasterAuditLog, fetchInviteCodes } from '../../src/api/adminApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MASTER_AUTH_KEY } from './_layout';
 import { useRouter } from 'expo-router';
@@ -14,7 +14,7 @@ export default function MasterDashboard() {
     const [activeTab, setActiveTab] = useState<'invites' | 'logging'>('invites');
 
     // Invite Codes State
-    const [invites, setInvites] = useState<{ id: string; name: string; code: string; createdAt: string }[]>([]);
+    const [invites, setInvites] = useState<{ name: string; code: string; createdAt: string }[]>([]);
     const [loading, setLoading] = useState(false);
     const [newOrgName, setNewOrgName] = useState('');
     const [generatedCode, setGeneratedCode] = useState<string | null>(null);
@@ -26,8 +26,23 @@ export default function MasterDashboard() {
     useEffect(() => {
         if (activeTab === 'logging') {
             loadAuditLogs();
+        } else if (activeTab === 'invites') {
+            loadInvites();
         }
     }, [activeTab]);
+
+    const loadInvites = async () => {
+        setLoading(true);
+        try {
+            const password = await AsyncStorage.getItem(MASTER_AUTH_KEY);
+            if (!password) return;
+            const codes = await fetchInviteCodes(password);
+            setInvites(codes);
+        } catch (e) {
+            console.error(e);
+        }
+        setLoading(false);
+    };
 
     const loadAuditLogs = async () => {
         setLoadingLogs(true);
@@ -59,8 +74,8 @@ export default function MasterDashboard() {
 
             const res = await createInviteCode(password, newOrgName);
             setGeneratedCode(res.code);
-            // Mock adding to list
-            setInvites(prev => [{ id: res.code, name: res.name, code: res.code, createdAt: new Date().toISOString() }, ...prev]);
+            // Refresh the list after generating
+            loadInvites();
             setNewOrgName('');
             Alert.alert('Success', `Code created: ${res.code}`);
         } catch (e) {
@@ -180,7 +195,7 @@ export default function MasterDashboard() {
                             )}
                         </Card>
 
-                        <AppText style={styles.listTitle}>Active Codes (Session Mock)</AppText>
+                        <AppText style={styles.listTitle}>Active Codes</AppText>
                         <FlatList
                             data={invites}
                             renderItem={renderInviteItem}

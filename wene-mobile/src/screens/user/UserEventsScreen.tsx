@@ -87,6 +87,7 @@ export const UserEventsScreen: React.FC = () => {
                 host={event.host}
                 leftSlot={<StatusDot color="#38b000" />}
                 onPress={() => router.push(schoolRoutes.success(event.id) as any)}
+                solanaMint={event.solanaMint}
               />
             ))
           )}
@@ -112,6 +113,7 @@ export const UserEventsScreen: React.FC = () => {
                 host={event.host}
                 leftSlot={<StatusDot color="#f5c542" />}
                 onPress={() => router.push(schoolRoutes.confirm(event.id) as any)}
+                solanaMint={event.solanaMint}
               />
             ))
           )}

@@ -11,6 +11,9 @@ export interface SchoolEvent {
   state?: 'draft' | 'published' | 'ended';
   /** 参加済み数（管理者用・API が返す） */
   claimedCount?: number;
+  solanaMint?: string;
+  solanaAuthority?: string;
+  solanaGrantId?: string;
 }
 
 /** エラー種別（HTTP契約・UI分岐は code のみで行う） */
