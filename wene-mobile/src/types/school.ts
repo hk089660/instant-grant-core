@@ -14,6 +14,8 @@ export interface SchoolEvent {
   solanaMint?: string;
   solanaAuthority?: string;
   solanaGrantId?: string;
+  /** 参加完了時に配布するSPLトークン量（最小単位） */
+  ticketTokenAmount?: number;
 }
 
 /** エラー種別（HTTP契約・UI分岐は code のみで行う） */

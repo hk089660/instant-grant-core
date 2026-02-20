@@ -37,6 +37,7 @@ export async function createAdminEvent(data: {
     solanaMint?: string;
     solanaAuthority?: string;
     solanaGrantId?: string;
+    ticketTokenAmount?: number;
 }): Promise<SchoolEvent> {
     const base = getBaseUrl();
     return httpPost<SchoolEvent>(`${base}/v1/school/events`, data);

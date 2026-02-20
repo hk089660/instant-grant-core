@@ -24,6 +24,8 @@ export async function getGrantByCampaignId(campaignId: string): Promise<Grant | 
         solanaMint: schoolEvent.solanaMint,
         solanaAuthority: schoolEvent.solanaAuthority,
         solanaGrantId: schoolEvent.solanaGrantId,
+        ticketTokenAmount: schoolEvent.ticketTokenAmount,
+        balance: schoolEvent.ticketTokenAmount ?? 0,
         logoUrl: 'https://wene.app/images/grant-logo.png' // default dummy representation
       };
     }

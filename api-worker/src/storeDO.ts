@@ -33,6 +33,11 @@ export interface Env {
   ADMIN_PASSWORD?: string;
 }
 
+const AUDIT_MAX_DEPTH = 4;
+const AUDIT_MAX_ARRAY = 20;
+const AUDIT_MAX_KEYS = 50;
+const AUDIT_MAX_STRING = 160;
+
 function doStorageAdapter(ctx: DurableObjectState): IClaimStorage {
   return {
     async get(key: string) {
@@ -103,9 +108,173 @@ export class SchoolStore implements DurableObject {
     return Array.from(result.values()) as AuditEvent[];
   }
 
-  async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-    const path = url.pathname;
+  private isApiPath(path: string): boolean {
+    return path.startsWith('/api/') || path.startsWith('/v1/school/');
+  }
+
+  private routeTemplate(path: string): string {
+    if (/^\/v1\/school\/events\/[^/]+\/claimants$/.test(path)) return '/v1/school/events/:eventId/claimants';
+    if (/^\/v1\/school\/events\/[^/]+$/.test(path)) return '/v1/school/events/:eventId';
+    if (/^\/api\/events\/[^/]+\/claim$/.test(path)) return '/api/events/:eventId/claim';
+    return path;
+  }
+
+  private eventIdForAudit(path: string, body: unknown): string {
+    const schoolEventPath = path.match(/^\/v1\/school\/events\/([^/]+)/);
+    if (schoolEventPath?.[1]) return schoolEventPath[1];
+
+    const userEventPath = path.match(/^\/api\/events\/([^/]+)\/claim$/);
+    if (userEventPath?.[1]) return userEventPath[1];
+
+    if (body && typeof body === 'object' && 'eventId' in body) {
+      const raw = (body as { eventId?: unknown }).eventId;
+      if (typeof raw === 'string' && raw.trim()) return raw.trim();
+    }
+
+    return 'system';
+  }
+
+  private maskActorId(id: string): string {
+    const trimmed = id.trim();
+    if (!trimmed) return 'unknown';
+    if (trimmed.length <= 8) return trimmed;
+    return `${trimmed.slice(0, 4)}...${trimmed.slice(-4)}`;
+  }
+
+  private actorForAudit(path: string, request: Request, body: unknown): AuditActor {
+    if (path.startsWith('/api/admin/') || path.startsWith('/api/master/')) {
+      const hasAuth = Boolean(request.headers.get('Authorization'));
+      return { type: 'operator', id: hasAuth ? 'authenticated' : 'anonymous' };
+    }
+
+    if (path === '/v1/school/claims') {
+      const payload = body as { walletAddress?: unknown; joinToken?: unknown } | undefined;
+      const wallet = typeof payload?.walletAddress === 'string' ? payload.walletAddress : '';
+      const joinToken = typeof payload?.joinToken === 'string' ? payload.joinToken : '';
+      const subject = wallet || joinToken;
+      return { type: 'wallet', id: this.maskActorId(subject || 'unknown') };
+    }
+
+    if (path === '/api/users/register' || path === '/api/auth/verify' || /^\/api\/events\/[^/]+\/claim$/.test(path)) {
+      const payload = body as { userId?: unknown } | undefined;
+      const userId = typeof payload?.userId === 'string' ? payload.userId.trim() : '';
+      return { type: 'user', id: userId || 'anonymous' };
+    }
+
+    if (path.startsWith('/v1/school/')) {
+      return { type: 'school', id: 'public-api' };
+    }
+
+    return { type: 'system', id: 'api' };
+  }
+
+  private isSensitiveKey(key: string): boolean {
+    const lowered = key.toLowerCase();
+    return (
+      lowered.includes('password') ||
+      lowered.includes('pin') ||
+      lowered.includes('token') ||
+      lowered.includes('authorization') ||
+      lowered.includes('secret') ||
+      lowered.includes('private') ||
+      lowered === 'code' ||
+      lowered.endsWith('_code')
+    );
+  }
+
+  private sanitizeAuditValue(value: unknown, depth = 0): unknown {
+    if (depth > AUDIT_MAX_DEPTH) return '[TRUNCATED_DEPTH]';
+    if (value === null || value === undefined) return value;
+    if (typeof value === 'string') {
+      if (value.length > AUDIT_MAX_STRING) return `${value.slice(0, AUDIT_MAX_STRING)}...`;
+      return value;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') return value;
+    if (Array.isArray(value)) {
+      return value.slice(0, AUDIT_MAX_ARRAY).map((item) => this.sanitizeAuditValue(item, depth + 1));
+    }
+    if (typeof value === 'object') {
+      const obj = value as Record<string, unknown>;
+      const out: Record<string, unknown> = {};
+      const keys = Object.keys(obj).slice(0, AUDIT_MAX_KEYS);
+      for (const key of keys) {
+        if (this.isSensitiveKey(key)) {
+          out[key] = '[REDACTED]';
+          continue;
+        }
+        out[key] = this.sanitizeAuditValue(obj[key], depth + 1);
+      }
+      return out;
+    }
+    return String(value);
+  }
+
+  private async requestBodyForAudit(request: Request): Promise<unknown> {
+    const method = request.method.toUpperCase();
+    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) return undefined;
+
+    const contentType = request.headers.get('content-type') ?? '';
+    if (!contentType.toLowerCase().includes('application/json')) return undefined;
+
+    try {
+      return await request.clone().json();
+    } catch {
+      return { parseError: 'invalid_json' };
+    }
+  }
+
+  private apiAuditEventName(method: string, route: string): string {
+    const token = route
+      .replace(/^\/+/, '')
+      .replace(/[:]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .toUpperCase();
+    return `API_${method.toUpperCase()}_${token || 'ROOT'}`;
+  }
+
+  private async appendApiAuditTrail(
+    request: Request,
+    url: URL,
+    path: string,
+    response: Response,
+    requestBody: unknown,
+    startedAt: number,
+    errorMessage?: string
+  ): Promise<void> {
+    if (!this.isApiPath(path) || request.method.toUpperCase() === 'OPTIONS') return;
+
+    const route = this.routeTemplate(path);
+    const event = this.apiAuditEventName(request.method, route);
+    const actor = this.actorForAudit(path, request, requestBody);
+    const eventId = this.eventIdForAudit(path, requestBody);
+
+    const query: Record<string, string> = {};
+    for (const [k, v] of url.searchParams.entries()) query[k] = v;
+    const hasQuery = Object.keys(query).length > 0;
+
+    const data: Record<string, unknown> = {
+      route,
+      method: request.method.toUpperCase(),
+      status: response.status,
+      statusClass: response.status >= 500 ? '5xx' : response.status >= 400 ? '4xx' : response.status >= 300 ? '3xx' : '2xx',
+      durationMs: Date.now() - startedAt,
+      hasAuthorization: Boolean(request.headers.get('Authorization')),
+      origin: request.headers.get('origin') ?? '',
+      requestBody: this.sanitizeAuditValue(requestBody),
+      ...(hasQuery ? { query: this.sanitizeAuditValue(query) } : {}),
+      ...(errorMessage ? { errorMessage } : {}),
+    };
+
+    try {
+      await this.appendAuditLog(event, actor, data, eventId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[audit] failed to append API audit trail', { event, path, message });
+    }
+  }
+
+  private async handleRequest(request: Request, path: string): Promise<Response> {
 
     // GET /api/master/audit-logs (Master Password required)
     if (path === '/api/master/audit-logs' && request.method === 'GET') {
@@ -219,7 +388,16 @@ export class SchoolStore implements DurableObject {
 
     // POST /v1/school/events — イベント新規作成（admin用）
     if (path === '/v1/school/events' && request.method === 'POST') {
-      let body: { title?: string; datetime?: string; host?: string; state?: 'draft' | 'published'; solanaMint?: string; solanaAuthority?: string; solanaGrantId?: string };
+      let body: {
+        title?: string;
+        datetime?: string;
+        host?: string;
+        state?: 'draft' | 'published';
+        solanaMint?: string;
+        solanaAuthority?: string;
+        solanaGrantId?: string;
+        ticketTokenAmount?: number | string;
+      };
       try {
         body = (await request.json()) as any;
       } catch {
@@ -228,17 +406,41 @@ export class SchoolStore implements DurableObject {
       const title = typeof body?.title === 'string' ? body.title.trim() : '';
       const datetime = typeof body?.datetime === 'string' ? body.datetime.trim() : '';
       const host = typeof body?.host === 'string' ? body.host.trim() : '';
+      const rawTokenAmount = body?.ticketTokenAmount;
+      const ticketTokenAmount =
+        typeof rawTokenAmount === 'number' && Number.isFinite(rawTokenAmount)
+          ? Math.floor(rawTokenAmount)
+          : typeof rawTokenAmount === 'string' && /^\d+$/.test(rawTokenAmount.trim())
+            ? Number.parseInt(rawTokenAmount.trim(), 10)
+            : NaN;
+
       if (!title || !datetime || !host) {
         return Response.json({ error: 'title, datetime, host are required' }, { status: 400 });
+      }
+      if (!Number.isInteger(ticketTokenAmount) || ticketTokenAmount <= 0) {
+        return Response.json({ error: 'ticketTokenAmount must be a positive integer' }, { status: 400 });
       }
       const event = await this.store.createEvent({
         title, datetime, host, state: body.state,
         solanaMint: body.solanaMint,
         solanaAuthority: body.solanaAuthority,
-        solanaGrantId: body.solanaGrantId
+        solanaGrantId: body.solanaGrantId,
+        ticketTokenAmount,
       });
       // Audit Log
-      await this.appendAuditLog('EVENT_CREATE', { type: 'admin', id: 'admin' }, { title, datetime, host, eventId: event.id, solanaMint: body.solanaMint }, event.id);
+      await this.appendAuditLog(
+        'EVENT_CREATE',
+        { type: 'admin', id: 'admin' },
+        {
+          title,
+          datetime,
+          host,
+          eventId: event.id,
+          solanaMint: body.solanaMint,
+          ticketTokenAmount,
+        },
+        event.id
+      );
       return Response.json(event, { status: 201 });
     }
 
@@ -406,5 +608,25 @@ export class SchoolStore implements DurableObject {
     }
 
     return new Response('Not Found', { status: 404 });
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const path = url.pathname;
+    const startedAt = Date.now();
+    const requestBody = await this.requestBodyForAudit(request);
+
+    let response: Response;
+    let errorMessage: string | undefined;
+
+    try {
+      response = await this.handleRequest(request, path);
+    } catch (err) {
+      errorMessage = err instanceof Error ? err.message : String(err);
+      response = Response.json({ error: 'internal server error' }, { status: 500 });
+    }
+
+    await this.appendApiAuditTrail(request, url, path, response, requestBody, startedAt, errorMessage);
+    return response;
   }
 }

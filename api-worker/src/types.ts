@@ -13,6 +13,8 @@ export interface SchoolEvent {
   solanaMint?: string;
   solanaAuthority?: string;
   solanaGrantId?: string;
+  /** 参加完了時の配布量（表示・監査用） */
+  ticketTokenAmount?: number;
 }
 
 export type SchoolClaimErrorCode =

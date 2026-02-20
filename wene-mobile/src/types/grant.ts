@@ -11,6 +11,7 @@ export interface Grant {
   solanaMint?: string;
   solanaAuthority?: string;
   solanaGrantId?: string;
+  ticketTokenAmount?: number;
   /** 期限（JST固定）。YYYY-MM-DD 形式。23:59表示に利用 */
   goalDeadlineJst?: string;
   /** 残り日数（表示用）。goalDeadline から算出可 */

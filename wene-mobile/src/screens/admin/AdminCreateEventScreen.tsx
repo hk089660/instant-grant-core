@@ -12,7 +12,7 @@ import { AppText, Button, Card } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
 import { httpPost } from '../../api/http/httpClient';
 import type { SchoolEvent } from '../../types/school';
-import { Keypair } from '@solana/web3.js';
+import { getDefaultSchoolTicketTokenConfig } from '../../solana/schoolTicketTokenConfig';
 
 function getAdminBaseUrl(): string {
     if (typeof window !== 'undefined' && window.location?.origin) {
@@ -33,6 +33,7 @@ export const AdminCreateEventScreen: React.FC = () => {
     const [title, setTitle] = useState('');
     const [datetime, setDatetime] = useState('');
     const [host, setHost] = useState('');
+    const [ticketTokenAmountInput, setTicketTokenAmountInput] = useState('1');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -47,7 +48,15 @@ export const AdminCreateEventScreen: React.FC = () => {
         return '';
     }, []);
 
-    const canSubmit = title.trim().length > 0 && datetime.trim().length > 0 && host.trim().length > 0;
+    const defaultTokenConfig = useMemo(() => getDefaultSchoolTicketTokenConfig(), []);
+    const ticketTokenAmount = Number.parseInt(ticketTokenAmountInput, 10);
+    const canSubmit =
+        title.trim().length > 0 &&
+        datetime.trim().length > 0 &&
+        host.trim().length > 0 &&
+        Number.isInteger(ticketTokenAmount) &&
+        ticketTokenAmount > 0 &&
+        !!defaultTokenConfig;
 
     const handlePreview = useCallback(() => {
         if (!canSubmit) return;
@@ -59,17 +68,22 @@ export const AdminCreateEventScreen: React.FC = () => {
         setError(null);
         try {
             const apiBase = getAdminBaseUrl();
-            const mintKp = Keypair.generate();
-            const grantId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString();
+            if (!defaultTokenConfig) {
+                throw new Error('SPLトークン設定がありません。EXPO_PUBLIC_SCHOOL_TICKET_* もしくは devnetConfig を設定してください。');
+            }
+            if (!Number.isInteger(ticketTokenAmount) || ticketTokenAmount <= 0) {
+                throw new Error('発行量は1以上の整数で指定してください。');
+            }
 
             const event = await httpPost<SchoolEvent>(`${apiBase}/v1/school/events`, {
                 title: title.trim(),
                 datetime: datetime.trim(),
                 host: host.trim(),
                 state: 'published',
-                solanaMint: mintKp.publicKey.toBase58(),
-                solanaAuthority: mintKp.publicKey.toBase58(), // using the same for dummy auth
-                solanaGrantId: grantId,
+                solanaMint: defaultTokenConfig.solanaMint,
+                solanaAuthority: defaultTokenConfig.solanaAuthority,
+                solanaGrantId: defaultTokenConfig.solanaGrantId,
+                ticketTokenAmount,
             });
             setCreatedEvent(event);
             setStep('done');
@@ -79,7 +93,7 @@ export const AdminCreateEventScreen: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    }, [title, datetime, host]);
+    }, [title, datetime, host, defaultTokenConfig, ticketTokenAmount]);
 
     // QR生成
     const scanUrl = useMemo(() => {
@@ -108,6 +122,7 @@ export const AdminCreateEventScreen: React.FC = () => {
         setTitle('');
         setDatetime('');
         setHost('');
+        setTicketTokenAmountInput('1');
         setCreatedEvent(null);
         setQrDataUrl(null);
         setError(null);
@@ -183,6 +198,23 @@ export const AdminCreateEventScreen: React.FC = () => {
                             maxLength={40}
                         />
 
+                        <AppText variant="caption" style={styles.label}>参加券の配布量（SPL最小単位）</AppText>
+                        <TextInput
+                            style={styles.input}
+                            value={ticketTokenAmountInput}
+                            onChangeText={(t) => setTicketTokenAmountInput(t.replace(/[^\d]/g, ''))}
+                            placeholder="例: 1"
+                            placeholderTextColor={adminTheme.colors.textTertiary}
+                            keyboardType="number-pad"
+                            maxLength={9}
+                        />
+
+                        {!defaultTokenConfig && (
+                            <AppText variant="caption" style={styles.errorText}>
+                                SPLトークン設定が未構成です。EXPO_PUBLIC_SCHOOL_TICKET_* もしくは devnetConfig を設定してください。
+                            </AppText>
+                        )}
+
                         {error ? (
                             <AppText variant="caption" style={styles.errorText}>{error}</AppText>
                         ) : null}
@@ -214,6 +246,11 @@ export const AdminCreateEventScreen: React.FC = () => {
                         <View style={styles.previewRow}>
                             <AppText variant="caption" style={styles.previewLabel}>主催</AppText>
                             <AppText variant="body" style={styles.previewValue}>{host}</AppText>
+                        </View>
+                        <View style={styles.divider} />
+                        <View style={styles.previewRow}>
+                            <AppText variant="caption" style={styles.previewLabel}>配布量</AppText>
+                            <AppText variant="body" style={styles.previewValue}>{ticketTokenAmountInput || '0'}</AppText>
                         </View>
 
                         {error ? (
@@ -260,6 +297,11 @@ export const AdminCreateEventScreen: React.FC = () => {
                             {createdEvent.solanaMint && (
                                 <AppText variant="small" style={styles.cardMuted}>
                                     Token Mint: {createdEvent.solanaMint.slice(0, 8)}...
+                                </AppText>
+                            )}
+                            {typeof createdEvent.ticketTokenAmount === 'number' && (
+                                <AppText variant="small" style={styles.cardMuted}>
+                                    配布量: {createdEvent.ticketTokenAmount}
                                 </AppText>
                             )}
 
