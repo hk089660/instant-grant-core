@@ -48,7 +48,7 @@ describe('SchoolStore Audit Log', () => {
 
   beforeEach(() => {
     mockState = new MockDurableObjectState();
-    mockEnv = {};
+    mockEnv = { AUDIT_IMMUTABLE_MODE: 'off' };
     // @ts-expect-error mock for DurableObjectState
     store = new SchoolStore(mockState, mockEnv);
   });

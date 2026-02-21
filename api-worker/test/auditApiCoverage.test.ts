@@ -58,7 +58,7 @@ describe('API coverage audit logs', () => {
 
   beforeEach(() => {
     state = new MockDurableObjectState();
-    env = { ADMIN_PASSWORD: 'master-secret' };
+    env = { ADMIN_PASSWORD: 'master-secret', AUDIT_IMMUTABLE_MODE: 'off' };
     // @ts-expect-error mock for DurableObjectState
     store = new SchoolStore(state, env);
   });
@@ -140,7 +140,7 @@ describe('API coverage audit logs', () => {
 
   it('returns server configuration error for master-only routes when default password is not replaced', async () => {
     const localState = new MockDurableObjectState();
-    const insecureEnv: Env = { ADMIN_PASSWORD: 'change-this-in-dashboard' };
+    const insecureEnv: Env = { ADMIN_PASSWORD: 'change-this-in-dashboard', AUDIT_IMMUTABLE_MODE: 'off' };
     // @ts-expect-error mock for DurableObjectState
     const insecureStore = new SchoolStore(localState, insecureEnv);
 

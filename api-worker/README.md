@@ -24,6 +24,14 @@ Hono による最小構成の API。`wene-mobile`（Cloudflare Pages）から固
   - **evt-003** → 常に `retryable`（デモ用）
 - `GET /v1/school/pop-status`
   - レスポンス: `{ enforceOnchainPop: boolean; signerConfigured: boolean; signerPubkey?: string | null; error?: string | null }`
+- `GET /v1/school/audit-status`
+  - レスポンス: `{ mode: 'off'|'best_effort'|'required'; failClosedForMutatingRequests: boolean; operationalReady: boolean; primaryImmutableSinkConfigured: boolean; sinks: { r2Configured: boolean; kvConfigured: boolean; ingestConfigured: boolean } }`
+- `GET /api/master/audit-integrity`（Master Password 必須）
+  - クエリ: `limit`（既定 50, 最大 200）, `verifyImmutable`（既定 true）
+  - レスポンス: `ok`, `issues[]`, `warnings[]` を含む整合性レポート（`ok=false` の場合 HTTP 409）
+- `POST /v1/audit/log`（監査ログ強制書き込み用）
+  - Authorization 必須（`Bearer <AUDIT_LOG_WRITE_TOKEN>`。未設定時は `ADMIN_PASSWORD`）
+  - `AUDIT_LOG_WRITE_TOKEN` / `ADMIN_PASSWORD` が無効な設定の場合は 503
 
 契約型は `src/types.ts`（wene-mobile の `SchoolEvent` / `SchoolClaimResult` と一致）。
 
@@ -54,9 +62,16 @@ L1 で PoP 検証を行うため、以下の Worker 変数を設定する:
 - `POP_SIGNER_SECRET_KEY_B64`: Ed25519 の 32byte seed または 64byte secret key を base64 で設定
 - `POP_SIGNER_PUBKEY`: 対応する公開鍵（base58）
 - `ENFORCE_ONCHAIN_POP`: on-chain 設定イベントで PoP 証跡を必須化（推奨: `true`、未設定時も強制）
+- `AUDIT_IMMUTABLE_MODE`: `required`（推奨） / `best_effort` / `off`
+- `AUDIT_IMMUTABLE_FETCH_TIMEOUT_MS`: immutable ingest 送信タイムアウト（ms、既定 5000）
+- `AUDIT_IMMUTABLE_INGEST_URL`: 任意。R2 に加えて外部 immutable sink に二重固定化したい場合に設定
+- `AUDIT_LOG_WRITE_TOKEN`: 任意。`POST /v1/audit/log` を有効化する場合の専用トークン
 
 `POST /v1/school/pop-proof` はこの鍵で署名した PoP 証明を返し、クライアントは `claim_grant` 送信前に Ed25519 検証命令を付与する。
-デプロイ後は `GET /v1/school/pop-status` で `signerConfigured: true` を確認してから本番運用に入ること。
+デプロイ後は次を確認してから本番運用に入ること:
+- `GET /v1/school/pop-status` で `signerConfigured: true`
+- `GET /v1/school/audit-status` で `operationalReady: true`
+- `GET /api/master/audit-integrity?limit=50` が `ok: true`
 
 ## CORS
 
@@ -80,6 +95,13 @@ L1 で PoP 検証を行うため、以下の Worker 変数を設定する:
 - 集計は `claim:${eventId}:` を prefix に list して件数。eventId ごとに独立（evt-001 と evt-002 は混ざらない）。
 - Worker の再起動・デプロイ後も claimedCount と already 判定は維持される。
 - ロジックは `src/claimLogic.ts`（`ClaimStore`）、DO は `src/storeDO.ts` でルーティングとストレージアダプタのみ。
+
+### 監査ログの不変保存（運用要件）
+
+- 監査エントリは DO 内ハッシュチェーンに加えて、DO 外の不変シンクに固定化される。
+- `AUDIT_IMMUTABLE_MODE=required` の場合、更新系 API（POST/PUT/PATCH/DELETE）は監査固定化が失敗すると 503 で fail-close する。
+- production では `AUDIT_LOGS`（R2 バインディング）を必ず設定すること。
+- 監査整合性は `GET /api/master/audit-integrity` で定期確認すること。
 
 ## テスト
 

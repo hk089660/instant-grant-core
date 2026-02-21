@@ -28,6 +28,7 @@ Asuka Network上で稼働する最初の行政・公共向けリファレンス�
 - Cloudflare Workers 上のプロセス証明レイヤーは稼働中です:
   - API監査ログをグローバルチェーン（`prev_hash`）で連結
   - かつイベント単位の連鎖（`stream_prev_hash`）も保持
+  - 監査エントリは Durable Object 外の不変シンク（R2 content-addressed + 任意の immutable ingest webhook）へも固定化し、更新系APIでは fail-close（`AUDIT_IMMUTABLE_MODE=required`）を適用
 - オペレーター向け認可強化は適用済みです:
   - 管理者向け学校APIは Bearer 認証必須
   - Master専用APIは既定値ではなく実値の `ADMIN_PASSWORD` を必須化
@@ -73,7 +74,7 @@ graph TD
 * **技術スタック:** TypeScript, Cloudflare Workers (Edge Computing)
 * **役割:** 時間とプロセスの監査人。
 * **革新点:** 全てのリクエストに対し、グローバル直前ハッシュ（`prev_hash`）とイベント単位連鎖（`stream_prev_hash`）を含む **Append-only Hash Chain** をリアルタイムに生成します。
-    * これにより、たとえ管理者であっても、過去の履歴を1ビットたりとも改ざん・隠蔽することは数学的に不可能です。
+    * さらに DO 外の不変シンク（`AUDIT_LOGS` R2 + 任意 immutable ingest）へ同時固定化し、DO単独改ざんを検知・拒否できる構成です。
 * [📂 View API Code](./api-worker)
 
 ### 3. Layer 3: The Interface (意思の保護)
@@ -225,10 +226,20 @@ Reviewer shortcut: \`./wene-mobile/src/screens/user/UserScanScreen.tsx\` と \`.
    - `POP_SIGNER_SECRET_KEY_B64`（必須、on-chain PoP 証明署名用）
    - `POP_SIGNER_PUBKEY`（必須、対応する Ed25519 公開鍵/base58）
    - `ENFORCE_ONCHAIN_POP`（推奨: `true`。未指定時も強制）
-3. Cloudflare Workersへデプロイします。
-4. WorkerのURL（例: `https://we-ne-school-api.<subdomain>.workers.dev`）を控えます。
-5. PoPランタイム状態を確認します:
+   - `AUDIT_IMMUTABLE_MODE`（推奨: `required`。`best_effort` / `off` も可）
+   - `AUDIT_IMMUTABLE_INGEST_URL`（任意、第二不変シンク）
+   - `AUDIT_IMMUTABLE_INGEST_TOKEN`（任意、ingest webhook の Bearer token）
+   - `AUDIT_IMMUTABLE_FETCH_TIMEOUT_MS`（任意、既定 `5000`）
+3. Workerバインディングを設定します:
+   - `AUDIT_LOGS`（R2、production で immutable mode を使う場合は必須）
+   - `AUDIT_INDEX`（KV、検索用メタインデックス。任意）
+4. Cloudflare Workersへデプロイします。
+5. WorkerのURL（例: `https://we-ne-school-api.<subdomain>.workers.dev`）を控えます。
+6. PoPランタイム状態を確認します:
    - `GET /v1/school/pop-status` が `enforceOnchainPop: true` かつ `signerConfigured: true` を返すこと。
+7. 監査ランタイム状態を確認します:
+   - `GET /v1/school/audit-status` が `operationalReady: true` を返すこと。
+   - `GET /api/master/audit-integrity?limit=50`（Masterトークン付き）が `ok: true` を返すこと。
 
 ### Step 3: Pages プロキシ層（`functions/` + `_redirects`）
 1. サイトへプロキシ関数がデプロイされることを確認します:

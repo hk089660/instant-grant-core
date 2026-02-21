@@ -41,7 +41,7 @@ describe('SchoolStore Audit Log Race Condition', () => {
     beforeEach(() => {
         mockState = new MockDurableObjectState();
         // @ts-ignore
-        store = new SchoolStore(mockState, {});
+        store = new SchoolStore(mockState, { AUDIT_IMMUTABLE_MODE: 'off' });
     });
 
     it('should handle concurrent requests without forking the chain', async () => {

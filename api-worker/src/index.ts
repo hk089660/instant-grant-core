@@ -10,9 +10,15 @@ import auditRouter from './audit/router';
 
 type Bindings = {
   CORS_ORIGIN?: string;
+  ADMIN_PASSWORD?: string;
+  AUDIT_LOG_WRITE_TOKEN?: string;
   SCHOOL_STORE: DurableObjectNamespace;
-  AUDIT_LOGS: R2Bucket;
-  AUDIT_INDEX: KVNamespace;
+  AUDIT_LOGS?: R2Bucket;
+  AUDIT_INDEX?: KVNamespace;
+  AUDIT_IMMUTABLE_MODE?: string;
+  AUDIT_IMMUTABLE_INGEST_URL?: string;
+  AUDIT_IMMUTABLE_INGEST_TOKEN?: string;
+  AUDIT_IMMUTABLE_FETCH_TIMEOUT_MS?: string;
 };
 
 const DEFAULT_CORS = 'https://instant-grant-core.dev';

@@ -12,6 +12,7 @@ import type {
 import { ClaimStore, type IClaimStorage } from './claimLogic';
 import type { AuditActor, AuditEvent } from './audit/types';
 import { canonicalize, sha256Hex } from './audit/hash';
+import { parseAuditImmutableMode, persistImmutableAuditEntry } from './audit/immutable';
 
 const USER_PREFIX = 'user:';
 
@@ -44,6 +45,12 @@ export interface Env {
   POP_SIGNER_SECRET_KEY_B64?: string;
   POP_SIGNER_PUBKEY?: string;
   ENFORCE_ONCHAIN_POP?: string;
+  AUDIT_LOGS?: R2Bucket;
+  AUDIT_INDEX?: KVNamespace;
+  AUDIT_IMMUTABLE_MODE?: string;
+  AUDIT_IMMUTABLE_INGEST_URL?: string;
+  AUDIT_IMMUTABLE_INGEST_TOKEN?: string;
+  AUDIT_IMMUTABLE_FETCH_TIMEOUT_MS?: string;
 }
 
 const AUDIT_MAX_DEPTH = 4;
@@ -60,7 +67,32 @@ const POP_HASH_LEN = 32;
 const POP_MESSAGE_VERSION = 2;
 const POP_MESSAGE_LEN = 1 + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 8;
 const POP_HASH_GENESIS_HEX = '0'.repeat(64);
+const AUDIT_HISTORY_PREFIX = 'audit_history:';
+const AUDIT_INTEGRITY_DEFAULT_LIMIT = 50;
+const AUDIT_INTEGRITY_MAX_LIMIT = 200;
+const IMMUTABLE_AUDIT_SOURCE = 'school-store';
 const TOKEN_IMAGE_URL = 'https://instant-grant-core.pages.dev/ticket-token.png';
+
+type AuditIntegrityIssue = {
+  code: string;
+  message: string;
+  entryHash?: string;
+  eventId?: string;
+  ref?: string;
+};
+
+type AuditIntegrityReport = {
+  ok: boolean;
+  mode: 'off' | 'best_effort' | 'required';
+  checked: number;
+  limit: number;
+  globalHead: string | null;
+  oldestInWindow: string | null;
+  verifyImmutable: boolean;
+  issues: AuditIntegrityIssue[];
+  warnings: string[];
+  inspectedAt: string;
+};
 
 function buildTokenSymbol(title: string): string {
   const cleaned = title.replace(/\s+/g, '').slice(0, 10).toUpperCase();
@@ -121,6 +153,23 @@ function parsePeriodIndex(raw: unknown): bigint | null {
     return BigInt(raw.trim());
   }
   return null;
+}
+
+function parseBoundedInt(raw: string | null, fallback: number, min: number, max: number): number {
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) return fallback;
+  if (parsed < min) return min;
+  if (parsed > max) return max;
+  return parsed;
+}
+
+function parseBooleanQuery(raw: string | null, fallback: boolean): boolean {
+  if (raw === null) return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
+  return fallback;
 }
 
 function u64ToLeBytes(value: bigint): Uint8Array {
@@ -219,6 +268,19 @@ export class SchoolStore implements DurableObject {
     const raw = (this.env.ENFORCE_ONCHAIN_POP ?? '').trim().toLowerCase();
     if (!raw) return true;
     return !(raw === '0' || raw === 'false' || raw === 'off' || raw === 'no');
+  }
+
+  private getAuditImmutableMode() {
+    return parseAuditImmutableMode(this.env.AUDIT_IMMUTABLE_MODE);
+  }
+
+  private isMutatingMethod(method: string): boolean {
+    const m = method.toUpperCase();
+    return m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE';
+  }
+
+  private isAuditFailClosed(method: string): boolean {
+    return this.getAuditImmutableMode() === 'required' && this.isMutatingMethod(method);
   }
 
   private isEventOnchainConfigured(event: { solanaMint?: string; solanaAuthority?: string; solanaGrantId?: string } | null | undefined): boolean {
@@ -534,6 +596,22 @@ export class SchoolStore implements DurableObject {
       const entry_hash = await sha256Hex(canonicalize(baseEntry));
       const fullEntry: AuditEvent = { ...baseEntry, entry_hash };
 
+      const immutableReceipt = await persistImmutableAuditEntry({
+        entry: fullEntry,
+        mode: this.getAuditImmutableMode(),
+        source: 'school-store',
+        bindings: {
+          AUDIT_LOGS: this.env.AUDIT_LOGS,
+          AUDIT_INDEX: this.env.AUDIT_INDEX,
+          AUDIT_IMMUTABLE_INGEST_URL: this.env.AUDIT_IMMUTABLE_INGEST_URL,
+          AUDIT_IMMUTABLE_INGEST_TOKEN: this.env.AUDIT_IMMUTABLE_INGEST_TOKEN,
+          AUDIT_IMMUTABLE_FETCH_TIMEOUT_MS: this.env.AUDIT_IMMUTABLE_FETCH_TIMEOUT_MS,
+        },
+      });
+      if (immutableReceipt) {
+        fullEntry.immutable = immutableReceipt;
+      }
+
       // Update both global and per-event stream chains.
       await this.ctx.storage.put(AUDIT_LAST_HASH_GLOBAL_KEY, entry_hash);
       await this.ctx.storage.put(streamLastHashKey, entry_hash);
@@ -554,8 +632,188 @@ export class SchoolStore implements DurableObject {
 
   async getAuditLogs(): Promise<AuditEvent[]> {
     // List latest 50 logs (reverse order)
-    const result = await this.ctx.storage.list({ prefix: 'audit_history:', limit: 50, reverse: true });
+    const result = await this.ctx.storage.list({ prefix: AUDIT_HISTORY_PREFIX, limit: 50, reverse: true });
     return Array.from(result.values()) as AuditEvent[];
+  }
+
+  private getAuditStatus() {
+    const mode = this.getAuditImmutableMode();
+    const r2Configured = Boolean(this.env.AUDIT_LOGS);
+    const kvConfigured = Boolean(this.env.AUDIT_INDEX);
+    const ingestConfigured = Boolean(this.env.AUDIT_IMMUTABLE_INGEST_URL?.trim());
+    const primaryImmutableSinkConfigured = r2Configured || ingestConfigured;
+    const operationalReady = mode === 'off' ? true : primaryImmutableSinkConfigured;
+    return {
+      mode,
+      failClosedForMutatingRequests: mode === 'required',
+      operationalReady,
+      primaryImmutableSinkConfigured,
+      sinks: {
+        r2Configured,
+        kvConfigured,
+        ingestConfigured,
+      },
+    };
+  }
+
+  private buildAuditHashInput(entry: AuditEvent): Record<string, unknown> {
+    const base: Record<string, unknown> = {
+      ts: entry.ts,
+      event: entry.event,
+      eventId: entry.eventId,
+      actor: entry.actor,
+      data: entry.data,
+      prev_hash: entry.prev_hash,
+    };
+    if (typeof entry.stream_prev_hash === 'string') {
+      base.stream_prev_hash = entry.stream_prev_hash;
+    }
+    return base;
+  }
+
+  private buildImmutablePayload(entry: AuditEvent): string {
+    const payloadEntry = {
+      ...this.buildAuditHashInput(entry),
+      entry_hash: entry.entry_hash,
+    };
+    return canonicalize({
+      version: 1,
+      source: IMMUTABLE_AUDIT_SOURCE,
+      entry: payloadEntry,
+    });
+  }
+
+  private async verifyAuditIntegrity(limit: number, verifyImmutable: boolean): Promise<AuditIntegrityReport> {
+    const mode = this.getAuditImmutableMode();
+    const shouldVerifyImmutable = verifyImmutable && mode !== 'off';
+    const issues: AuditIntegrityIssue[] = [];
+    const warningSet = new Set<string>();
+
+    const rows = await this.ctx.storage.list({ prefix: AUDIT_HISTORY_PREFIX, limit, reverse: true });
+    const entries = Array.from(rows.values()) as AuditEvent[];
+
+    let newerEntry: AuditEvent | null = null;
+    const expectedStreamOlderHashByEvent = new Map<string, string>();
+
+    for (const entry of entries) {
+      if (!entry || typeof entry !== 'object' || typeof entry.entry_hash !== 'string') {
+        issues.push({
+          code: 'invalid_entry_shape',
+          message: 'invalid audit history entry',
+        });
+        continue;
+      }
+
+      const recomputedEntryHash = await sha256Hex(canonicalize(this.buildAuditHashInput(entry)));
+      if (recomputedEntryHash !== entry.entry_hash) {
+        issues.push({
+          code: 'entry_hash_mismatch',
+          message: 'entry hash mismatch',
+          entryHash: entry.entry_hash,
+          eventId: entry.eventId,
+        });
+      }
+
+      if (newerEntry && newerEntry.prev_hash !== entry.entry_hash) {
+        issues.push({
+          code: 'global_chain_break',
+          message: 'global prev_hash does not point to the next older entry',
+          entryHash: newerEntry.entry_hash,
+          eventId: newerEntry.eventId,
+        });
+      }
+
+      const expectedOlderHash = expectedStreamOlderHashByEvent.get(entry.eventId);
+      if (expectedOlderHash && expectedOlderHash !== entry.entry_hash) {
+        issues.push({
+          code: 'stream_chain_break',
+          message: 'stream_prev_hash does not point to next older entry in this event stream',
+          entryHash: entry.entry_hash,
+          eventId: entry.eventId,
+        });
+      }
+      expectedStreamOlderHashByEvent.set(entry.eventId, entry.stream_prev_hash ?? 'GENESIS');
+
+      if (shouldVerifyImmutable) {
+        if (!entry.immutable) {
+          issues.push({
+            code: 'immutable_receipt_missing',
+            message: 'immutable receipt is missing',
+            entryHash: entry.entry_hash,
+            eventId: entry.eventId,
+          });
+        } else {
+          const payload = this.buildImmutablePayload(entry);
+          const payloadHash = await sha256Hex(payload);
+          if (entry.immutable.payload_hash !== payloadHash) {
+            issues.push({
+              code: 'immutable_payload_hash_mismatch',
+              message: 'immutable payload hash mismatch',
+              entryHash: entry.entry_hash,
+              eventId: entry.eventId,
+            });
+          }
+
+          const hasPrimarySink = entry.immutable.sinks.some(
+            (sink) => sink.sink === 'r2_entry' || sink.sink === 'immutable_ingest'
+          );
+          if (!hasPrimarySink) {
+            issues.push({
+              code: 'immutable_primary_sink_missing',
+              message: 'immutable receipt has no accepted primary sink',
+              entryHash: entry.entry_hash,
+              eventId: entry.eventId,
+            });
+          }
+
+          const r2Refs = entry.immutable.sinks.filter((sink) => sink.sink === 'r2_entry');
+          if (r2Refs.length > 0) {
+            if (!this.env.AUDIT_LOGS) {
+              warningSet.add('AUDIT_LOGS binding is not configured, skipped R2 object checks');
+            } else {
+              for (const sink of r2Refs) {
+                const objectBody = await this.env.AUDIT_LOGS.get(sink.ref);
+                if (!objectBody) {
+                  issues.push({
+                    code: 'immutable_r2_object_missing',
+                    message: 'immutable R2 object is missing',
+                    entryHash: entry.entry_hash,
+                    eventId: entry.eventId,
+                    ref: sink.ref,
+                  });
+                  continue;
+                }
+                const objectText = await objectBody.text();
+                if (objectText !== payload) {
+                  issues.push({
+                    code: 'immutable_r2_object_mismatch',
+                    message: 'immutable R2 object content mismatch',
+                    entryHash: entry.entry_hash,
+                    eventId: entry.eventId,
+                    ref: sink.ref,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+
+      newerEntry = entry;
+    }
+
+    return {
+      ok: issues.length === 0,
+      mode,
+      checked: entries.length,
+      limit,
+      globalHead: entries[0]?.entry_hash ?? null,
+      oldestInWindow: entries.at(-1)?.entry_hash ?? null,
+      verifyImmutable: shouldVerifyImmutable,
+      issues,
+      warnings: Array.from(warningSet.values()),
+      inspectedAt: new Date().toISOString(),
+    };
   }
 
   private isApiPath(path: string): boolean {
@@ -726,6 +984,9 @@ export class SchoolStore implements DurableObject {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('[audit] failed to append API audit trail', { event, path, message });
+      if (this.isAuditFailClosed(request.method)) {
+        throw new Error(`audit append failed: ${message}`);
+      }
     }
   }
 
@@ -788,6 +1049,25 @@ export class SchoolStore implements DurableObject {
       }
       const logs = await this.getAuditLogs();
       return Response.json({ logs });
+    }
+
+    // GET /api/master/audit-integrity (Master Password required)
+    if (path === '/api/master/audit-integrity' && request.method === 'GET') {
+      const authError = this.requireMasterAuthorization(request);
+      if (authError) {
+        return authError;
+      }
+      const url = new URL(request.url);
+      const limit = parseBoundedInt(
+        url.searchParams.get('limit'),
+        AUDIT_INTEGRITY_DEFAULT_LIMIT,
+        1,
+        AUDIT_INTEGRITY_MAX_LIMIT
+      );
+      const verifyImmutable = parseBooleanQuery(url.searchParams.get('verifyImmutable'), true);
+      const report = await this.verifyAuditIntegrity(limit, verifyImmutable);
+      const status = report.ok ? 200 : 409;
+      return Response.json(report, { status });
     }
 
     // POST /api/admin/invite (Master Password required)
@@ -1044,6 +1324,10 @@ export class SchoolStore implements DurableObject {
       });
     }
 
+    if (path === '/v1/school/audit-status' && request.method === 'GET') {
+      return Response.json(this.getAuditStatus());
+    }
+
     if (path === '/v1/school/pop-proof' && request.method === 'POST') {
       let body: PopProofBody;
       try {
@@ -1259,7 +1543,15 @@ export class SchoolStore implements DurableObject {
       response = Response.json({ error: 'internal server error' }, { status: 500 });
     }
 
-    await this.appendApiAuditTrail(request, url, path, response, requestBody, startedAt, errorMessage);
+    try {
+      await this.appendApiAuditTrail(request, url, path, response, requestBody, startedAt, errorMessage);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (this.isAuditFailClosed(request.method)) {
+        return Response.json({ error: 'audit log persistence failed', detail: message }, { status: 503 });
+      }
+      console.error('[audit] non-blocking append failure', { path, method: request.method, message });
+    }
     return response;
   }
 }

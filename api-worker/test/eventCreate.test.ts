@@ -60,6 +60,7 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
       ADMIN_PASSWORD: 'master-secret',
       POP_SIGNER_SECRET_KEY_B64: Buffer.from(popSigner.secretKey).toString('base64'),
       POP_SIGNER_PUBKEY: bs58.encode(popSigner.publicKey),
+      AUDIT_IMMUTABLE_MODE: 'off',
     };
     // @ts-expect-error mock for DurableObjectState
     store = new SchoolStore(state, env);

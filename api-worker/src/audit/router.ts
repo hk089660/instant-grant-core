@@ -8,10 +8,9 @@ interface SchoolStoreStub {
 }
 
 type Env = {
-  AUDIT_LOGS: R2Bucket;
-  AUDIT_INDEX: KVNamespace;
-
   SCHOOL_STORE: any;
+  ADMIN_PASSWORD?: string;
+  AUDIT_LOG_WRITE_TOKEN?: string;
 };
 
 const auditRouter = new Hono<{ Bindings: Env }>();
@@ -20,8 +19,29 @@ function badRequest(message: string) {
   return { ok: false as const, error: message };
 }
 
+function extractBearerToken(header: string | null): string {
+  if (!header) return '';
+  const trimmed = header.trim();
+  if (!trimmed.toLowerCase().startsWith('bearer ')) return '';
+  return trimmed.slice(7).trim();
+}
+
 // index.ts が '/' に mount してる想定
 auditRouter.post('/v1/audit/log', async (c) => {
+  const token = extractBearerToken(c.req.header('authorization') ?? null);
+  const writeToken = c.env.AUDIT_LOG_WRITE_TOKEN?.trim() ?? '';
+  const adminPassword = c.env.ADMIN_PASSWORD?.trim() ?? '';
+  const expectedToken =
+    writeToken ||
+    (adminPassword && adminPassword !== 'change-this-in-dashboard' ? adminPassword : '');
+
+  if (!expectedToken) {
+    return c.json(badRequest('audit log endpoint is not configured'), 503);
+  }
+  if (!token || token !== expectedToken) {
+    return c.json(badRequest('unauthorized'), 401);
+  }
+
   let body: AuditLogRequest;
   try {
     body = await c.req.json<AuditLogRequest>();
@@ -48,22 +68,11 @@ auditRouter.post('/v1/audit/log', async (c) => {
   const stub = tempStub as SchoolStoreStub;
 
   const fullEntry = await stub.appendAuditLog(body.event, body.actor, body.data, eventId);
-  const entry_hash = fullEntry.entry_hash;
-  const ts = fullEntry.ts;
-
-  const date = ts.slice(0, 10);
-  const objectKey = `audit/${eventId}/${date}.jsonl`;
-
-  const existingObj = await c.env.AUDIT_LOGS.get(objectKey);
-  const existingText = existingObj ? await existingObj.text() : '';
-
-  await c.env.AUDIT_LOGS.put(objectKey, existingText + JSON.stringify(fullEntry) + '\n');
-
-  // KV update is now handled by DO (as storage.put), so we don't need AUDIT_INDEX.put here.
-  // We keep AUDIT_INDEX in Env just in case it's still needed elsewhere or for legacy reads, 
-  // but for this flow it's replaced by DO.
-
-  return c.json({ ok: true, entry_hash, objectKey });
+  return c.json({
+    ok: true,
+    entry_hash: fullEntry.entry_hash,
+    immutable: fullEntry.immutable ?? null,
+  });
 });
 
 export default auditRouter;

@@ -28,6 +28,7 @@ This project proposes and implements a new consensus concept called **"Proof of 
 - Process-proof layer is active on Cloudflare Workers:
   - API audit logs are chained with a global hash chain (`prev_hash`).
   - Per-event continuity is also preserved (`stream_prev_hash`).
+  - Audit entries are persisted to immutable sinks outside Durable Object storage (R2 content-addressed objects and optional immutable-ingest webhook), with fail-closed mode (`AUDIT_IMMUTABLE_MODE=required`) for mutating APIs.
 - Operator security hardening is active:
   - Admin-protected school APIs require Bearer authentication.
   - Master-only APIs reject the default placeholder password and require a real `ADMIN_PASSWORD`.
@@ -71,7 +72,7 @@ graph TD
 * **Tech Stack:** TypeScript, Cloudflare Workers (Edge Computing)
 * **Role:** Auditor of time and process.
 * **Innovation:** Generates an **Append-only Hash Chain** in real-time for every request, including global previous hash (`prev_hash`) and per-event stream linkage (`stream_prev_hash`).
-    * This makes it mathematically impossible for even administrators to tamper with or conceal a single bit of past history.
+    * Audit entries are also mirrored to immutable sinks outside DO (`AUDIT_LOGS` R2 and optional immutable ingest endpoint), so in-DO rewrites can be detected and rejected.
 * [📂 View API Code](./api-worker)
 
 ### 3. Layer 3: The Interface (Protection of Intent)
@@ -223,10 +224,20 @@ Use the following order for a clean deployment path.
    - `POP_SIGNER_SECRET_KEY_B64` (required for on-chain PoP proof signing)
    - `POP_SIGNER_PUBKEY` (required; corresponding Ed25519 public key in base58)
    - `ENFORCE_ONCHAIN_POP` (recommended: `true`; default is enforced when omitted)
-3. Deploy to Cloudflare Workers.
-4. Copy your Worker's URL (for example `https://we-ne-school-api.<subdomain>.workers.dev`).
-5. Verify PoP runtime status:
+   - `AUDIT_IMMUTABLE_MODE` (recommended: `required`; `best_effort` / `off` also supported)
+   - `AUDIT_IMMUTABLE_INGEST_URL` (optional second immutable sink webhook)
+   - `AUDIT_IMMUTABLE_INGEST_TOKEN` (optional bearer token for immutable ingest webhook)
+   - `AUDIT_IMMUTABLE_FETCH_TIMEOUT_MS` (optional, default `5000`)
+3. Configure Worker bindings:
+   - `AUDIT_LOGS` (R2 bucket, required when running immutable mode in production)
+   - `AUDIT_INDEX` (KV, optional metadata index for fast lookup)
+4. Deploy to Cloudflare Workers.
+5. Copy your Worker's URL (for example `https://we-ne-school-api.<subdomain>.workers.dev`).
+6. Verify PoP runtime status:
    - `GET /v1/school/pop-status` should return `enforceOnchainPop: true` and `signerConfigured: true`.
+7. Verify audit runtime status:
+   - `GET /v1/school/audit-status` should return `operationalReady: true`.
+   - `GET /api/master/audit-integrity?limit=50` (with Master token) should return `ok: true`.
 
 ### Step 3: Pages Proxy Layer (`functions/` + `_redirects`)
 1. Confirm proxy files are deployed with the site:
