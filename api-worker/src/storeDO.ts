@@ -94,6 +94,24 @@ type AuditIntegrityReport = {
   inspectedAt: string;
 };
 
+type RuntimeStatusReport = {
+  ready: boolean;
+  checkedAt: string;
+  checks: {
+    adminPasswordConfigured: boolean;
+    popEnforced: boolean;
+    popSignerConfigured: boolean;
+    popSignerPubkey: string | null;
+    popSignerError: string | null;
+    auditMode: 'off' | 'best_effort' | 'required';
+    auditOperationalReady: boolean;
+    auditPrimarySinkConfigured: boolean;
+    corsOrigin: string | null;
+  };
+  blockingIssues: string[];
+  warnings: string[];
+};
+
 function buildTokenSymbol(title: string): string {
   const cleaned = title.replace(/\s+/g, '').slice(0, 10).toUpperCase();
   return cleaned || 'TICKET';
@@ -653,6 +671,66 @@ export class SchoolStore implements DurableObject {
         kvConfigured,
         ingestConfigured,
       },
+    };
+  }
+
+  private getRuntimeStatus(): RuntimeStatusReport {
+    const auditStatus = this.getAuditStatus();
+    const blockingIssues: string[] = [];
+    const warnings: string[] = [];
+
+    const adminPasswordConfigured = this.getConfiguredMasterPassword() !== null;
+    if (!adminPasswordConfigured) {
+      blockingIssues.push('ADMIN_PASSWORD is not configured or still uses the default placeholder');
+    }
+
+    const popEnforced = this.isOnchainPopEnforced();
+    let popSignerConfigured = false;
+    let popSignerPubkey: string | null = null;
+    let popSignerError: string | null = null;
+    try {
+      const signer = this.getPopSigner();
+      popSignerConfigured = signer !== null;
+      popSignerPubkey = signer?.signerPubkey ?? null;
+    } catch (err) {
+      popSignerError = err instanceof Error ? err.message : String(err);
+    }
+
+    if (popEnforced && !popSignerConfigured) {
+      if (popSignerError) {
+        blockingIssues.push(`PoP signer configuration error: ${popSignerError}`);
+      } else {
+        blockingIssues.push('PoP signer is not configured');
+      }
+    }
+
+    if (auditStatus.failClosedForMutatingRequests && !auditStatus.operationalReady) {
+      blockingIssues.push('Audit immutable sink is not operational while AUDIT_IMMUTABLE_MODE=required');
+    }
+
+    const corsOrigin = this.env.CORS_ORIGIN?.trim() ?? '';
+    if (!corsOrigin) {
+      warnings.push('CORS_ORIGIN is not set (default origin policy will be used)');
+    } else if (corsOrigin === 'https://instant-grant-core.dev') {
+      warnings.push('CORS_ORIGIN is still default; replace with your production Pages/custom domain');
+    }
+
+    return {
+      ready: blockingIssues.length === 0,
+      checkedAt: new Date().toISOString(),
+      checks: {
+        adminPasswordConfigured,
+        popEnforced,
+        popSignerConfigured,
+        popSignerPubkey,
+        popSignerError,
+        auditMode: auditStatus.mode,
+        auditOperationalReady: auditStatus.operationalReady,
+        auditPrimarySinkConfigured: auditStatus.primaryImmutableSinkConfigured,
+        corsOrigin: corsOrigin || null,
+      },
+      blockingIssues,
+      warnings,
     };
   }
 
@@ -1507,6 +1585,10 @@ export class SchoolStore implements DurableObject {
       return Response.json(this.getAuditStatus());
     }
 
+    if (path === '/v1/school/runtime-status' && request.method === 'GET') {
+      return Response.json(this.getRuntimeStatus());
+    }
+
     if (path === '/v1/school/pop-proof' && request.method === 'POST') {
       let body: PopProofBody;
       try {
@@ -1709,6 +1791,20 @@ export class SchoolStore implements DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    // Fail closed before side-effects when immutable audit is required but not operational.
+    // This avoids mutating state and then failing later during audit append.
+    if (this.isApiPath(path) && this.isAuditFailClosed(request.method)) {
+      const auditStatus = this.getAuditStatus();
+      if (!auditStatus.operationalReady) {
+        return Response.json({
+          error: 'audit immutable sink is not operational',
+          detail: 'Set AUDIT_LOGS or AUDIT_IMMUTABLE_INGEST_URL before mutating APIs in required mode',
+          audit: auditStatus,
+        }, { status: 503 });
+      }
+    }
+
     const startedAt = Date.now();
     const requestBody = await this.requestBodyForAudit(request);
 

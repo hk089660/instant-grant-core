@@ -10,7 +10,8 @@
     "test": "npm run test:contract",
     "test:contract": "cd grant_program && anchor test",
     "test:mobile": "cd wene-mobile && npx tsc --noEmit",
-    "setup:mobile": "cd wene-mobile && npm run setup"
+    "setup:mobile": "cd wene-mobile && npm run setup",
+    "verify:production": "node scripts/verify-production-readiness.mjs"
   },
   "repository": {
     "type": "git",

@@ -240,6 +240,12 @@ Reviewer shortcut: \`./wene-mobile/src/screens/user/UserScanScreen.tsx\` と \`.
 7. 監査ランタイム状態を確認します:
    - `GET /v1/school/audit-status` が `operationalReady: true` を返すこと。
    - `GET /api/master/audit-integrity?limit=50`（Masterトークン付き）が `ok: true` を返すこと。
+8. 実運用レディネスを確認します:
+   - `GET /v1/school/runtime-status` が `ready: true` を返すこと。
+   - `AUDIT_IMMUTABLE_MODE=required` 時、immutable sink が未準備なら更新系 API は実処理前に `503` で遮断されます。
+9. エンドツーエンドの運用チェックを実行します:
+   - `npm run verify:production`
+   - 任意（master整合性チェック込み）: `MASTER_TOKEN=<admin_password> npm run verify:production`
 
 ### Step 3: Pages プロキシ層（`functions/` + `_redirects`）
 1. サイトへプロキシ関数がデプロイされることを確認します:

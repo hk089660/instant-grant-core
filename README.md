@@ -238,6 +238,12 @@ Use the following order for a clean deployment path.
 7. Verify audit runtime status:
    - `GET /v1/school/audit-status` should return `operationalReady: true`.
    - `GET /api/master/audit-integrity?limit=50` (with Master token) should return `ok: true`.
+8. Verify production readiness:
+   - `GET /v1/school/runtime-status` should return `ready: true`.
+   - In `AUDIT_IMMUTABLE_MODE=required`, mutating APIs are now preflight-blocked with `503` when immutable sinks are not operational.
+9. Run end-to-end readiness check:
+   - `npm run verify:production`
+   - Optional (master integrity check): `MASTER_TOKEN=<admin_password> npm run verify:production`
 
 ### Step 3: Pages Proxy Layer (`functions/` + `_redirects`)
 1. Confirm proxy files are deployed with the site:

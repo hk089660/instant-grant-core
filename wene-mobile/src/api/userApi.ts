@@ -1,6 +1,6 @@
 /**
  * 利用者登録・参加申込 API（userId + PIN フロー）
- * 同一 baseUrl（EXPO_PUBLIC_API_BASE_URL）を使用
+ * 同一 baseUrl（EXPO_PUBLIC_SCHOOL_API_BASE_URL 優先、互換で EXPO_PUBLIC_API_BASE_URL）を使用
  */
 
 import { httpPost } from './http/httpClient';
@@ -11,8 +11,13 @@ export function getBaseUrl(): string {
     return window.location.origin;
   }
   // Native: 環境変数で指定された Workers URL へ直接アクセス
-  const base = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
-  return base;
+  const base = (
+    process.env.EXPO_PUBLIC_SCHOOL_API_BASE_URL ??
+    process.env.EXPO_PUBLIC_API_BASE_URL ??
+    ''
+  ).trim().replace(/\/$/, '');
+  if (base) return base;
+  throw new Error('API base URL is required (set EXPO_PUBLIC_SCHOOL_API_BASE_URL or EXPO_PUBLIC_API_BASE_URL)');
 }
 
 export interface RegisterResponse {

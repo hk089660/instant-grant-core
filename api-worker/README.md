@@ -26,6 +26,9 @@ Hono による最小構成の API。`wene-mobile`（Cloudflare Pages）から固
   - レスポンス: `{ enforceOnchainPop: boolean; signerConfigured: boolean; signerPubkey?: string | null; error?: string | null }`
 - `GET /v1/school/audit-status`
   - レスポンス: `{ mode: 'off'|'best_effort'|'required'; failClosedForMutatingRequests: boolean; operationalReady: boolean; primaryImmutableSinkConfigured: boolean; sinks: { r2Configured: boolean; kvConfigured: boolean; ingestConfigured: boolean } }`
+- `GET /v1/school/runtime-status`
+  - レスポンス: `{ ready: boolean; checks: {...}; blockingIssues: string[]; warnings: string[] }`
+  - 実運用の前提（`ADMIN_PASSWORD`、PoP signer、監査 immutable sink）を一括で確認
 - `GET /api/master/audit-integrity`（Master Password 必須）
   - クエリ: `limit`（既定 50, 最大 200）, `verifyImmutable`（既定 true）
   - レスポンス: `ok`, `issues[]`, `warnings[]` を含む整合性レポート（`ok=false` の場合 HTTP 409）
@@ -100,6 +103,7 @@ L1 で PoP 検証を行うため、以下の Worker 変数を設定する:
 
 - 監査エントリは DO 内ハッシュチェーンに加えて、DO 外の不変シンクに固定化される。
 - `AUDIT_IMMUTABLE_MODE=required` の場合、更新系 API（POST/PUT/PATCH/DELETE）は監査固定化が失敗すると 503 で fail-close する。
+- `AUDIT_IMMUTABLE_MODE=required` かつ immutable sink が未設定/未準備のときは、更新系 API を**実処理前に 503 で遮断**する（状態変更の先行を防止）。
 - production では `AUDIT_LOGS`（R2 バインディング）を必ず設定すること。
 - 監査整合性は `GET /api/master/audit-integrity` で定期確認すること。
 

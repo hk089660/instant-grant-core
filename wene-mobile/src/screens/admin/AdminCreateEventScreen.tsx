@@ -10,7 +10,7 @@ import { useRouter } from 'expo-router';
 import * as QRCode from 'qrcode';
 import { AppText, Button, Card } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
-import { createAdminEvent } from '../../api/adminApi';
+import { createAdminEvent, fetchRuntimeStatus, type RuntimeStatusResponse } from '../../api/adminApi';
 import type { SchoolEvent } from '../../types/school';
 import { useRecipientStore } from '../../store/recipientStore';
 import { usePhantomStore } from '../../store/phantomStore';
@@ -45,6 +45,9 @@ export const AdminCreateEventScreen: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     const [setupTxSignatures, setSetupTxSignatures] = useState<string[]>([]);
     const [connectMethod, setConnectMethod] = useState<'extension' | 'mobile' | null>(null);
+    const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatusResponse | null>(null);
+    const [runtimeStatusLoading, setRuntimeStatusLoading] = useState(false);
+    const [runtimeStatusError, setRuntimeStatusError] = useState<string | null>(null);
 
     // 作成結果
     const [createdEvent, setCreatedEvent] = useState<SchoolEvent | null>(null);
@@ -81,6 +84,7 @@ export const AdminCreateEventScreen: React.FC = () => {
     const maxClaimsValid =
         unlimitedClaims ||
         (Number.isInteger(parsedMaxClaimsPerInterval) && parsedMaxClaimsPerInterval > 0);
+    const runtimeReady = runtimeStatus?.ready === true;
     const canSubmit =
         title.trim().length > 0 &&
         datetime.trim().length > 0 &&
@@ -90,12 +94,38 @@ export const AdminCreateEventScreen: React.FC = () => {
         Number.isInteger(claimIntervalDays) &&
         claimIntervalDays > 0 &&
         maxClaimsValid &&
-        walletReady;
+        walletReady &&
+        runtimeReady;
+
+    const refreshRuntimeStatus = useCallback(async () => {
+        setRuntimeStatusLoading(true);
+        setRuntimeStatusError(null);
+        try {
+            const status = await fetchRuntimeStatus();
+            setRuntimeStatus(status);
+        } catch (e: unknown) {
+            const msg = e && typeof e === 'object' && 'message' in e
+                ? String((e as { message: string }).message)
+                : '運用状態の取得に失敗しました';
+            setRuntimeStatus(null);
+            setRuntimeStatusError(msg);
+        } finally {
+            setRuntimeStatusLoading(false);
+        }
+    }, []);
 
     const handlePreview = useCallback(() => {
+        if (!runtimeReady) {
+            setError('実運用状態チェックが未完了です。運用状態を確認してください。');
+            return;
+        }
         if (!canSubmit) return;
         setStep('preview');
-    }, [canSubmit]);
+    }, [canSubmit, runtimeReady]);
+
+    useEffect(() => {
+        refreshRuntimeStatus();
+    }, [refreshRuntimeStatus]);
 
     useEffect(() => {
         if (extensionReady) {
@@ -173,6 +203,9 @@ export const AdminCreateEventScreen: React.FC = () => {
         try {
             if (!walletPubkey) {
                 throw new Error('Phantomウォレットを接続してください。');
+            }
+            if (!runtimeReady) {
+                throw new Error('実運用状態チェックが未完了です。運用状態を再確認してください。');
             }
             if (!Number.isInteger(ticketTokenAmount) || ticketTokenAmount <= 0) {
                 throw new Error('発行量は1以上の整数で指定してください。');
@@ -262,6 +295,7 @@ export const AdminCreateEventScreen: React.FC = () => {
         claimIntervalDays,
         maxClaimsPerInterval,
         maxClaimsValid,
+        runtimeReady,
     ]);
 
     // QR生成
@@ -339,6 +373,50 @@ export const AdminCreateEventScreen: React.FC = () => {
                         <AppText variant="h3" style={styles.cardTitle}>
                             新規イベント情報
                         </AppText>
+                        <View style={styles.runtimeHeaderRow}>
+                            <AppText variant="caption" style={styles.label}>運用状態</AppText>
+                            <Button
+                                title={runtimeStatusLoading ? '確認中…' : '再確認'}
+                                variant="secondary"
+                                dark
+                                onPress={refreshRuntimeStatus}
+                                disabled={runtimeStatusLoading}
+                                style={styles.runtimeRefreshButton}
+                            />
+                        </View>
+                        <Card style={styles.runtimeCard}>
+                            {runtimeStatusLoading ? (
+                                <AppText variant="small" style={styles.cardMuted}>運用状態を確認中...</AppText>
+                            ) : runtimeStatusError ? (
+                                <AppText variant="small" style={styles.errorText}>{runtimeStatusError}</AppText>
+                            ) : runtimeStatus ? (
+                                <>
+                                    <AppText variant="small" style={runtimeStatus.ready ? styles.runtimeOkText : styles.errorText}>
+                                        {runtimeStatus.ready ? 'ready: true（実運用可能）' : 'ready: false（設定修正が必要）'}
+                                    </AppText>
+                                    {runtimeStatus.blockingIssues.length > 0 && (
+                                        <View style={styles.runtimeIssues}>
+                                            {runtimeStatus.blockingIssues.map((issue, idx) => (
+                                                <AppText key={`blocking-${idx}`} variant="small" style={styles.errorText}>
+                                                    - {issue}
+                                                </AppText>
+                                            ))}
+                                        </View>
+                                    )}
+                                    {runtimeStatus.warnings.length > 0 && (
+                                        <View style={styles.runtimeIssues}>
+                                            {runtimeStatus.warnings.map((warning, idx) => (
+                                                <AppText key={`warning-${idx}`} variant="small" style={styles.noticeText}>
+                                                    - {warning}
+                                                </AppText>
+                                            ))}
+                                        </View>
+                                    )}
+                                </>
+                            ) : (
+                                <AppText variant="small" style={styles.cardMuted}>未取得</AppText>
+                            )}
+                        </Card>
                         <AppText variant="caption" style={styles.label}>管理者ウォレット</AppText>
                         <View style={styles.walletRow}>
                             <AppText variant="small" style={styles.walletStatus}>
@@ -431,6 +509,11 @@ export const AdminCreateEventScreen: React.FC = () => {
                             disabled={!canSubmit}
                             style={styles.actionButton}
                         />
+                        {!runtimeReady && (
+                            <AppText variant="small" style={styles.errorText}>
+                                運用状態が ready になるまで発行できません。
+                            </AppText>
+                        )}
                     </Card>
                 )}
 
@@ -633,6 +716,29 @@ const styles = StyleSheet.create({
         marginBottom: adminTheme.spacing.xs,
         marginTop: adminTheme.spacing.sm,
     },
+    runtimeHeaderRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginTop: adminTheme.spacing.sm,
+    },
+    runtimeRefreshButton: {
+        minWidth: 96,
+    },
+    runtimeCard: {
+        marginTop: adminTheme.spacing.xs,
+        marginBottom: adminTheme.spacing.sm,
+        padding: adminTheme.spacing.md,
+        backgroundColor: adminTheme.colors.background,
+        borderWidth: 1,
+        borderColor: adminTheme.colors.border,
+    },
+    runtimeIssues: {
+        marginTop: adminTheme.spacing.xs,
+    },
+    runtimeOkText: {
+        color: '#00c853',
+    },
     walletRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -678,6 +784,10 @@ const styles = StyleSheet.create({
     },
     errorText: {
         color: '#ff6b6b',
+        marginTop: adminTheme.spacing.sm,
+    },
+    noticeText: {
+        color: adminTheme.colors.textSecondary,
         marginTop: adminTheme.spacing.sm,
     },
     previewRow: {

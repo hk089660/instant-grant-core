@@ -28,9 +28,13 @@ function resolveBaseUrl(): string {
     return window.location.origin;
   }
   // Native: 環境変数で指定された Workers URL へ直接アクセス
-  const envBase = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
+  const envBase = (
+    process.env.EXPO_PUBLIC_SCHOOL_API_BASE_URL ??
+    process.env.EXPO_PUBLIC_API_BASE_URL ??
+    ''
+  ).trim().replace(/\/$/, '');
   if (envBase) return envBase;
-  throw new Error('EXPO_PUBLIC_API_BASE_URL is required for native builds');
+  throw new Error('API base URL is required (set EXPO_PUBLIC_SCHOOL_API_BASE_URL or EXPO_PUBLIC_API_BASE_URL)');
 }
 
 export function createSchoolDeps(): SchoolDeps {

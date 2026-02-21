@@ -11,9 +11,13 @@ function getBaseUrl(): string {
   if (typeof window !== 'undefined' && window.location?.origin) {
     return window.location.origin;
   }
-  const envBase = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/$/, '');
+  const envBase = (
+    process.env.EXPO_PUBLIC_SCHOOL_API_BASE_URL ??
+    process.env.EXPO_PUBLIC_API_BASE_URL ??
+    ''
+  ).trim().replace(/\/$/, '');
   if (envBase) return envBase;
-  throw new Error('EXPO_PUBLIC_API_BASE_URL is required for native builds');
+  throw new Error('API base URL is required (set EXPO_PUBLIC_SCHOOL_API_BASE_URL or EXPO_PUBLIC_API_BASE_URL)');
 }
 
 async function getAdminAuthHeaders(): Promise<Record<string, string>> {
@@ -198,4 +202,28 @@ export async function fetchMasterAuditLogs(masterPassword: string): Promise<Mast
   if (!res.ok) return [];
   const json = await res.json();
   return json.logs || [];
+}
+
+export interface RuntimeStatusResponse {
+  ready: boolean;
+  checkedAt: string;
+  checks: {
+    adminPasswordConfigured: boolean;
+    popEnforced: boolean;
+    popSignerConfigured: boolean;
+    popSignerPubkey: string | null;
+    popSignerError: string | null;
+    auditMode: 'off' | 'best_effort' | 'required';
+    auditOperationalReady: boolean;
+    auditPrimarySinkConfigured: boolean;
+    corsOrigin: string | null;
+  };
+  blockingIssues: string[];
+  warnings: string[];
+}
+
+/** Runtime readiness status (public operational check) */
+export async function fetchRuntimeStatus(): Promise<RuntimeStatusResponse> {
+  const base = getBaseUrl();
+  return httpGet<RuntimeStatusResponse>(`${base}/v1/school/runtime-status`);
 }
