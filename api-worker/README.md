@@ -16,10 +16,14 @@ Hono による最小構成の API。`wene-mobile`（Cloudflare Pages）から固
   - `maxClaimsPerInterval` は `null`（無制限）または 1 以上の整数（未指定時 1）
   - レスポンス: 作成された `SchoolEvent`
 - `POST /v1/school/claims`  
-  - リクエスト: `{ eventId: string; walletAddress?: string; joinToken?: string }`  
+  - リクエスト: `{ eventId: string; walletAddress?: string; joinToken?: string; txSignature?: string; receiptPubkey?: string }`  
   - レスポンス: `SchoolClaimResult`  
   - **walletAddress 未指定かつ joinToken 未指定** → `wallet_required`（Phantom誘導用）  
+  - `ENFORCE_ONCHAIN_POP=true` かつ on-chain 設定済みイベント（`solanaMint`/`solanaAuthority`/`solanaGrantId`）では、`walletAddress + txSignature + receiptPubkey` を必須化
+  - `POST /api/events/:eventId/claim`（userId+PIN）でも同様に on-chain 証跡を必須化
   - **evt-003** → 常に `retryable`（デモ用）
+- `GET /v1/school/pop-status`
+  - レスポンス: `{ enforceOnchainPop: boolean; signerConfigured: boolean; signerPubkey?: string | null; error?: string | null }`
 
 契約型は `src/types.ts`（wene-mobile の `SchoolEvent` / `SchoolClaimResult` と一致）。
 
@@ -49,8 +53,10 @@ L1 で PoP 検証を行うため、以下の Worker 変数を設定する:
 
 - `POP_SIGNER_SECRET_KEY_B64`: Ed25519 の 32byte seed または 64byte secret key を base64 で設定
 - `POP_SIGNER_PUBKEY`: 対応する公開鍵（base58）
+- `ENFORCE_ONCHAIN_POP`: on-chain 設定イベントで PoP 証跡を必須化（推奨: `true`、未設定時も強制）
 
 `POST /v1/school/pop-proof` はこの鍵で署名した PoP 証明を返し、クライアントは `claim_grant` 送信前に Ed25519 検証命令を付与する。
+デプロイ後は `GET /v1/school/pop-status` で `signerConfigured: true` を確認してから本番運用に入ること。
 
 ## CORS
 

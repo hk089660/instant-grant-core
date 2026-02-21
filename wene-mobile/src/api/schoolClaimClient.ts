@@ -11,6 +11,8 @@ import type { SchoolEvent } from '../types/school';
 export interface SchoolClaimSubmitOptions {
   walletAddress?: string;
   joinToken?: string;
+  txSignature?: string;
+  receiptPubkey?: string;
 }
 
 export interface SchoolClaimClient {

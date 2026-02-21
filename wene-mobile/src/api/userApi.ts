@@ -24,6 +24,12 @@ export interface UserClaimResponse {
   confirmationCode: string;
 }
 
+export interface UserClaimOnchainProof {
+  walletAddress?: string;
+  txSignature?: string;
+  receiptPubkey?: string;
+}
+
 export interface VerifyUserResponse {
   ok: true;
 }
@@ -43,9 +49,16 @@ export async function verifyUserPin(userId: string, pin: string): Promise<Verify
 export async function claimEventWithUser(
   eventId: string,
   userId: string,
-  pin: string
+  pin: string,
+  proof?: UserClaimOnchainProof
 ): Promise<UserClaimResponse> {
   const base = getBaseUrl();
   const url = `${base}/api/events/${encodeURIComponent(eventId)}/claim`;
-  return httpPost<UserClaimResponse>(url, { userId, pin });
+  return httpPost<UserClaimResponse>(url, {
+    userId,
+    pin,
+    walletAddress: proof?.walletAddress,
+    txSignature: proof?.txSignature,
+    receiptPubkey: proof?.receiptPubkey,
+  });
 }

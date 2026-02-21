@@ -222,8 +222,11 @@ Use the following order for a clean deployment path.
    - `CORS_ORIGIN` (recommended)
    - `POP_SIGNER_SECRET_KEY_B64` (required for on-chain PoP proof signing)
    - `POP_SIGNER_PUBKEY` (required; corresponding Ed25519 public key in base58)
+   - `ENFORCE_ONCHAIN_POP` (recommended: `true`; default is enforced when omitted)
 3. Deploy to Cloudflare Workers.
 4. Copy your Worker's URL (for example `https://we-ne-school-api.<subdomain>.workers.dev`).
+5. Verify PoP runtime status:
+   - `GET /v1/school/pop-status` should return `enforceOnchainPop: true` and `signerConfigured: true`.
 
 ### Step 3: Pages Proxy Layer (`functions/` + `_redirects`)
 1. Confirm proxy files are deployed with the site:
@@ -242,6 +245,7 @@ Use the following order for a clean deployment path.
    - `EXPO_PUBLIC_API_BASE_URL` = Worker URL (compatibility fallback)
    - `EXPO_PUBLIC_BASE_URL` = Pages domain (recommended for print/deeplink UX)
    - `EXPO_PUBLIC_POP_SIGNER_PUBKEY` = same value as Worker `POP_SIGNER_PUBKEY` (required for admin issuance)
+   - `EXPO_PUBLIC_ENFORCE_ONCHAIN_POP` = `true` (recommended for production; on-chain configured events require wallet + PoP evidence)
    - `EXPO_PUBLIC_ADMIN_DEMO_PASSWORD` (only if demo login button is used)
 4. Run `npm install` (patches for web3.js will apply automatically).
 5. Start the app.

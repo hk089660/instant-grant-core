@@ -22,6 +22,8 @@ export function createHttpSchoolClaimClient(options: HttpSchoolClaimClientOption
           eventId,
           walletAddress: opts?.walletAddress,
           joinToken: opts?.joinToken,
+          txSignature: opts?.txSignature,
+          receiptPubkey: opts?.receiptPubkey,
         };
         const result = await httpPost<SchoolClaimResult>(url, body);
         if (result && typeof result === 'object' && 'success' in result) {

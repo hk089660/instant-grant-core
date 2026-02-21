@@ -277,4 +277,88 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     const message = Buffer.from(proof.messageBase64 ?? '', 'base64');
     expect(message[0]).toBe(2);
   });
+
+  it('rejects user claim without on-chain proof on on-chain configured event', async () => {
+    const createRes = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'strict onchain event',
+          datetime: '2026/02/21 12:00',
+          host: 'admin',
+          ticketTokenAmount: 1,
+          solanaMint: 'So11111111111111111111111111111111111111112',
+          solanaAuthority: '11111111111111111111111111111111',
+          solanaGrantId: '1',
+        }),
+      })
+    );
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as { id: string };
+
+    const registerRes = await store.fetch(
+      new Request('https://example.com/api/users/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ displayName: 'User A', pin: '1234' }),
+      })
+    );
+    expect(registerRes.status).toBe(200);
+    const registered = (await registerRes.json()) as { userId?: string };
+    expect(typeof registered.userId).toBe('string');
+
+    const claimRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(created.id)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: registered.userId,
+          pin: '1234',
+        }),
+      })
+    );
+    expect(claimRes.status).toBe(400);
+    const body = (await claimRes.json()) as { error?: string };
+    expect(body.error).toContain('on-chain claim proof required');
+  });
+
+  it('rejects /v1/school/claims without tx proof on on-chain configured event', async () => {
+    const createRes = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'strict school claim event',
+          datetime: '2026/02/21 13:00',
+          host: 'admin',
+          ticketTokenAmount: 1,
+          solanaMint: 'So11111111111111111111111111111111111111112',
+          solanaAuthority: '11111111111111111111111111111111',
+          solanaGrantId: '2',
+        }),
+      })
+    );
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as { id: string };
+
+    const res = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: created.id,
+          walletAddress: '11111111111111111111111111111111',
+        }),
+      })
+    );
+    expect(res.status).toBe(200);
+    const result = (await res.json()) as {
+      success?: boolean;
+      error?: { code?: string; message?: string };
+    };
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('wallet_required');
+    expect(result.error?.message).toContain('オンチェーンPoP証跡');
+  });
 });

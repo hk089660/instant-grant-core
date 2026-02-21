@@ -61,6 +61,8 @@ export interface ClaimBody {
   eventId?: string;
   walletAddress?: string;
   joinToken?: string;
+  txSignature?: string;
+  receiptPubkey?: string;
 }
 
 export interface PopProofBody {
@@ -91,6 +93,9 @@ export interface RegisterBody {
 export interface UserClaimBody {
   userId?: string;
   pin?: string;
+  walletAddress?: string;
+  txSignature?: string;
+  receiptPubkey?: string;
 }
 
 export interface UserClaimResponse {

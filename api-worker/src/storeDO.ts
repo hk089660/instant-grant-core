@@ -43,6 +43,7 @@ export interface Env {
   ADMIN_DEMO_PASSWORD?: string;
   POP_SIGNER_SECRET_KEY_B64?: string;
   POP_SIGNER_PUBKEY?: string;
+  ENFORCE_ONCHAIN_POP?: string;
 }
 
 const AUDIT_MAX_DEPTH = 4;
@@ -52,6 +53,7 @@ const AUDIT_MAX_STRING = 160;
 const DEFAULT_ADMIN_PASSWORD = 'change-this-in-dashboard';
 const AUDIT_LAST_HASH_GLOBAL_KEY = 'audit:lastHash:global';
 const MINT_BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const TX_SIGNATURE_BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{64,128}$/;
 const POP_CHAIN_GLOBAL_PREFIX = 'pop_chain:lastHash:global:';
 const POP_CHAIN_STREAM_PREFIX = 'pop_chain:lastHash:stream:';
 const POP_HASH_LEN = 32;
@@ -211,6 +213,49 @@ export class SchoolStore implements DurableObject {
 
     this.popSignerCache = { secretKey, signerPubkey };
     return this.popSignerCache;
+  }
+
+  private isOnchainPopEnforced(): boolean {
+    const raw = (this.env.ENFORCE_ONCHAIN_POP ?? '').trim().toLowerCase();
+    if (!raw) return true;
+    return !(raw === '0' || raw === 'false' || raw === 'off' || raw === 'no');
+  }
+
+  private isEventOnchainConfigured(event: { solanaMint?: string; solanaAuthority?: string; solanaGrantId?: string } | null | undefined): boolean {
+    if (!event) return false;
+    return Boolean(
+      typeof event.solanaMint === 'string' && event.solanaMint.trim() &&
+      typeof event.solanaAuthority === 'string' && event.solanaAuthority.trim() &&
+      typeof event.solanaGrantId === 'string' && event.solanaGrantId.trim()
+    );
+  }
+
+  private getOnchainProofFields(body: {
+    walletAddress?: unknown;
+    txSignature?: unknown;
+    receiptPubkey?: unknown;
+  }): { walletAddress: string; txSignature: string; receiptPubkey: string } {
+    const walletAddress = typeof body.walletAddress === 'string' ? body.walletAddress.trim() : '';
+    const txSignature = typeof body.txSignature === 'string' ? body.txSignature.trim() : '';
+    const receiptPubkey = typeof body.receiptPubkey === 'string' ? body.receiptPubkey.trim() : '';
+    return { walletAddress, txSignature, receiptPubkey };
+  }
+
+  private validateOnchainProofFields(fields: {
+    walletAddress: string;
+    txSignature: string;
+    receiptPubkey: string;
+  }): string | null {
+    if (!fields.walletAddress || !MINT_BASE58_RE.test(fields.walletAddress)) {
+      return 'walletAddress is required for on-chain claim';
+    }
+    if (!fields.txSignature || !TX_SIGNATURE_BASE58_RE.test(fields.txSignature)) {
+      return 'txSignature is required for on-chain claim';
+    }
+    if (!fields.receiptPubkey || !MINT_BASE58_RE.test(fields.receiptPubkey)) {
+      return 'receiptPubkey is required for on-chain claim';
+    }
+    return null;
   }
 
   private async buildPopEntryHash(params: {
@@ -980,6 +1025,25 @@ export class SchoolStore implements DurableObject {
       return Response.json({ eventId, eventTitle: event.title, items });
     }
 
+    if (path === '/v1/school/pop-status' && request.method === 'GET') {
+      let signerConfigured = false;
+      let signerPubkey: string | null = null;
+      let error: string | null = null;
+      try {
+        const signer = this.getPopSigner();
+        signerConfigured = signer !== null;
+        signerPubkey = signer?.signerPubkey ?? null;
+      } catch (err) {
+        error = err instanceof Error ? err.message : String(err);
+      }
+      return Response.json({
+        enforceOnchainPop: this.isOnchainPopEnforced(),
+        signerConfigured,
+        signerPubkey,
+        error,
+      });
+    }
+
     if (path === '/v1/school/pop-proof' && request.method === 'POST') {
       let body: PopProofBody;
       try {
@@ -1010,6 +1074,40 @@ export class SchoolStore implements DurableObject {
           success: false,
           error: { code: 'invalid', message: 'イベントIDが無効です' },
         } as SchoolClaimResult);
+      }
+      const eventId = typeof body?.eventId === 'string' ? body.eventId.trim() : '';
+      const event = eventId ? await this.store.getEvent(eventId) : null;
+      if (!event) {
+        return Response.json({
+          success: false,
+          error: { code: 'not_found', message: 'イベントが見つかりません' },
+        } as SchoolClaimResult);
+      }
+      if (this.isOnchainPopEnforced() && this.isEventOnchainConfigured(event)) {
+        let signerConfigured = false;
+        try {
+          signerConfigured = this.getPopSigner() !== null;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return Response.json({
+            success: false,
+            error: { code: 'retryable', message: `PoP設定エラー: ${message}` },
+          } as SchoolClaimResult);
+        }
+        if (!signerConfigured) {
+          return Response.json({
+            success: false,
+            error: { code: 'retryable', message: 'PoP署名設定が未完了のためオンチェーン参加を受け付けできません' },
+          } as SchoolClaimResult);
+        }
+        const fields = this.getOnchainProofFields(body);
+        const invalidReason = this.validateOnchainProofFields(fields);
+        if (invalidReason) {
+          return Response.json({
+            success: false,
+            error: { code: 'wallet_required', message: `オンチェーンPoP証跡が必要です: ${invalidReason}` },
+          } as SchoolClaimResult);
+        }
       }
       const result = await this.store.submitClaim(body);
 
@@ -1099,6 +1197,23 @@ export class SchoolStore implements DurableObject {
       }
       if (event.state && event.state !== 'published') {
         return Response.json({ error: 'event not available' }, { status: 400 });
+      }
+      if (this.isOnchainPopEnforced() && this.isEventOnchainConfigured(event)) {
+        let signerConfigured = false;
+        try {
+          signerConfigured = this.getPopSigner() !== null;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return Response.json({ error: `PoP configuration error: ${message}` }, { status: 500 });
+        }
+        if (!signerConfigured) {
+          return Response.json({ error: 'PoP signer is not configured' }, { status: 500 });
+        }
+        const proofFields = this.getOnchainProofFields(body);
+        const invalidReason = this.validateOnchainProofFields(proofFields);
+        if (invalidReason) {
+          return Response.json({ error: `on-chain claim proof required: ${invalidReason}` }, { status: 400 });
+        }
       }
       const already = await this.store.hasClaimed(eventId, userId, event);
       if (already) {

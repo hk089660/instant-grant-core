@@ -224,8 +224,11 @@ Reviewer shortcut: \`./wene-mobile/src/screens/user/UserScanScreen.tsx\` と \`.
    - `CORS_ORIGIN`（推奨）
    - `POP_SIGNER_SECRET_KEY_B64`（必須、on-chain PoP 証明署名用）
    - `POP_SIGNER_PUBKEY`（必須、対応する Ed25519 公開鍵/base58）
+   - `ENFORCE_ONCHAIN_POP`（推奨: `true`。未指定時も強制）
 3. Cloudflare Workersへデプロイします。
 4. WorkerのURL（例: `https://we-ne-school-api.<subdomain>.workers.dev`）を控えます。
+5. PoPランタイム状態を確認します:
+   - `GET /v1/school/pop-status` が `enforceOnchainPop: true` かつ `signerConfigured: true` を返すこと。
 
 ### Step 3: Pages プロキシ層（`functions/` + `_redirects`）
 1. サイトへプロキシ関数がデプロイされることを確認します:
@@ -244,6 +247,7 @@ Reviewer shortcut: \`./wene-mobile/src/screens/user/UserScanScreen.tsx\` と \`.
    - `EXPO_PUBLIC_API_BASE_URL` = Worker URL（互換フォールバック）
    - `EXPO_PUBLIC_BASE_URL` = Pages ドメイン（印刷/DeepLink UX のため推奨）
    - `EXPO_PUBLIC_POP_SIGNER_PUBKEY` = Worker の `POP_SIGNER_PUBKEY` と同値（管理者発行時に必須）
+   - `EXPO_PUBLIC_ENFORCE_ONCHAIN_POP` = `true`（本番推奨。on-chain 設定済みイベントで wallet + PoP 証跡を必須化）
    - `EXPO_PUBLIC_ADMIN_DEMO_PASSWORD`（デモログインボタンを使う場合のみ）
 4. `npm install` を実行します（web3.jsのパッチが自動的に適用されます）。
 5. アプリを起動します。
