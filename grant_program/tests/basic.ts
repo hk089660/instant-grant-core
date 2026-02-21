@@ -1,9 +1,10 @@
 import fs from "fs";
 import path from "path";
+import { createHash } from "crypto";
 
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { PublicKey, SystemProgram } from "@solana/web3.js";
+import { Ed25519Program, PublicKey, SystemProgram } from "@solana/web3.js";
 import {
   createMint,
   getOrCreateAssociatedTokenAccount,
@@ -17,10 +18,72 @@ import { GrantProgram } from "../target/types/grant_program";
 
 import { strict as assert } from "assert";
 
+const POP_MESSAGE_VERSION_V2 = 2;
+
 function u64LE(n: anchor.BN): Buffer {
   const b = Buffer.alloc(8);
   b.writeBigUInt64LE(BigInt(n.toString()), 0);
   return b;
+}
+
+function i64LE(n: bigint): Buffer {
+  const b = Buffer.alloc(8);
+  b.writeBigInt64LE(n, 0);
+  return b;
+}
+
+function popEntryHash(params: {
+  version: number;
+  prevHash: Buffer;
+  streamPrevHash: Buffer;
+  auditHash?: Buffer;
+  grant: PublicKey;
+  claimer: PublicKey;
+  periodIndex: bigint;
+  issuedAt: bigint;
+}): Buffer {
+  const domain = params.version === 2 ? "we-ne:pop:v2" : "we-ne:pop:v1";
+  const body: Buffer[] = [
+    Buffer.from(domain),
+    params.prevHash,
+    params.streamPrevHash,
+  ];
+  if (params.version === 2) {
+    body.push(params.auditHash ?? Buffer.alloc(32, 0));
+  }
+  body.push(
+    params.grant.toBuffer(),
+    params.claimer.toBuffer(),
+    u64LE(new anchor.BN(params.periodIndex.toString())),
+    i64LE(params.issuedAt)
+  );
+  return createHash("sha256").update(Buffer.concat(body)).digest();
+}
+
+function buildPopProofMessage(params: {
+  version: number;
+  grant: PublicKey;
+  claimer: PublicKey;
+  periodIndex: bigint;
+  prevHash: Buffer;
+  streamPrevHash: Buffer;
+  auditHash?: Buffer;
+  entryHash: Buffer;
+  issuedAt: bigint;
+}): Buffer {
+  const message: Buffer[] = [
+    Buffer.from([params.version]),
+    params.grant.toBuffer(),
+    params.claimer.toBuffer(),
+    u64LE(new anchor.BN(params.periodIndex.toString())),
+    params.prevHash,
+    params.streamPrevHash,
+  ];
+  if (params.version === 2) {
+    message.push(params.auditHash ?? Buffer.alloc(32, 0));
+  }
+  message.push(params.entryHash, i64LE(params.issuedAt));
+  return Buffer.concat(message);
 }
 
 describe("grant_program (PDA)", () => {
@@ -179,6 +242,7 @@ describe("grant_program (PDA)", () => {
 
   it("claimer can claim once per period (PDA)", async () => {
     const authority = provider.wallet as anchor.Wallet;
+    const popSigner = anchor.web3.Keypair.generate();
 
     const claimer = anchor.web3.Keypair.generate();
     const sig = await provider.connection.requestAirdrop(
@@ -213,6 +277,14 @@ describe("grant_program (PDA)", () => {
 
     const [vaultPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("vault"), grantPda.toBuffer()],
+      program.programId
+    );
+    const [popConfigPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("pop-config"), authority.publicKey.toBuffer()],
+      program.programId
+    );
+    const [popStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("pop-state"), grantPda.toBuffer()],
       program.programId
     );
 
@@ -259,6 +331,16 @@ describe("grant_program (PDA)", () => {
       } as any)
       .rpc();
 
+    await program.methods
+      .upsertPopConfig(popSigner.publicKey)
+      .accounts({
+        popConfig: popConfigPda,
+        authority: authority.publicKey,
+        systemProgram: SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      } as any)
+      .rpc();
+
     const claimerAta = await getOrCreateAssociatedTokenAccount(
       provider.connection,
       authority.payer,
@@ -278,6 +360,35 @@ describe("grant_program (PDA)", () => {
       program.programId
     );
 
+    const genesisHash = Buffer.alloc(32, 0);
+    const auditHash = createHash("sha256").update(Buffer.from("audit-anchor:test")).digest();
+    const issuedAt = BigInt(Math.floor(Date.now() / 1000));
+    const entryHash = popEntryHash({
+      version: POP_MESSAGE_VERSION_V2,
+      prevHash: genesisHash,
+      streamPrevHash: genesisHash,
+      auditHash,
+      grant: grantPda,
+      claimer: claimer.publicKey,
+      periodIndex: BigInt(periodIndex.toString()),
+      issuedAt,
+    });
+    const popMessage = buildPopProofMessage({
+      version: POP_MESSAGE_VERSION_V2,
+      grant: grantPda,
+      claimer: claimer.publicKey,
+      periodIndex: BigInt(periodIndex.toString()),
+      prevHash: genesisHash,
+      streamPrevHash: genesisHash,
+      auditHash,
+      entryHash,
+      issuedAt,
+    });
+    const popIx = Ed25519Program.createInstructionWithPrivateKey({
+      privateKey: popSigner.secretKey,
+      message: popMessage,
+    });
+
     await program.methods
       .claimGrant(periodIndex)
       .accounts({
@@ -287,10 +398,14 @@ describe("grant_program (PDA)", () => {
         claimer: claimer.publicKey,
         claimerAta: claimerAta.address,
         receipt: receiptPda,
+        popState: popStatePda,
+        popConfig: popConfigPda,
+        instructionsSysvar: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       } as any)
+      .preInstructions([popIx])
       .signers([claimer])
       .rpc();
 
@@ -298,6 +413,34 @@ describe("grant_program (PDA)", () => {
     assert.equal(after1.amount, BigInt(amountPerPeriod.toString()));
 
     // same period claim should fail (receipt already exists)
+    const issuedAt2 = issuedAt + BigInt(1);
+    const auditHash2 = createHash("sha256").update(Buffer.from("audit-anchor:test:2")).digest();
+    const entryHash2 = popEntryHash({
+      version: POP_MESSAGE_VERSION_V2,
+      prevHash: entryHash,
+      streamPrevHash: entryHash,
+      auditHash: auditHash2,
+      grant: grantPda,
+      claimer: claimer.publicKey,
+      periodIndex: BigInt(periodIndex.toString()),
+      issuedAt: issuedAt2,
+    });
+    const popMessage2 = buildPopProofMessage({
+      version: POP_MESSAGE_VERSION_V2,
+      grant: grantPda,
+      claimer: claimer.publicKey,
+      periodIndex: BigInt(periodIndex.toString()),
+      prevHash: entryHash,
+      streamPrevHash: entryHash,
+      auditHash: auditHash2,
+      entryHash: entryHash2,
+      issuedAt: issuedAt2,
+    });
+    const popIx2 = Ed25519Program.createInstructionWithPrivateKey({
+      privateKey: popSigner.secretKey,
+      message: popMessage2,
+    });
+
     let threw = false;
     try {
       await program.methods
@@ -309,10 +452,14 @@ describe("grant_program (PDA)", () => {
           claimer: claimer.publicKey,
           claimerAta: claimerAta.address,
           receipt: receiptPda,
+          popState: popStatePda,
+          popConfig: popConfigPda,
+          instructionsSysvar: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
           rent: anchor.web3.SYSVAR_RENT_PUBKEY,
         } as any)
+        .preInstructions([popIx2])
         .signers([claimer])
         .rpc();
     } catch (_) {

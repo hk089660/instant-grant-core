@@ -1,18 +1,46 @@
-import { Transaction, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from '@solana/web3.js';
+import {
+  Ed25519Program,
+  PublicKey,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
+  SYSVAR_RENT_PUBKEY,
+  SystemProgram,
+  Transaction,
+  TransactionInstruction,
+} from '@solana/web3.js';
 import {
   TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddress,
-  createAssociatedTokenAccountInstruction,
   getAccount,
+  createAssociatedTokenAccountInstruction,
+  getAssociatedTokenAddress,
   createBurnInstruction,
 } from '@solana/spl-token';
-import { BN } from '@coral-xyz/anchor';
 import { GRANT_PROGRAM_ID } from './config';
 import { getConnection, getProgram } from './anchorClient';
-import { getGrantPda, getVaultPda, getReceiptPda, calculatePeriodIndex } from './grantProgram';
+import {
+  calculatePeriodIndex,
+  getGrantPda,
+  getPopConfigPda,
+  getPopStatePda,
+  getReceiptPda,
+  getVaultPda,
+} from './grantProgram';
 import { DEFAULT_CLUSTER } from './cluster';
 import { DEVNET_GRANT_CONFIG } from './devnetConfig';
 import { RPC_URL } from './singleton';
+
+const CLAIM_GRANT_DISCRIMINATOR = Buffer.from([125, 134, 233, 135, 82, 18, 177, 8]);
+const SUPPORTED_POP_PROOF_MESSAGE_VERSIONS = new Set<number>([1, 2]);
+
+interface PopClaimProofResponse {
+  signerPubkey: string;
+  messageBase64: string;
+  signatureBase64: string;
+  auditHash: string;
+  entryHash: string;
+  prevHash: string;
+  streamPrevHash: string;
+  issuedAt: number;
+}
 
 function toBigIntValue(value: unknown, field: string): bigint {
   if (typeof value === 'bigint') return value;
@@ -23,6 +51,110 @@ function toBigIntValue(value: unknown, field: string): bigint {
     if (/^-?\d+$/.test(str.trim())) return BigInt(str.trim());
   }
   throw new Error(`Invalid ${field} in grant account`);
+}
+
+function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+  const base = (
+    process.env.EXPO_PUBLIC_SCHOOL_API_BASE_URL ??
+    process.env.EXPO_PUBLIC_API_BASE_URL ??
+    ''
+  ).trim().replace(/\/$/, '');
+  if (!base) {
+    throw new Error('API base URL is not configured (set EXPO_PUBLIC_SCHOOL_API_BASE_URL or EXPO_PUBLIC_API_BASE_URL)');
+  }
+  return base;
+}
+
+async function fetchPopClaimProof(params: {
+  eventId: string;
+  grant: PublicKey;
+  claimer: PublicKey;
+  periodIndex: bigint;
+}): Promise<PopClaimProofResponse> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/v1/school/pop-proof`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      eventId: params.eventId,
+      grant: params.grant.toBase58(),
+      claimer: params.claimer.toBase58(),
+      periodIndex: params.periodIndex.toString(),
+    }),
+  });
+
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    body = null;
+  }
+
+  if (!res.ok) {
+    const apiMessage = body && typeof body === 'object' && 'error' in body
+      ? String((body as { error?: unknown }).error ?? '')
+      : '';
+    throw new Error(`PoP証明の取得に失敗しました (${res.status})${apiMessage ? `: ${apiMessage}` : ''}`);
+  }
+
+  const parsed = body as Partial<PopClaimProofResponse> | null;
+  if (
+    !parsed ||
+    typeof parsed.signerPubkey !== 'string' ||
+    typeof parsed.messageBase64 !== 'string' ||
+    typeof parsed.signatureBase64 !== 'string'
+  ) {
+    throw new Error('PoP証明レスポンスの形式が不正です');
+  }
+
+  return {
+    signerPubkey: parsed.signerPubkey,
+    messageBase64: parsed.messageBase64,
+    signatureBase64: parsed.signatureBase64,
+    auditHash: typeof parsed.auditHash === 'string' ? parsed.auditHash : '',
+    entryHash: typeof parsed.entryHash === 'string' ? parsed.entryHash : '',
+    prevHash: typeof parsed.prevHash === 'string' ? parsed.prevHash : '',
+    streamPrevHash: typeof parsed.streamPrevHash === 'string' ? parsed.streamPrevHash : '',
+    issuedAt: typeof parsed.issuedAt === 'number' ? parsed.issuedAt : 0,
+  };
+}
+
+function buildClaimGrantInstruction(params: {
+  grant: PublicKey;
+  mint: PublicKey;
+  vault: PublicKey;
+  claimer: PublicKey;
+  claimerAta: PublicKey;
+  receipt: PublicKey;
+  popState: PublicKey;
+  popConfig: PublicKey;
+  periodIndex: bigint;
+}): TransactionInstruction {
+  const data = Buffer.alloc(16);
+  CLAIM_GRANT_DISCRIMINATOR.copy(data, 0);
+  data.writeBigUInt64LE(params.periodIndex, 8);
+
+  return new TransactionInstruction({
+    programId: GRANT_PROGRAM_ID,
+    keys: [
+      { pubkey: params.grant, isSigner: false, isWritable: true },
+      { pubkey: params.mint, isSigner: false, isWritable: false },
+      { pubkey: params.vault, isSigner: false, isWritable: true },
+      { pubkey: params.claimer, isSigner: true, isWritable: true },
+      { pubkey: params.claimerAta, isSigner: false, isWritable: true },
+      { pubkey: params.receipt, isSigner: false, isWritable: true },
+      { pubkey: params.popState, isSigner: false, isWritable: true },
+      { pubkey: params.popConfig, isSigner: false, isWritable: false },
+      { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
+    ],
+    data,
+  });
 }
 
 /**
@@ -52,9 +184,13 @@ export interface BuildClaimTxResult {
     grantPda: PublicKey;
     vaultPda: PublicKey;
     receiptPda: PublicKey;
+    popStatePda: PublicKey;
+    popConfigPda: PublicKey;
     claimerAta: PublicKey;
     periodIndex: bigint;
     mint: PublicKey;
+    popProofAuditHash: string;
+    popProofEntryHash: string;
   };
 }
 
@@ -136,6 +272,13 @@ export async function buildClaimTx(
 
   const [vaultPda] = getVaultPda(grantPda);
   const [receiptPda] = getReceiptPda(grantPda, recipientPubkey, periodIndex);
+  const [popStatePda] = getPopStatePda(grantPda);
+  const [popConfigPda] = getPopConfigPda(authority);
+
+  const popConfigInfo = await connection.getAccountInfo(popConfigPda, 'confirmed');
+  if (!popConfigInfo) {
+    throw new Error('PoP設定が未初期化です。管理者側で参加券を再発行してください');
+  }
 
   // 既存レシートがある場合は、同一期間の再受給が不可能（Program仕様）なので事前に中断
   const existingReceipt = await connection.getAccountInfo(receiptPda, 'confirmed');
@@ -191,6 +334,22 @@ export async function buildClaimTx(
   }
 
   const claimerAta = await getAssociatedTokenAddress(mint, recipientPubkey);
+  const popProof = await fetchPopClaimProof({
+    eventId: campaignId,
+    grant: grantPda,
+    claimer: recipientPubkey,
+    periodIndex,
+  });
+
+  const signerPubkey = new PublicKey(popProof.signerPubkey);
+  const messageBytes = Buffer.from(popProof.messageBase64, 'base64');
+  const signatureBytes = Buffer.from(popProof.signatureBase64, 'base64');
+  if (messageBytes.length < 1 || !SUPPORTED_POP_PROOF_MESSAGE_VERSIONS.has(messageBytes[0])) {
+    throw new Error('PoP証明メッセージのバージョンが不正です（サポート外）');
+  }
+  if (signatureBytes.length !== 64) {
+    throw new Error('PoP署名の長さが不正です');
+  }
 
   const tx = new Transaction();
 
@@ -206,23 +365,26 @@ export async function buildClaimTx(
       )
     );
   }
-
-  const instruction = await program.methods
-    .claimGrant(new BN(periodIndex.toString()))
-    .accounts({
+  tx.add(
+    Ed25519Program.createInstructionWithPublicKey({
+      publicKey: signerPubkey.toBytes(),
+      message: messageBytes,
+      signature: signatureBytes,
+    })
+  );
+  tx.add(
+    buildClaimGrantInstruction({
       grant: grantPda,
       mint,
       vault: vaultPda,
       claimer: recipientPubkey,
-      claimerAta: claimerAta,
+      claimerAta,
       receipt: receiptPda,
-      tokenProgram: TOKEN_PROGRAM_ID,
-      systemProgram: SystemProgram.programId,
-      rent: SYSVAR_RENT_PUBKEY,
+      popState: popStatePda,
+      popConfig: popConfigPda,
+      periodIndex,
     })
-    .instruction();
-
-  tx.add(instruction);
+  );
 
   // recentBlockhash / lastValidBlockHeight を必ず取得（sendSignedTx の confirmContext に常に渡すため）
   const { blockhash: recentBlockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
@@ -241,9 +403,13 @@ export async function buildClaimTx(
       grantPda,
       vaultPda,
       receiptPda,
+      popStatePda,
+      popConfigPda,
       claimerAta,
       periodIndex,
       mint,
+      popProofAuditHash: popProof.auditHash,
+      popProofEntryHash: popProof.entryHash,
     },
   };
 }

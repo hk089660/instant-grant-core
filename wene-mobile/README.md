@@ -199,7 +199,7 @@ Recommended browsers for `/u/*`: Safari (iOS) / Chrome (Android). Other browsers
 
 ## Instant, transparent benefit distribution on Solana — built for Japan's public support needs
 
-[![CI](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml/badge.svg)](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml)
+[![CI](https://github.com/hk089660/instant-grant-core/actions/workflows/ci.yml/badge.svg)](https://github.com/hk089660/instant-grant-core/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/hk089660/instant-grant-core/blob/main/LICENSE)
 
 **Links:**
@@ -617,8 +617,8 @@ To make the project easier to build and verify for contributors and third partie
 
 ## 📞 Contact
 
-* Issues: [https://github.com/hk089660/-instant-grant-core/issues](https://github.com/hk089660/-instant-grant-core/issues)
-* Discussions: [https://github.com/hk089660/-instant-grant-core/discussions](https://github.com/hk089660/-instant-grant-core/discussions)
+* Issues: [https://github.com/hk089660/instant-grant-core/issues](https://github.com/hk089660/instant-grant-core/issues)
+* Discussions: [https://github.com/hk089660/instant-grant-core/discussions](https://github.com/hk089660/instant-grant-core/discussions)
 * Security: See `SECURITY.md` for vulnerability reporting
 
 Built with ❤️ for public good on Solana

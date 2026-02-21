@@ -1,5 +1,14 @@
-
-import type { ClaimBody, RegisterBody, UserClaimBody, UserClaimResponse, SchoolClaimResult } from './types';
+import bs58 from 'bs58';
+import nacl from 'tweetnacl';
+import type {
+  ClaimBody,
+  PopProofBody,
+  PopProofResponse,
+  RegisterBody,
+  SchoolClaimResult,
+  UserClaimBody,
+  UserClaimResponse,
+} from './types';
 import { ClaimStore, type IClaimStorage } from './claimLogic';
 import type { AuditActor, AuditEvent } from './audit/types';
 import { canonicalize, sha256Hex } from './audit/hash';
@@ -32,6 +41,8 @@ export interface Env {
   CORS_ORIGIN?: string;
   ADMIN_PASSWORD?: string;
   ADMIN_DEMO_PASSWORD?: string;
+  POP_SIGNER_SECRET_KEY_B64?: string;
+  POP_SIGNER_PUBKEY?: string;
 }
 
 const AUDIT_MAX_DEPTH = 4;
@@ -41,11 +52,87 @@ const AUDIT_MAX_STRING = 160;
 const DEFAULT_ADMIN_PASSWORD = 'change-this-in-dashboard';
 const AUDIT_LAST_HASH_GLOBAL_KEY = 'audit:lastHash:global';
 const MINT_BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const POP_CHAIN_GLOBAL_PREFIX = 'pop_chain:lastHash:global:';
+const POP_CHAIN_STREAM_PREFIX = 'pop_chain:lastHash:stream:';
+const POP_HASH_LEN = 32;
+const POP_MESSAGE_VERSION = 2;
+const POP_MESSAGE_LEN = 1 + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 8;
+const POP_HASH_GENESIS_HEX = '0'.repeat(64);
 const TOKEN_IMAGE_URL = 'https://instant-grant-core.pages.dev/ticket-token.png';
 
 function buildTokenSymbol(title: string): string {
   const cleaned = title.replace(/\s+/g, '').slice(0, 10).toUpperCase();
   return cleaned || 'TICKET';
+}
+
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
+function decodeBase64(input: string): Uint8Array {
+  const binary = atob(input);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const clean = hex.trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(clean)) {
+    throw new Error('invalid hash hex');
+  }
+  const out = new Uint8Array(POP_HASH_LEN);
+  for (let i = 0; i < POP_HASH_LEN; i += 1) {
+    out[i] = Number.parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function readHashHex(raw: string | undefined | null): string {
+  if (!raw || raw === 'GENESIS') return POP_HASH_GENESIS_HEX;
+  const v = raw.trim().toLowerCase();
+  if (/^[0-9a-f]{64}$/.test(v)) return v;
+  throw new Error('invalid hash in storage');
+}
+
+function parsePeriodIndex(raw: unknown): bigint | null {
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 && Number.isInteger(raw)) {
+    return BigInt(raw);
+  }
+  if (typeof raw === 'string' && /^\d+$/.test(raw.trim())) {
+    return BigInt(raw.trim());
+  }
+  return null;
+}
+
+function u64ToLeBytes(value: bigint): Uint8Array {
+  const out = new Uint8Array(8);
+  const dv = new DataView(out.buffer);
+  dv.setBigUint64(0, value, true);
+  return out;
+}
+
+function i64ToLeBytes(value: bigint): Uint8Array {
+  const out = new Uint8Array(8);
+  const dv = new DataView(out.buffer);
+  dv.setBigInt64(0, value, true);
+  return out;
 }
 
 function doStorageAdapter(ctx: DurableObjectState): IClaimStorage {
@@ -72,6 +159,237 @@ export class SchoolStore implements DurableObject {
 
 
   private auditLock: Promise<void> = Promise.resolve();
+  private popProofLock: Promise<void> = Promise.resolve();
+  private popSignerCache:
+    | { secretKey: Uint8Array; signerPubkey: string }
+    | null
+    | undefined;
+
+  private getPopSigner(): { secretKey: Uint8Array; signerPubkey: string } | null {
+    if (this.popSignerCache !== undefined) return this.popSignerCache;
+
+    const secretB64 = this.env.POP_SIGNER_SECRET_KEY_B64?.trim() ?? '';
+    const signerPubkey = this.env.POP_SIGNER_PUBKEY?.trim() ?? '';
+    if (!secretB64 || !signerPubkey) {
+      this.popSignerCache = null;
+      return null;
+    }
+
+    if (!MINT_BASE58_RE.test(signerPubkey)) {
+      throw new Error('POP_SIGNER_PUBKEY is invalid');
+    }
+
+    let decoded: Uint8Array;
+    try {
+      decoded = decodeBase64(secretB64);
+    } catch {
+      throw new Error('POP_SIGNER_SECRET_KEY_B64 is not base64');
+    }
+
+    let secretKey: Uint8Array;
+    if (decoded.length === 64) {
+      secretKey = decoded;
+    } else if (decoded.length === 32) {
+      secretKey = nacl.sign.keyPair.fromSeed(decoded).secretKey;
+    } else {
+      throw new Error('POP_SIGNER_SECRET_KEY_B64 must decode to 32-byte seed or 64-byte secret key');
+    }
+
+    let configuredPubkey: Uint8Array;
+    try {
+      configuredPubkey = bs58.decode(signerPubkey);
+    } catch {
+      throw new Error('POP_SIGNER_PUBKEY is invalid');
+    }
+    if (configuredPubkey.length !== 32) {
+      throw new Error('POP_SIGNER_PUBKEY must decode to 32 bytes');
+    }
+    const actualPubkey = nacl.sign.keyPair.fromSecretKey(secretKey).publicKey;
+    if (!bytesEqual(actualPubkey, configuredPubkey)) {
+      throw new Error('POP signer keypair mismatch (POP_SIGNER_SECRET_KEY_B64 / POP_SIGNER_PUBKEY)');
+    }
+
+    this.popSignerCache = { secretKey, signerPubkey };
+    return this.popSignerCache;
+  }
+
+  private async buildPopEntryHash(params: {
+    prevHash: Uint8Array;
+    streamPrevHash: Uint8Array;
+    auditHash: Uint8Array;
+    grant: Uint8Array;
+    claimer: Uint8Array;
+    periodIndex: bigint;
+    issuedAt: bigint;
+  }): Promise<Uint8Array> {
+    const encoder = new TextEncoder();
+    const periodBytes = u64ToLeBytes(params.periodIndex);
+    const issuedAtBytes = i64ToLeBytes(params.issuedAt);
+    const domain = encoder.encode('we-ne:pop:v2');
+    const input = new Uint8Array(
+      domain.length +
+      params.prevHash.length +
+      params.streamPrevHash.length +
+      params.auditHash.length +
+      params.grant.length +
+      params.claimer.length +
+      periodBytes.length +
+      issuedAtBytes.length
+    );
+
+    let offset = 0;
+    input.set(domain, offset); offset += domain.length;
+    input.set(params.prevHash, offset); offset += params.prevHash.length;
+    input.set(params.streamPrevHash, offset); offset += params.streamPrevHash.length;
+    input.set(params.auditHash, offset); offset += params.auditHash.length;
+    input.set(params.grant, offset); offset += params.grant.length;
+    input.set(params.claimer, offset); offset += params.claimer.length;
+    input.set(periodBytes, offset); offset += periodBytes.length;
+    input.set(issuedAtBytes, offset);
+
+    const digest = await crypto.subtle.digest('SHA-256', input);
+    return new Uint8Array(digest);
+  }
+
+  private buildPopProofMessage(params: {
+    grant: Uint8Array;
+    claimer: Uint8Array;
+    periodIndex: bigint;
+    prevHash: Uint8Array;
+    streamPrevHash: Uint8Array;
+    auditHash: Uint8Array;
+    entryHash: Uint8Array;
+    issuedAt: bigint;
+  }): Uint8Array {
+    const out = new Uint8Array(POP_MESSAGE_LEN);
+    let offset = 0;
+    out[offset] = POP_MESSAGE_VERSION;
+    offset += 1;
+    out.set(params.grant, offset); offset += 32;
+    out.set(params.claimer, offset); offset += 32;
+    out.set(u64ToLeBytes(params.periodIndex), offset); offset += 8;
+    out.set(params.prevHash, offset); offset += 32;
+    out.set(params.streamPrevHash, offset); offset += 32;
+    out.set(params.auditHash, offset); offset += 32;
+    out.set(params.entryHash, offset); offset += 32;
+    out.set(i64ToLeBytes(params.issuedAt), offset);
+    return out;
+  }
+
+  private async issuePopClaimProof(body: PopProofBody): Promise<PopProofResponse> {
+    const task = this.popProofLock.then(async () => {
+      const signer = this.getPopSigner();
+      if (!signer) {
+        throw new Error('PoP signer is not configured');
+      }
+
+      const eventId = typeof body?.eventId === 'string' ? body.eventId.trim() : '';
+      const grantRaw = typeof body?.grant === 'string' ? body.grant.trim() : '';
+      const claimerRaw = typeof body?.claimer === 'string' ? body.claimer.trim() : '';
+      const periodIndex = parsePeriodIndex(body?.periodIndex);
+
+      if (!eventId || !grantRaw || !claimerRaw || periodIndex === null || periodIndex < BigInt(0)) {
+        throw new Error('invalid PoP proof request');
+      }
+      if (!MINT_BASE58_RE.test(grantRaw) || !MINT_BASE58_RE.test(claimerRaw)) {
+        throw new Error('invalid grant/claimer format');
+      }
+      const maxU64 = (BigInt(1) << BigInt(64)) - BigInt(1);
+      if (periodIndex > maxU64) {
+        throw new Error('periodIndex out of range');
+      }
+
+      const event = await this.store.getEvent(eventId);
+      if (!event) {
+        throw new Error('event not found');
+      }
+      if (event.state && event.state !== 'published') {
+        throw new Error('event not available');
+      }
+
+      const grant = bs58.decode(grantRaw);
+      const claimer = bs58.decode(claimerRaw);
+      if (grant.length !== 32 || claimer.length !== 32) {
+        throw new Error('invalid grant/claimer bytes');
+      }
+
+      const globalKey = `${POP_CHAIN_GLOBAL_PREFIX}${grantRaw}`;
+      const streamKey = `${POP_CHAIN_STREAM_PREFIX}${grantRaw}`;
+      const prevHashHex = readHashHex(await this.ctx.storage.get<string>(globalKey));
+      const streamPrevHashHex = readHashHex(await this.ctx.storage.get<string>(streamKey));
+      const prevHash = hexToBytes(prevHashHex);
+      const streamPrevHash = hexToBytes(streamPrevHashHex);
+      const issuedAt = BigInt(Math.floor(Date.now() / 1000));
+
+      // Bind PoP proof to the immutable API audit chain with an anchor hash.
+      const auditAnchor = await this.appendAuditLog(
+        'POP_CLAIM_PROOF_ANCHOR',
+        { type: 'wallet', id: this.maskActorId(claimerRaw) },
+        {
+          eventId,
+          grant: grantRaw,
+          claimer: claimerRaw,
+          periodIndex: periodIndex.toString(),
+          prevHash: prevHashHex,
+          streamPrevHash: streamPrevHashHex,
+        },
+        `pop:${eventId}`
+      );
+      const auditHashHex = readHashHex(auditAnchor.entry_hash);
+      const auditHash = hexToBytes(auditHashHex);
+
+      const entryHash = await this.buildPopEntryHash({
+        prevHash,
+        streamPrevHash,
+        auditHash,
+        grant,
+        claimer,
+        periodIndex,
+        issuedAt,
+      });
+      const entryHashHex = bytesToHex(entryHash);
+
+      await this.ctx.storage.put(globalKey, entryHashHex);
+      await this.ctx.storage.put(streamKey, entryHashHex);
+      await this.ctx.storage.put(`pop_chain:history:${new Date().toISOString()}:${entryHashHex}`, {
+        eventId,
+        grant: grantRaw,
+        claimer: claimerRaw,
+        periodIndex: periodIndex.toString(),
+        prevHash: prevHashHex,
+        streamPrevHash: streamPrevHashHex,
+        auditHash: auditHashHex,
+        entryHash: entryHashHex,
+        issuedAt: Number(issuedAt),
+      });
+
+      const message = this.buildPopProofMessage({
+        grant,
+        claimer,
+        periodIndex,
+        prevHash,
+        streamPrevHash,
+        auditHash,
+        entryHash,
+        issuedAt,
+      });
+      const signature = nacl.sign.detached(message, signer.secretKey);
+
+      return {
+        signerPubkey: signer.signerPubkey,
+        messageBase64: encodeBase64(message),
+        signatureBase64: encodeBase64(signature),
+        auditHash: auditHashHex,
+        prevHash: prevHashHex,
+        streamPrevHash: streamPrevHashHex,
+        entryHash: entryHashHex,
+        issuedAt: Number(issuedAt),
+      };
+    });
+
+    this.popProofLock = task.then(() => { }, () => { });
+    return task;
+  }
 
   private extractBearerToken(request: Request): string | null {
     const authHeader = request.headers.get('Authorization') ?? '';
@@ -660,6 +978,27 @@ export class SchoolStore implements DurableObject {
         };
       }));
       return Response.json({ eventId, eventTitle: event.title, items });
+    }
+
+    if (path === '/v1/school/pop-proof' && request.method === 'POST') {
+      let body: PopProofBody;
+      try {
+        body = (await request.json()) as PopProofBody;
+      } catch {
+        return Response.json({ error: 'invalid body' }, { status: 400 });
+      }
+      try {
+        const proof = await this.issuePopClaimProof(body);
+        return Response.json(proof);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const status =
+          message.includes('not configured') ? 500 :
+            message.includes('not found') ? 404 :
+              message.includes('not available') ? 400 :
+                message.includes('invalid') || message.includes('out of range') ? 400 : 500;
+        return Response.json({ error: message }, { status });
+      }
     }
 
     if (path === '/v1/school/claims' && request.method === 'POST') {

@@ -22,7 +22,7 @@ No installation required. Experience the lightning-fast approval process powered
 Existing public blockchains guarantee the integrity of "results (balance transfers)", but the "process (how the transaction was generated)" has remained a black box.
 This project proposes and implements a new consensus concept called **"Proof of Process (PoP)"**, where Web2-style API logs are carved into an irreversible hash chain and mathematically bound to on-chain settlements.
 
-## 📌 Current AsukaNetwork Status (Feb 20, 2026)
+## 📌 Current AsukaNetwork Status (Feb 21, 2026)
 
 - Runtime mode is **devnet-first** (current app runtime is fixed to Solana devnet).
 - Process-proof layer is active on Cloudflare Workers:
@@ -34,17 +34,20 @@ This project proposes and implements a new consensus concept called **"Proof of 
 - Public demo delivery is active:
   - User app: `https://instant-grant-core.pages.dev/`
   - Admin app: `https://instant-grant-core.pages.dev/admin/login`
-- Pending protocol milestone:
-  - Contract-side mandatory PoP proof enforcement is still planned (not yet enforced at L1).
+- PoP settlement binding is active on Layer 1:
+  - `claim_grant` / `claim_grant_with_proof` enforce on-chain PoP verification.
+  - Ed25519 pre-instruction, authorized PoP signer (`pop_config`), and hash-chain continuity (`pop_state`) are validated on-chain.
+  - PoP v2 includes API audit-anchor hash in the signed message, and entry hash derivation is re-computed and checked on-chain.
 
 ## 🏗 Architecture: Trinity of Trust
 This repository defines "accountability" in code through the following three-layer structure (Trinity Architecture).
 
 Current implementation status by layer:
 
-- Layer 1 (Solana settlement/claim): Implemented for devnet claim flow; strict L1-side mandatory PoP verification remains planned.
-- Layer 2 (API process proof): Implemented (global hash chain + per-event stream chain + operator auth controls).
+- Layer 1 (Solana settlement/claim): Implemented with mandatory PoP verification in claim instructions (ed25519 + authorized signer + chain continuity + proof freshness checks).
+- Layer 2 (API process proof): Implemented (global hash chain + per-event stream chain + PoP proof issuance signed with audit-anchor binding + operator auth controls).
 - Layer 3 (User/Admin interface): Implemented (web/mobile UX, Phantom signing/deeplink flow, admin session guard).
+- Edge proxy for Pages delivery: Implemented in `functions/[[path]].ts` and `wene-mobile/functions/[[path]].ts` for `/api/*`, `/v1/*`, `/metadata/*`, and `/health`.
 
 ```mermaid
 graph TD
@@ -77,6 +80,11 @@ graph TD
 * **Innovation:** Uses **NaCl (Curve25519)** for End-to-End Encryption (E2EE) to completely protect user signatures (intent) from Man-in-the-Middle attacks until they reach the protocol. Deployed as a censorship-resistant PWA.
 * [📂 View Mobile Code](./wene-mobile)
 
+### 3.5. Edge Delivery Proxy (Cloudflare Pages Functions)
+* **Tech Stack:** Cloudflare Pages Functions (`[[path]].ts`)
+* **Role:** Runtime proxy between Pages-hosted UI and Worker API.
+* **Implementation:** `functions/[[path]].ts` (root) and `wene-mobile/functions/[[path]].ts` proxy `/api/*`, `/v1/*`, `/metadata/*`, and `/health` to the Worker origin.
+
 ## 🦁 Philosophy: Beyond Winny
 Peer-to-Peer (P2P) technology once aimed for "freedom without administrators", but what society demanded was "trust with clear accountability".
 Asuka Network inherits the autonomous decentralized philosophy of P2P while implementing **complete auditability via "Proof of Process"**, aiming to become a domestic digital public infrastructure that government and public services can rely on with confidence.
@@ -85,8 +93,8 @@ Asuka Network inherits the autonomous decentralized philosophy of P2P while impl
 - [x] **Phase 1: Genesis (Completed)**
     - Integrated implementation of SVM contract (Rust) and Edge Hash Chain (TS).
     - Deployment of MVP app "We-ne" as PWA.
-- [ ] **Phase 2: Gating (Planned)**
-    - Implementation of logic to forcibly reject transactions on the L1 contract side if they lack a valid PoP proof from the API layer.
+- [x] **Phase 2: Gating (Completed)**
+    - L1 now forcibly rejects claim transactions that do not contain a valid API-issued PoP proof.
 - [ ] **Phase 3: Federation**
     - Expansion to a consortium model where municipalities and public institutions can participate as nodes.
 
@@ -97,13 +105,21 @@ Asuka Network inherits the autonomous decentralized philosophy of P2P while impl
 
 ---
 
-# We-ne (instant-grant-core)
+## We-ne Reference Implementation (instant-grant-core)
 
 We-ne is an open-source prototype/evaluation kit for verifying non-custodial aid distribution and participation ticket operations on Solana. It emphasizes third-party verifiability using receipt records and prevention of duplicate reception.
 
 > Status (as of Feb 20, 2026): **PoC / devnet-first**. This is for reproducibility and evaluation verification, not for production mainnet operation.
 
 [Japanese README](./README.ja.md) | [Architecture](./docs/ARCHITECTURE.md) | [Devnet Setup](./docs/DEVNET_SETUP.md) | [Security](./docs/SECURITY.md)
+
+## Repository Structure (Current)
+
+- `grant_program/`: Solana program (Anchor, Layer 1).
+- `api-worker/`: Cloudflare Worker API and hash-chain audit logic (Layer 2).
+- `wene-mobile/`: User/Admin app (Expo, Web + Mobile UI, Layer 3).
+- `functions/` and `wene-mobile/functions/`: Cloudflare Pages Functions proxy layer (`/api`, `/v1`, `/metadata`, `/health` -> Worker).
+- `scripts/build-all.sh`: root reproducible build/test helper (`build`, `test`, `all`) used for third-party verification.
 
 ## What this prototype solves
 
@@ -204,20 +220,35 @@ Use the following order for a clean deployment path.
    - `ADMIN_PASSWORD` (required, non-default)
    - `ADMIN_DEMO_PASSWORD` (optional, demo login only)
    - `CORS_ORIGIN` (recommended)
+   - `POP_SIGNER_SECRET_KEY_B64` (required for on-chain PoP proof signing)
+   - `POP_SIGNER_PUBKEY` (required; corresponding Ed25519 public key in base58)
 3. Deploy to Cloudflare Workers.
-4. Copy your Worker's URL (e.g., `https://api.your-name.workers.dev`).
+4. Copy your Worker's URL (for example `https://we-ne-school-api.<subdomain>.workers.dev`).
 
-### Step 3: Layer 3 (Mobile App)
+### Step 3: Pages Proxy Layer (`functions/` + `_redirects`)
+1. Confirm proxy files are deployed with the site:
+   - `functions/[[path]].ts`
+   - `wene-mobile/functions/[[path]].ts`
+2. Build web artifacts with API base env:
+   - Preferred: `EXPO_PUBLIC_SCHOOL_API_BASE_URL`
+   - Compatible fallback: `EXPO_PUBLIC_API_BASE_URL`
+3. Ensure generated `dist/_redirects` includes proxy rules for `/api/*`, `/v1/*`, and `/metadata/*`.
+
+### Step 4: Layer 3 (Mobile/Web App)
 1. Go to `wene-mobile/`.
 2. Create `.env` from `.env.example`.
 3. Set app envs:
-   - `EXPO_PUBLIC_API_BASE_URL` = Worker URL
+   - `EXPO_PUBLIC_SCHOOL_API_BASE_URL` = Worker URL (preferred)
+   - `EXPO_PUBLIC_API_BASE_URL` = Worker URL (compatibility fallback)
    - `EXPO_PUBLIC_BASE_URL` = Pages domain (recommended for print/deeplink UX)
+   - `EXPO_PUBLIC_POP_SIGNER_PUBKEY` = same value as Worker `POP_SIGNER_PUBKEY` (required for admin issuance)
    - `EXPO_PUBLIC_ADMIN_DEMO_PASSWORD` (only if demo login button is used)
 4. Run `npm install` (patches for web3.js will apply automatically).
 5. Start the app.
 
 ## Quick Start (Local)
+
+Option A (UI + local API in `wene-mobile`):
 
 ```bash
 cd wene-mobile
@@ -230,6 +261,18 @@ Check after startup:
 - Admin Login: `http://localhost:8081/admin/login`
 - User Scan Flow: `http://localhost:8081/u/scan?eventId=evt-001`
 
+Option B (root reproducible build/test helper):
+
+```bash
+chmod +x scripts/build-all.sh
+./scripts/build-all.sh all
+```
+
+`scripts/build-all.sh` runs:
+- `build`: Anchor build + mobile TypeScript check
+- `test`: Anchor tests
+- `all`: build + test + mobile typecheck (default)
+
 ## Quick Start (Cloudflare Pages)
 
 Cloudflare Pages configuration for this monorepo:
@@ -240,14 +283,18 @@ Cloudflare Pages configuration for this monorepo:
 
 Prerequisites for `export:web`:
 
-- Set Worker URL to `EXPO_PUBLIC_API_BASE_URL` (or `EXPO_PUBLIC_SCHOOL_API_BASE_URL`).
+- Set Worker URL to `EXPO_PUBLIC_SCHOOL_API_BASE_URL` (preferred) or `EXPO_PUBLIC_API_BASE_URL` (fallback).
 - If unset, `scripts/gen-redirects.js` will fail. If proxy redirects are not generated, `/api/*` and `/v1/*` may hit Pages directly and return `405` or HTML.
+- `npm run deploy:pages` deploys to `instant-grant-core` by default.
+  - Override with `PAGES_PROJECT_NAME=<your-pages-project> npm run deploy:pages`.
+- `npm run verify:pages` checks `https://instant-grant-core.pages.dev` by default.
+  - Override with `PAGES_BASE_URL=https://<your-pages-domain> npm run verify:pages`.
 
 Copy-paste Deploy Command:
 
 ```bash
 cd wene-mobile
-EXPO_PUBLIC_API_BASE_URL="https://<your-worker>.workers.dev" npm run export:web
+EXPO_PUBLIC_SCHOOL_API_BASE_URL="https://<your-worker>.workers.dev" npm run export:web
 npm run deploy:pages
 npm run verify:pages
 ```
@@ -304,9 +351,9 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
 ## Detailed Documentation
 
 - School PoC guide: `wene-mobile/README_SCHOOL.md`
-- Cloudflare Pages deployment notes: `CLOUDFLARE_PAGES.md`
-- Worker API details: `README.md`
-- Devnet setup: `DEVNET_SETUP.md`
+- Cloudflare Pages deployment notes: `wene-mobile/docs/CLOUDFLARE_PAGES.md`
+- Worker API details: `api-worker/README.md`
+- Devnet setup: `docs/DEVNET_SETUP.md`
 
 ## Context for Judges
 

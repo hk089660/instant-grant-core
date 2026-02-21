@@ -367,6 +367,8 @@ export const UserConfirmScreen: React.FC = () => {
         const msg = String((e as { message: string }).message);
         if (msg.includes('invalid pin')) {
           setError('PINが正しくありません');
+        } else if (msg.includes('PoP') || msg.includes('pop')) {
+          setError('オンチェーン検証用のPoP証明が無効です。再試行してください。');
         } else if (msg.includes('既に受給済み')) {
           setError(
             onchainPolicyCompatible

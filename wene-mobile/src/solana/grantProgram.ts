@@ -84,6 +84,32 @@ export const getReceiptPda = (
   );
 };
 
+/**
+ * PoP signer config PDA（authority 単位）
+ */
+export const getPopConfigPda = (
+  authority: PublicKey,
+  programId: PublicKey = GRANT_PROGRAM_ID
+): [PublicKey, number] => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('pop-config'), authority.toBuffer()],
+    programId
+  );
+};
+
+/**
+ * PoP chain state PDA（grant 単位）
+ */
+export const getPopStatePda = (
+  grant: PublicKey,
+  programId: PublicKey = GRANT_PROGRAM_ID
+): [PublicKey, number] => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('pop-state'), grant.toBuffer()],
+    programId
+  );
+};
+
 // ============================================================
 // ユーティリティ関数
 // ============================================================

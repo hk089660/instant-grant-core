@@ -22,7 +22,7 @@ Asuka Network上で稼働する最初の行政・公共向けリファレンス�
 既存のパブリックチェーンは「結果（残高の移動）」の整合性は保証しますが、「過程（どのような手続きを経てそのトランザクションが生成されたか）」はブラックボックスでした。
 本プロジェクトでは、Web2的なAPIログを不可逆なハッシュチェーンとして刻み、それをオンチェーンの決済と数学的に結合させる **「Proof of Process (PoP)」** という新たなコンセンサス概念を提唱・実装します。
 
-## 📌 AsukaNetwork の現状（2026-02-20）
+## 📌 AsukaNetwork の現状（2026-02-21）
 
 - 稼働モードは **devnet-first** です（現行アプリ実行時のクラスターは devnet 固定）。
 - Cloudflare Workers 上のプロセス証明レイヤーは稼働中です:
@@ -34,17 +34,20 @@ Asuka Network上で稼働する最初の行政・公共向けリファレンス�
 - 公開デモは稼働中です:
   - 利用者アプリ: `https://instant-grant-core.pages.dev/`
   - 管理者アプリ: `https://instant-grant-core.pages.dev/admin/login`
-- 未完了のプロトコル項目:
-  - PoP証明の L1 コントラクト強制検証は planned（L1 強制は未実装）
+- Layer 1 の PoP 決済結合は稼働中です:
+  - `claim_grant` / `claim_grant_with_proof` で、PoP 証明をオンチェーンで必須検証します。
+  - Ed25519 事前命令、許可済み PoP 署名者（`pop_config`）、ハッシュチェーン継続性（`pop_state`）を L1 で検証します。
+  - PoP v2 は API 監査アンカー（audit hash）を署名メッセージに含み、entry hash を L1 側で再計算・照合します。
 
 ## 🏗 アーキテクチャ：三位一体の信頼基盤
 本リポジトリは、以下の3層構造（Trinity Architecture）によって「責任の所在」をコードで定義します。
 
 レイヤー別の実装状況:
 
-- Layer 1（Solana決済/claim）: devnet claim フローは実装済み。L1 側での PoP 証明強制検証は planned。
-- Layer 2（APIプロセス証明）: 実装済み（グローバルハッシュチェーン + イベント単位連鎖 + 管理者認可）。
+- Layer 1（Solana決済/claim）: claim 命令で PoP 強制検証を実装済み（ed25519 + 正規署名者 + 連鎖継続 + 有効期限チェック）。
+- Layer 2（APIプロセス証明）: 実装済み（グローバルハッシュチェーン + イベント単位連鎖 + 監査アンカー束縛付き PoP 証明発行 + 管理者認可）。
 - Layer 3（利用者/管理者UI）: 実装済み（Web/Mobile UX、Phantom署名/deeplink、管理者セッションガード）。
+- Pages配信用エッジプロキシ: `functions/[[path]].ts` と `wene-mobile/functions/[[path]].ts` で実装済み（`/api/*`、`/v1/*`、`/metadata/*`、`/health`）。
 
 
 
@@ -79,6 +82,11 @@ graph TD
 * **革新点:** **NaCl (Curve25519)** を用いたエンドツーエンド暗号化 (E2EE) により、ユーザーの署名（意思）がプロトコルに届くまで、中間者攻撃から完全に保護されます。検閲耐性を持つPWAとして展開されます。
 * [📂 View Mobile Code](./wene-mobile)
 
+### 3.5. Edge Delivery Proxy（Cloudflare Pages Functions）
+* **技術スタック:** Cloudflare Pages Functions（`[[path]].ts`）
+* **役割:** Pages配信のUIとWorker APIのランタイム中継。
+* **実装:** `functions/[[path]].ts`（root）と `wene-mobile/functions/[[path]].ts` で `/api/*`、`/v1/*`、`/metadata/*`、`/health` を Worker に中継。
+
 ## 🦁 哲学：Winnyのその先へ
 かつてP2P技術は「管理者のいない自由」を目指しましたが、社会が求めていたのは「責任の所在が明確な信頼」でした。
 Asuka Networkは、P2Pの自律分散思想を継承しつつ、**「Proof of Process」による完全な監査可能性（Auditability）** を実装することで、行政や公共サービスが安心して依存できる、国産のデジタル公共基盤を目指します。
@@ -87,8 +95,8 @@ Asuka Networkは、P2Pの自律分散思想を継承しつつ、**「Proof of Pr
 - [x] **Phase 1: Genesis (完了)**
     - SVMコントラクト(Rust)とエッジハッシュチェーン(TS)の統合実装。
     - MVPアプリ「We-ne」のPWAデプロイ。
-- [ ] **Phase 2: Gating (予定)**
-    - API層からの有効なPoP証明がないトランザクションを、L1コントラクト側で強制的に拒絶するロジックの実装。
+- [x] **Phase 2: Gating (完了)**
+    - API層由来の有効なPoP証明がない claim トランザクションを、L1 コントラクト側で強制拒否。
 - [ ] **Phase 3: Federation**
     - 自治体や公共機関がノードとして参加可能な、コンソーシアム・モデルへの拡張。
 
@@ -99,13 +107,21 @@ Asuka Networkは、P2Pの自律分散思想を継承しつつ、**「Proof of Pr
 
 ---
 
-# We-ne (instant-grant-core)
+## We-ne リファレンス実装（instant-grant-core）
 
 We-ne は、Solana 上で非保管型の支援配布と参加券運用を検証するための、オープンソースのプロトタイプ/評価キットです。receipt 記録を用いた第三者検証性と重複受取防止を重視しています。
 
 > ステータス（2026年2月20日時点）: **PoC / devnet-first**。本番 mainnet 運用ではなく、再現性と審査向け検証を目的としています。
 
 [English README](./README.md) | [Architecture](./docs/ARCHITECTURE.md) | [Devnet Setup](./docs/DEVNET_SETUP.md) | [Security](./docs/SECURITY.md)
+
+## リポジトリ構成（現行）
+
+- `grant_program/`: Solanaプログラム（Anchor、Layer 1）。
+- `api-worker/`: Cloudflare Worker API とハッシュチェーン監査ロジック（Layer 2）。
+- `wene-mobile/`: 利用者/管理者アプリ（Expo、Web + Mobile UI、Layer 3）。
+- `functions/` と `wene-mobile/functions/`: Cloudflare Pages Functions のプロキシ層（`/api`、`/v1`、`/metadata`、`/health` -> Worker）。
+- `scripts/build-all.sh`: ルートから再現ビルド/テストを実行するヘルパー（`build`、`test`、`all`）。
 
 ## このプロトタイプが解決すること
 
@@ -206,20 +222,35 @@ Reviewer shortcut: \`./wene-mobile/src/screens/user/UserScanScreen.tsx\` と \`.
    - `ADMIN_PASSWORD`（必須、既定値不可）
    - `ADMIN_DEMO_PASSWORD`（任意、デモログイン用）
    - `CORS_ORIGIN`（推奨）
+   - `POP_SIGNER_SECRET_KEY_B64`（必須、on-chain PoP 証明署名用）
+   - `POP_SIGNER_PUBKEY`（必須、対応する Ed25519 公開鍵/base58）
 3. Cloudflare Workersへデプロイします。
-4. WorkerのURL（例: `https://api.your-name.workers.dev`）を控えます。
+4. WorkerのURL（例: `https://we-ne-school-api.<subdomain>.workers.dev`）を控えます。
 
-### Step 3: Layer 3 (Mobile App)
+### Step 3: Pages プロキシ層（`functions/` + `_redirects`）
+1. サイトへプロキシ関数がデプロイされることを確認します:
+   - `functions/[[path]].ts`
+   - `wene-mobile/functions/[[path]].ts`
+2. Web成果物のビルド時に API base を設定します:
+   - 推奨: `EXPO_PUBLIC_SCHOOL_API_BASE_URL`
+   - 互換フォールバック: `EXPO_PUBLIC_API_BASE_URL`
+3. 生成された `dist/_redirects` に `/api/*`、`/v1/*`、`/metadata/*` のプロキシルールが含まれることを確認します。
+
+### Step 4: Layer 3 (Mobile/Web App)
 1. `wene-mobile/` に移動します。
 2. `.env.example` から `.env` を作成します。
 3. アプリ環境変数を設定します:
-   - `EXPO_PUBLIC_API_BASE_URL` = Worker URL
+   - `EXPO_PUBLIC_SCHOOL_API_BASE_URL` = Worker URL（推奨）
+   - `EXPO_PUBLIC_API_BASE_URL` = Worker URL（互換フォールバック）
    - `EXPO_PUBLIC_BASE_URL` = Pages ドメイン（印刷/DeepLink UX のため推奨）
+   - `EXPO_PUBLIC_POP_SIGNER_PUBKEY` = Worker の `POP_SIGNER_PUBKEY` と同値（管理者発行時に必須）
    - `EXPO_PUBLIC_ADMIN_DEMO_PASSWORD`（デモログインボタンを使う場合のみ）
 4. `npm install` を実行します（web3.jsのパッチが自動的に適用されます）。
 5. アプリを起動します。
 
 ## クイックスタート（ローカル）
+
+Option A（`wene-mobile` で UI + ローカル API 起動）:
 
 \`\`\`bash
 cd wene-mobile
@@ -232,6 +263,18 @@ npm run dev:full
 - 管理者ログイン: \`http://localhost:8081/admin/login\`
 - 利用者スキャン導線: \`http://localhost:8081/u/scan?eventId=evt-001\`
 
+Option B（ルートの再現ビルド/テストヘルパー）:
+
+\`\`\`bash
+chmod +x scripts/build-all.sh
+./scripts/build-all.sh all
+\`\`\`
+
+\`scripts/build-all.sh\` が実行する内容:
+- \`build\`: Anchor build + mobile TypeScript check
+- \`test\`: Anchor tests
+- \`all\`: build + test + mobile typecheck（既定）
+
 ## クイックスタート（Cloudflare Pages）
 
 このモノレポの Cloudflare Pages 設定:
@@ -242,14 +285,18 @@ npm run dev:full
 
 \`export:web\` の必須条件:
 
-- \`EXPO_PUBLIC_API_BASE_URL\`（または \`EXPO_PUBLIC_SCHOOL_API_BASE_URL\`）に Worker URL を設定する。
+- \`EXPO_PUBLIC_SCHOOL_API_BASE_URL\`（推奨）または \`EXPO_PUBLIC_API_BASE_URL\`（フォールバック）に Worker URL を設定する。
 - 未設定の場合、\`scripts/gen-redirects.js\` が失敗する。proxy 用リダイレクトが生成されないと、\`/api/*\` と \`/v1/*\` が Pages に直接当たり \`405\` や HTML を返す場合がある。
+- \`npm run deploy:pages\` は既定で `instant-grant-core` にデプロイする。
+  - 別プロジェクトを使う場合: \`PAGES_PROJECT_NAME=<your-pages-project> npm run deploy:pages\`
+- \`npm run verify:pages\` は既定で `https://instant-grant-core.pages.dev` を検証する。
+  - 別ドメインを検証する場合: \`PAGES_BASE_URL=https://<your-pages-domain> npm run verify:pages\`
 
 コピペ用デプロイコマンド:
 
 \`\`\`bash
 cd wene-mobile
-EXPO_PUBLIC_API_BASE_URL="https://<your-worker>.workers.dev" npm run export:web
+EXPO_PUBLIC_SCHOOL_API_BASE_URL="https://<your-worker>.workers.dev" npm run export:web
 npm run deploy:pages
 npm run verify:pages
 \`\`\`
@@ -306,9 +353,9 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST \\
 ## 詳細ドキュメント
 
 - School PoC guide: \`wene-mobile/README_SCHOOL.md\`
-- Cloudflare Pages deployment notes: \`CLOUDFLARE_PAGES.md\`
-- Worker API details: \`README.md\`
-- Devnet setup: \`DEVNET_SETUP.md\`
+- Cloudflare Pages deployment notes: \`wene-mobile/docs/CLOUDFLARE_PAGES.md\`
+- Worker API details: \`api-worker/README.md\`
+- Devnet setup: \`docs/DEVNET_SETUP.md\`
 
 ## 審査員向けコンテキスト
 

@@ -5,6 +5,7 @@ import {
   SystemProgram,
   SYSVAR_RENT_PUBKEY,
   Transaction,
+  TransactionInstruction,
 } from '@solana/web3.js';
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -21,8 +22,9 @@ import {
   PROGRAM_ID as TOKEN_METADATA_PROGRAM_ID,
   createCreateMetadataAccountV3Instruction,
 } from '@metaplex-foundation/mpl-token-metadata';
+import { GRANT_PROGRAM_ID } from './config';
 import { getConnection, getProgram } from './anchorClient';
-import { getGrantPda, getVaultPda } from './grantProgram';
+import { getGrantPda, getPopConfigPda, getVaultPda } from './grantProgram';
 import { signTransaction } from '../utils/phantom';
 import { sendSignedTx } from './sendTx';
 import { setPhantomWebReturnPath } from '../utils/phantomWebReturnPath';
@@ -30,6 +32,7 @@ import type { PhantomExtensionProvider } from '../wallet/phantomExtension';
 
 const MAX_U64 = (BigInt(1) << BigInt(64)) - BigInt(1);
 const MIN_PREFUND_MULTIPLIER = 100;
+const UPSERT_POP_CONFIG_DISCRIMINATOR = Buffer.from([103, 79, 37, 9, 166, 255, 209, 132]);
 
 interface AdminPhantomMobileContext {
   mode: 'mobile';
@@ -130,6 +133,38 @@ function resolveMetadataBaseUrl(): string {
   return 'https://instant-grant-core.haruki-kira3.workers.dev';
 }
 
+function resolvePopSignerPubkey(): PublicKey {
+  const raw = (process.env.EXPO_PUBLIC_POP_SIGNER_PUBKEY ?? '').trim();
+  if (!raw) {
+    throw new Error('PoP署名者公開鍵が未設定です。EXPO_PUBLIC_POP_SIGNER_PUBKEY を設定してください');
+  }
+  try {
+    return new PublicKey(raw);
+  } catch {
+    throw new Error('EXPO_PUBLIC_POP_SIGNER_PUBKEY の形式が不正です');
+  }
+}
+
+function buildUpsertPopConfigInstruction(params: {
+  authority: PublicKey;
+  popConfigPda: PublicKey;
+  signerPubkey: PublicKey;
+}): TransactionInstruction {
+  const data = Buffer.alloc(8 + 32);
+  UPSERT_POP_CONFIG_DISCRIMINATOR.copy(data, 0);
+  params.signerPubkey.toBuffer().copy(data, 8);
+  return new TransactionInstruction({
+    programId: GRANT_PROGRAM_ID,
+    keys: [
+      { pubkey: params.popConfigPda, isSigner: false, isWritable: true },
+      { pubkey: params.authority, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
+    ],
+    data,
+  });
+}
+
 async function signAndSendTx(
   tx: Transaction,
   phantom: AdminPhantomContext,
@@ -186,6 +221,7 @@ export async function issueEventTicketToken(
   const periodSeconds = toU64(BigInt(claimIntervalDays * 24 * 60 * 60), 'periodSeconds');
 
   const authority = new PublicKey(params.phantom.walletPubkey);
+  const popSignerPubkey = resolvePopSignerPubkey();
   const mintKeypair = Keypair.generate();
   const mint = mintKeypair.publicKey;
   const grantId = BigInt(Date.now() * 1000 + Math.floor(Math.random() * 1000));
@@ -202,6 +238,7 @@ export async function issueEventTicketToken(
   );
   const [grantPda] = getGrantPda(authority, mint, grantId);
   const [vaultPda] = getVaultPda(grantPda);
+  const [popConfigPda] = getPopConfigPda(authority);
   const [metadataPda] = PublicKey.findProgramAddressSync(
     [
       Buffer.from('metadata'),
@@ -277,6 +314,12 @@ export async function issueEventTicketToken(
       })
       .instruction();
 
+    const upsertPopConfigIx = buildUpsertPopConfigInstruction({
+      authority,
+      popConfigPda,
+      signerPubkey: popSignerPubkey,
+    });
+
     const metadataIx = createCreateMetadataAccountV3Instruction(
       {
         metadata: metadataPda,
@@ -335,6 +378,7 @@ export async function issueEventTicketToken(
     );
 
     const tx2 = new Transaction().add(
+      upsertPopConfigIx,
       createGrantIx,
       metadataIx,
       fundGrantIx,

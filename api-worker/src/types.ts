@@ -63,6 +63,24 @@ export interface ClaimBody {
   joinToken?: string;
 }
 
+export interface PopProofBody {
+  eventId?: string;
+  grant?: string;
+  claimer?: string;
+  periodIndex?: string | number;
+}
+
+export interface PopProofResponse {
+  signerPubkey: string;
+  messageBase64: string;
+  signatureBase64: string;
+  auditHash: string;
+  prevHash: string;
+  streamPrevHash: string;
+  entryHash: string;
+  issuedAt: number;
+}
+
 /** POST /api/users/register */
 export interface RegisterBody {
   displayName?: string;

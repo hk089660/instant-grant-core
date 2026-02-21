@@ -43,6 +43,15 @@ npx wrangler deploy
 
 デプロイ後に表示される URL（例: `https://we-ne-school-api.<subdomain>.workers.dev`）を、Pages の環境変数 `EXPO_PUBLIC_API_BASE_URL` に設定する。
 
+### PoP（Proof of Process）署名設定（必須）
+
+L1 で PoP 検証を行うため、以下の Worker 変数を設定する:
+
+- `POP_SIGNER_SECRET_KEY_B64`: Ed25519 の 32byte seed または 64byte secret key を base64 で設定
+- `POP_SIGNER_PUBKEY`: 対応する公開鍵（base58）
+
+`POST /v1/school/pop-proof` はこの鍵で署名した PoP 証明を返し、クライアントは `claim_grant` 送信前に Ed25519 検証命令を付与する。
+
 ## CORS
 
 この Worker は次の優先順で CORS を判定する。

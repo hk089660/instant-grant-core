@@ -1,6 +1,12 @@
 #![allow(deprecated)]
 
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::{
+    ed25519_program,
+    hash::hashv,
+    instruction::Instruction,
+    sysvar::instructions::{load_current_index_checked, load_instruction_at_checked},
+};
 
 declare_id!("GZcUoGHk8SfAArTKicL1jiRHZEQa3EuzgYcC2u4yWfSR");
 use anchor_spl::token::{
@@ -20,6 +26,12 @@ use anchor_spl::token::{
 // - 可変はサブスクの「プラン（tier）」で後から拡張
 
 pub const DEFAULT_MONTH_SECONDS: i64 = 2_592_000; // 30 days
+const POP_HASH_LEN: usize = 32;
+const POP_MESSAGE_VERSION_V1: u8 = 1;
+const POP_MESSAGE_VERSION_V2: u8 = 2;
+const POP_MESSAGE_LEN_V1: usize = 1 + 32 + 32 + 8 + 32 + 32 + 32 + 8;
+const POP_MESSAGE_LEN_V2: usize = 1 + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 8;
+const POP_MAX_SKEW_SECONDS: i64 = 600; // 10 minutes
 
 #[program]
 pub mod grant_program {
@@ -87,14 +99,18 @@ pub mod grant_program {
     }
 
     /// 受給（期間内1回のみ）
-    pub fn claim_grant(ctx: Context<ClaimGrant>, period_index: u64) -> Result<()> {
+    pub fn claim_grant(mut ctx: Context<ClaimGrant>, period_index: u64) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
-        let grant = &ctx.accounts.grant;
 
-        require!(!grant.paused, ErrorCode::Paused);
+        require!(!ctx.accounts.grant.paused, ErrorCode::Paused);
         // allowlist が有効な場合は proof 付きの claim を要求
-        require!(grant.merkle_root == [0u8; 32], ErrorCode::AllowlistRequired);
+        require!(
+            ctx.accounts.grant.merkle_root == [0u8; 32],
+            ErrorCode::AllowlistRequired
+        );
 
+        verify_and_record_pop_proof(&mut ctx.accounts, period_index, now, ctx.bumps.pop_state)?;
+        let grant = &ctx.accounts.grant;
         require_claim_timing(grant, now, period_index)?;
         // receipt PDA の seed に period_index が含まれているため
         // 同じ期間に2回目のclaimをしようとすると init が失敗し、二重受給が防げる
@@ -195,28 +211,41 @@ pub mod grant_program {
         Ok(())
     }
 
+    /// PoP（Proof of Process）署名者を設定/更新
+    pub fn upsert_pop_config(ctx: Context<UpsertPopConfig>, signer_pubkey: Pubkey) -> Result<()> {
+        let pop_config = &mut ctx.accounts.pop_config;
+        pop_config.authority = ctx.accounts.authority.key();
+        pop_config.signer_pubkey = signer_pubkey;
+        pop_config.bump = ctx.bumps.pop_config;
+        Ok(())
+    }
+
     /// allowlist（Merkle）を用いた受給
     /// - Grant に merkle_root が設定されている場合はこちらを使用
     pub fn claim_grant_with_proof(
-        ctx: Context<ClaimGrant>,
+        mut ctx: Context<ClaimGrant>,
         period_index: u64,
         proof: Vec<[u8; 32]>,
     ) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
-        let grant = &ctx.accounts.grant;
 
-        require!(!grant.paused, ErrorCode::Paused);
+        require!(!ctx.accounts.grant.paused, ErrorCode::Paused);
 
         // allowlist が無効なら通常の claim を使えばよい
-        require!(grant.merkle_root != [0u8; 32], ErrorCode::AllowlistNotEnabled);
+        require!(
+            ctx.accounts.grant.merkle_root != [0u8; 32],
+            ErrorCode::AllowlistNotEnabled
+        );
 
         // Merkle allowlist verify
         let leaf = allowlist_leaf(ctx.accounts.claimer.key());
         require!(
-            verify_merkle_sorted(grant.merkle_root, leaf, &proof),
+            verify_merkle_sorted(ctx.accounts.grant.merkle_root, leaf, &proof),
             ErrorCode::NotInAllowlist
         );
 
+        verify_and_record_pop_proof(&mut ctx.accounts, period_index, now, ctx.bumps.pop_state)?;
+        let grant = &ctx.accounts.grant;
         require_claim_timing(grant, now, period_index)?;
         transfer_from_vault(
             &ctx.accounts.grant,
@@ -355,7 +384,45 @@ pub struct ClaimGrant<'info> {
     )]
     pub receipt: Account<'info, ClaimReceipt>,
 
+    #[account(
+        init_if_needed,
+        payer = claimer,
+        space = 8 + PopState::INIT_SPACE,
+        seeds = [b"pop-state", grant.key().as_ref()],
+        bump
+    )]
+    pub pop_state: Account<'info, PopState>,
+
+    #[account(
+        seeds = [b"pop-config", grant.authority.as_ref()],
+        bump = pop_config.bump,
+        constraint = pop_config.authority == grant.authority @ ErrorCode::InvalidPopConfigAuthority
+    )]
+    pub pop_config: Account<'info, PopConfig>,
+
+    /// CHECK: Instructions Sysvar account (required for Ed25519 proof verification)
+    #[account(address = anchor_lang::solana_program::sysvar::instructions::ID)]
+    pub instructions_sysvar: UncheckedAccount<'info>,
+
     pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct UpsertPopConfig<'info> {
+    #[account(
+        init_if_needed,
+        payer = authority,
+        space = 8 + PopConfig::INIT_SPACE,
+        seeds = [b"pop-config", authority.key().as_ref()],
+        bump
+    )]
+    pub pop_config: Account<'info, PopConfig>,
+
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
 }
@@ -465,6 +532,32 @@ impl ClaimReceipt {
     pub const INIT_SPACE: usize = 32 + 32 + 8 + 8;
 }
 
+#[account]
+pub struct PopConfig {
+    pub authority: Pubkey,
+    pub signer_pubkey: Pubkey,
+    pub bump: u8,
+}
+
+impl PopConfig {
+    pub const INIT_SPACE: usize = 32 + 32 + 1;
+}
+
+#[account]
+pub struct PopState {
+    pub grant: Pubkey,
+    pub last_global_hash: [u8; 32],
+    pub last_stream_hash: [u8; 32],
+    pub last_period_index: u64,
+    pub last_issued_at: i64,
+    pub initialized: bool,
+    pub bump: u8,
+}
+
+impl PopState {
+    pub const INIT_SPACE: usize = 32 + 32 + 32 + 8 + 8 + 1 + 1;
+}
+
 // ===== Helpers =====
 
 fn require_claim_timing(grant: &Grant, now: i64, period_index: u64) -> Result<()> {
@@ -530,6 +623,297 @@ fn record_receipt(
     receipt.claimed_at = claimed_at;
 }
 
+#[derive(Clone)]
+struct PopProofMessage {
+    version: u8,
+    grant: Pubkey,
+    claimer: Pubkey,
+    period_index: u64,
+    prev_hash: [u8; POP_HASH_LEN],
+    stream_prev_hash: [u8; POP_HASH_LEN],
+    audit_hash: [u8; POP_HASH_LEN],
+    entry_hash: [u8; POP_HASH_LEN],
+    issued_at: i64,
+}
+
+fn verify_and_record_pop_proof<'info>(
+    accounts: &mut ClaimGrant<'info>,
+    period_index: u64,
+    now: i64,
+    pop_state_bump: u8,
+) -> Result<()> {
+    let instructions_info = accounts.instructions_sysvar.to_account_info();
+    let current_index = load_current_index_checked(&instructions_info)
+        .map_err(|_| error!(ErrorCode::MissingPopSignatureInstruction))? as usize;
+    require!(current_index > 0, ErrorCode::MissingPopSignatureInstruction);
+
+    let ed25519_ix = load_instruction_at_checked(current_index - 1, &instructions_info)
+        .map_err(|_| error!(ErrorCode::MissingPopSignatureInstruction))?;
+    require!(
+        ed25519_ix.program_id == ed25519_program::id(),
+        ErrorCode::InvalidPopSignatureProgram
+    );
+
+    let (signer_pubkey, message_bytes) = extract_ed25519_signer_and_message(&ed25519_ix)?;
+    require!(
+        signer_pubkey == accounts.pop_config.signer_pubkey,
+        ErrorCode::InvalidPopSigner
+    );
+
+    let message = parse_pop_message(&message_bytes)?;
+    require!(message.grant == accounts.grant.key(), ErrorCode::PopProofGrantMismatch);
+    require!(
+        message.claimer == accounts.claimer.key(),
+        ErrorCode::PopProofClaimerMismatch
+    );
+    require!(
+        message.period_index == period_index,
+        ErrorCode::PopProofPeriodMismatch
+    );
+
+    if message.version == POP_MESSAGE_VERSION_V2 {
+        require!(
+            message.audit_hash != [0u8; 32],
+            ErrorCode::PopAuditHashMissing
+        );
+    }
+
+    let expected_entry_hash = pop_entry_hash(
+        message.version,
+        &message.prev_hash,
+        &message.stream_prev_hash,
+        &message.audit_hash,
+        &message.grant,
+        &message.claimer,
+        message.period_index,
+        message.issued_at,
+    )?;
+    require!(
+        expected_entry_hash == message.entry_hash,
+        ErrorCode::PopEntryHashMismatch
+    );
+
+    let skew = absolute_i64_diff(now, message.issued_at)?;
+    require!(skew <= POP_MAX_SKEW_SECONDS, ErrorCode::PopProofExpired);
+
+    let pop_state = &mut accounts.pop_state;
+    if pop_state.initialized {
+        require!(pop_state.grant == accounts.grant.key(), ErrorCode::PopStateGrantMismatch);
+        require!(
+            pop_state.last_global_hash == message.prev_hash,
+            ErrorCode::PopHashChainBroken
+        );
+        require!(
+            pop_state.last_stream_hash == message.stream_prev_hash,
+            ErrorCode::PopStreamChainBroken
+        );
+    } else {
+        require!(message.prev_hash == [0u8; 32], ErrorCode::PopGenesisMismatch);
+        require!(
+            message.stream_prev_hash == [0u8; 32],
+            ErrorCode::PopGenesisMismatch
+        );
+        pop_state.grant = accounts.grant.key();
+        pop_state.bump = pop_state_bump;
+        pop_state.initialized = true;
+    }
+
+    pop_state.last_global_hash = message.entry_hash;
+    pop_state.last_stream_hash = message.entry_hash;
+    pop_state.last_period_index = message.period_index;
+    pop_state.last_issued_at = message.issued_at;
+
+    Ok(())
+}
+
+fn extract_ed25519_signer_and_message(ix: &Instruction) -> Result<(Pubkey, Vec<u8>)> {
+    let data = ix.data.as_slice();
+    require!(data.len() >= 16, ErrorCode::InvalidPopSignatureData);
+    require!(data[0] == 1, ErrorCode::InvalidPopSignatureData);
+
+    let signature_offset = read_u16_le(data, 2)? as usize;
+    let signature_instruction_index = read_u16_le(data, 4)?;
+    let public_key_offset = read_u16_le(data, 6)? as usize;
+    let public_key_instruction_index = read_u16_le(data, 8)?;
+    let message_data_offset = read_u16_le(data, 10)? as usize;
+    let message_data_size = read_u16_le(data, 12)? as usize;
+    let message_instruction_index = read_u16_le(data, 14)?;
+
+    // Current ed25519 instruction must include all fields inline.
+    require!(
+        signature_instruction_index == u16::MAX &&
+        public_key_instruction_index == u16::MAX &&
+        message_instruction_index == u16::MAX,
+        ErrorCode::InvalidPopSignatureData
+    );
+
+    let signature_end = signature_offset
+        .checked_add(64)
+        .ok_or(ErrorCode::MathOverflow)?;
+    let public_key_end = public_key_offset
+        .checked_add(32)
+        .ok_or(ErrorCode::MathOverflow)?;
+    let message_end = message_data_offset
+        .checked_add(message_data_size)
+        .ok_or(ErrorCode::MathOverflow)?;
+
+    require!(
+        signature_end <= data.len() &&
+        public_key_end <= data.len() &&
+        message_end <= data.len(),
+        ErrorCode::InvalidPopSignatureData
+    );
+
+    let signer_pubkey = Pubkey::new_from_array(
+        data[public_key_offset..public_key_end]
+            .try_into()
+            .map_err(|_| error!(ErrorCode::InvalidPopSignatureData))?,
+    );
+    let message_bytes = data[message_data_offset..message_end].to_vec();
+    Ok((signer_pubkey, message_bytes))
+}
+
+fn parse_pop_message(message: &[u8]) -> Result<PopProofMessage> {
+    require!(!message.is_empty(), ErrorCode::InvalidPopMessageLength);
+    let version = message[0];
+    require!(
+        version == POP_MESSAGE_VERSION_V1 || version == POP_MESSAGE_VERSION_V2,
+        ErrorCode::InvalidPopMessageVersion
+    );
+    let expected_len = if version == POP_MESSAGE_VERSION_V2 {
+        POP_MESSAGE_LEN_V2
+    } else {
+        POP_MESSAGE_LEN_V1
+    };
+    require!(
+        message.len() == expected_len,
+        ErrorCode::InvalidPopMessageLength
+    );
+
+    let mut offset = 1usize;
+    let grant = read_pubkey(message, &mut offset)?;
+    let claimer = read_pubkey(message, &mut offset)?;
+    let period_index = read_u64_le(message, &mut offset)?;
+    let prev_hash = read_hash(message, &mut offset)?;
+    let stream_prev_hash = read_hash(message, &mut offset)?;
+    let audit_hash = if version == POP_MESSAGE_VERSION_V2 {
+        read_hash(message, &mut offset)?
+    } else {
+        [0u8; 32]
+    };
+    let entry_hash = read_hash(message, &mut offset)?;
+    let issued_at = read_i64_le(message, &mut offset)?;
+
+    Ok(PopProofMessage {
+        version,
+        grant,
+        claimer,
+        period_index,
+        prev_hash,
+        stream_prev_hash,
+        audit_hash,
+        entry_hash,
+        issued_at,
+    })
+}
+
+fn pop_entry_hash(
+    version: u8,
+    prev_hash: &[u8; 32],
+    stream_prev_hash: &[u8; 32],
+    audit_hash: &[u8; 32],
+    grant: &Pubkey,
+    claimer: &Pubkey,
+    period_index: u64,
+    issued_at: i64,
+) -> Result<[u8; 32]> {
+    let period_bytes = period_index.to_le_bytes();
+    let issued_at_bytes = issued_at.to_le_bytes();
+    match version {
+        POP_MESSAGE_VERSION_V1 => Ok(hashv(&[
+            b"we-ne:pop:v1",
+            prev_hash.as_ref(),
+            stream_prev_hash.as_ref(),
+            grant.as_ref(),
+            claimer.as_ref(),
+            period_bytes.as_ref(),
+            issued_at_bytes.as_ref(),
+        ])
+        .to_bytes()),
+        POP_MESSAGE_VERSION_V2 => Ok(hashv(&[
+            b"we-ne:pop:v2",
+            prev_hash.as_ref(),
+            stream_prev_hash.as_ref(),
+            audit_hash.as_ref(),
+            grant.as_ref(),
+            claimer.as_ref(),
+            period_bytes.as_ref(),
+            issued_at_bytes.as_ref(),
+        ])
+        .to_bytes()),
+        _ => err!(ErrorCode::InvalidPopMessageVersion),
+    }
+}
+
+fn absolute_i64_diff(a: i64, b: i64) -> Result<i64> {
+    if a >= b {
+        a.checked_sub(b).ok_or(ErrorCode::MathOverflow.into())
+    } else {
+        b.checked_sub(a).ok_or(ErrorCode::MathOverflow.into())
+    }
+}
+
+fn read_u16_le(data: &[u8], offset: usize) -> Result<u16> {
+    let end = offset.checked_add(2).ok_or(ErrorCode::MathOverflow)?;
+    require!(end <= data.len(), ErrorCode::InvalidPopSignatureData);
+    Ok(u16::from_le_bytes([data[offset], data[offset + 1]]))
+}
+
+fn read_pubkey(data: &[u8], offset: &mut usize) -> Result<Pubkey> {
+    let end = offset.checked_add(32).ok_or(ErrorCode::MathOverflow)?;
+    require!(end <= data.len(), ErrorCode::InvalidPopMessageLength);
+    let out = Pubkey::new_from_array(
+        data[*offset..end]
+            .try_into()
+            .map_err(|_| error!(ErrorCode::InvalidPopMessageLength))?,
+    );
+    *offset = end;
+    Ok(out)
+}
+
+fn read_hash(data: &[u8], offset: &mut usize) -> Result<[u8; 32]> {
+    let end = offset.checked_add(32).ok_or(ErrorCode::MathOverflow)?;
+    require!(end <= data.len(), ErrorCode::InvalidPopMessageLength);
+    let out: [u8; 32] = data[*offset..end]
+        .try_into()
+        .map_err(|_| error!(ErrorCode::InvalidPopMessageLength))?;
+    *offset = end;
+    Ok(out)
+}
+
+fn read_u64_le(data: &[u8], offset: &mut usize) -> Result<u64> {
+    let end = offset.checked_add(8).ok_or(ErrorCode::MathOverflow)?;
+    require!(end <= data.len(), ErrorCode::InvalidPopMessageLength);
+    let out = u64::from_le_bytes(
+        data[*offset..end]
+            .try_into()
+            .map_err(|_| error!(ErrorCode::InvalidPopMessageLength))?,
+    );
+    *offset = end;
+    Ok(out)
+}
+
+fn read_i64_le(data: &[u8], offset: &mut usize) -> Result<i64> {
+    let end = offset.checked_add(8).ok_or(ErrorCode::MathOverflow)?;
+    require!(end <= data.len(), ErrorCode::InvalidPopMessageLength);
+    let out = i64::from_le_bytes(
+        data[*offset..end]
+            .try_into()
+            .map_err(|_| error!(ErrorCode::InvalidPopMessageLength))?,
+    );
+    *offset = end;
+    Ok(out)
+}
 
 // ===== Allowlist (Merkle) helpers =====
 
@@ -589,4 +973,38 @@ pub enum ErrorCode {
     AllowlistNotEnabled,
     #[msg("Claimer is not in allowlist")]
     NotInAllowlist,
+    #[msg("PoP config authority mismatch")]
+    InvalidPopConfigAuthority,
+    #[msg("Missing PoP signature instruction")]
+    MissingPopSignatureInstruction,
+    #[msg("Invalid PoP signature program")]
+    InvalidPopSignatureProgram,
+    #[msg("Invalid PoP signature data")]
+    InvalidPopSignatureData,
+    #[msg("Invalid PoP signer")]
+    InvalidPopSigner,
+    #[msg("Invalid PoP message version")]
+    InvalidPopMessageVersion,
+    #[msg("Invalid PoP message length")]
+    InvalidPopMessageLength,
+    #[msg("PoP proof grant mismatch")]
+    PopProofGrantMismatch,
+    #[msg("PoP proof claimer mismatch")]
+    PopProofClaimerMismatch,
+    #[msg("PoP proof period mismatch")]
+    PopProofPeriodMismatch,
+    #[msg("PoP proof expired")]
+    PopProofExpired,
+    #[msg("PoP entry hash mismatch")]
+    PopEntryHashMismatch,
+    #[msg("PoP hash chain continuity is broken")]
+    PopHashChainBroken,
+    #[msg("PoP stream chain continuity is broken")]
+    PopStreamChainBroken,
+    #[msg("PoP genesis hash mismatch")]
+    PopGenesisMismatch,
+    #[msg("PoP state grant mismatch")]
+    PopStateGrantMismatch,
+    #[msg("PoP audit hash is missing")]
+    PopAuditHashMissing,
 }

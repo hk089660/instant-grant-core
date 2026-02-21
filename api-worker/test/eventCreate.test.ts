@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import bs58 from 'bs58';
+import nacl from 'tweetnacl';
 import { SchoolStore, type Env } from '../src/storeDO';
 
 class MockStorage {
@@ -53,7 +55,12 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
 
   beforeEach(() => {
     state = new MockDurableObjectState();
-    const env: Env = { ADMIN_PASSWORD: 'master-secret' };
+    const popSigner = nacl.sign.keyPair();
+    const env: Env = {
+      ADMIN_PASSWORD: 'master-secret',
+      POP_SIGNER_SECRET_KEY_B64: Buffer.from(popSigner.secretKey).toString('base64'),
+      POP_SIGNER_PUBKEY: bs58.encode(popSigner.publicKey),
+    };
     // @ts-expect-error mock for DurableObjectState
     store = new SchoolStore(state, env);
   });
@@ -218,5 +225,56 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     );
 
     expect(res.status).toBe(401);
+  });
+
+  it('issues signed PoP claim proof for on-chain verification', async () => {
+    const createRes = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'pop event',
+          datetime: '2026/02/21 10:00',
+          host: 'admin',
+          ticketTokenAmount: 1,
+        }),
+      })
+    );
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as { id: string };
+
+    const proofRes = await store.fetch(
+      new Request('https://example.com/v1/school/pop-proof', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: created.id,
+          grant: 'So11111111111111111111111111111111111111112',
+          claimer: '11111111111111111111111111111111',
+          periodIndex: '0',
+        }),
+      })
+    );
+    expect(proofRes.status).toBe(200);
+    const proof = (await proofRes.json()) as {
+      signerPubkey?: string;
+      messageBase64?: string;
+      signatureBase64?: string;
+      auditHash?: string;
+      entryHash?: string;
+      prevHash?: string;
+      streamPrevHash?: string;
+      issuedAt?: number;
+    };
+    expect(typeof proof.signerPubkey).toBe('string');
+    expect(typeof proof.messageBase64).toBe('string');
+    expect(typeof proof.signatureBase64).toBe('string');
+    expect(proof.auditHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(proof.entryHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(proof.prevHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(proof.streamPrevHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(typeof proof.issuedAt).toBe('number');
+    const message = Buffer.from(proof.messageBase64 ?? '', 'base64');
+    expect(message[0]).toBe(2);
   });
 });
