@@ -232,7 +232,7 @@ Use the following order for a clean deployment path.
    - `AUDIT_LOGS` (R2 bucket, required when running immutable mode in production)
    - `AUDIT_INDEX` (KV, optional metadata index for fast lookup)
 4. Deploy to Cloudflare Workers.
-5. Copy your Worker's URL (for example `https://we-ne-school-api.<subdomain>.workers.dev`).
+5. Copy your Worker's URL (canonical: `https://instant-grant-core.haruki-kira3.workers.dev`).
 6. Verify PoP runtime status:
    - `GET /v1/school/pop-status` should return `enforceOnchainPop: true` and `signerConfigured: true`.
 7. Verify audit runtime status:
@@ -309,7 +309,7 @@ Copy-paste Deploy Command:
 
 ```bash
 cd wene-mobile
-EXPO_PUBLIC_SCHOOL_API_BASE_URL="https://<your-worker>.workers.dev" npm run export:web
+EXPO_PUBLIC_SCHOOL_API_BASE_URL="https://instant-grant-core.haruki-kira3.workers.dev" npm run export:web
 npm run deploy:pages
 npm run verify:pages
 ```

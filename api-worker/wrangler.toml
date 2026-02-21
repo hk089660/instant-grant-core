@@ -1,4 +1,4 @@
-name = "we-ne-school-api"
+name = "instant-grant-core"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
 

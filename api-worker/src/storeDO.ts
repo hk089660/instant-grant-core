@@ -692,14 +692,30 @@ export class SchoolStore implements DurableObject {
     const rows = await this.ctx.storage.list({ prefix: AUDIT_HISTORY_PREFIX, limit, reverse: true });
     const entries = Array.from(rows.values()) as AuditEvent[];
 
-    let newerEntry: AuditEvent | null = null;
-    const expectedStreamOlderHashByEvent = new Map<string, string>();
+    const validEntries: AuditEvent[] = [];
 
     for (const entry of entries) {
       if (!entry || typeof entry !== 'object' || typeof entry.entry_hash !== 'string') {
         issues.push({
           code: 'invalid_entry_shape',
           message: 'invalid audit history entry',
+        });
+        continue;
+      }
+      if (typeof entry.eventId !== 'string' || !entry.eventId) {
+        issues.push({
+          code: 'invalid_entry_shape',
+          message: 'invalid eventId in audit history entry',
+          entryHash: entry.entry_hash,
+        });
+        continue;
+      }
+      if (typeof entry.prev_hash !== 'string' || !entry.prev_hash) {
+        issues.push({
+          code: 'invalid_entry_shape',
+          message: 'invalid prev_hash in audit history entry',
+          entryHash: entry.entry_hash,
+          eventId: entry.eventId,
         });
         continue;
       }
@@ -714,25 +730,7 @@ export class SchoolStore implements DurableObject {
         });
       }
 
-      if (newerEntry && newerEntry.prev_hash !== entry.entry_hash) {
-        issues.push({
-          code: 'global_chain_break',
-          message: 'global prev_hash does not point to the next older entry',
-          entryHash: newerEntry.entry_hash,
-          eventId: newerEntry.eventId,
-        });
-      }
-
-      const expectedOlderHash = expectedStreamOlderHashByEvent.get(entry.eventId);
-      if (expectedOlderHash && expectedOlderHash !== entry.entry_hash) {
-        issues.push({
-          code: 'stream_chain_break',
-          message: 'stream_prev_hash does not point to next older entry in this event stream',
-          entryHash: entry.entry_hash,
-          eventId: entry.eventId,
-        });
-      }
-      expectedStreamOlderHashByEvent.set(entry.eventId, entry.stream_prev_hash ?? 'GENESIS');
+      validEntries.push(entry);
 
       if (shouldVerifyImmutable) {
         if (!entry.immutable) {
@@ -799,7 +797,188 @@ export class SchoolStore implements DurableObject {
         }
       }
 
-      newerEntry = entry;
+    }
+
+    const entriesByHash = new Map<string, AuditEvent>();
+    const globalChildCount = new Map<string, number>();
+    const globalExternalPrevRefs: AuditEvent[] = [];
+
+    for (const entry of validEntries) {
+      if (entriesByHash.has(entry.entry_hash)) {
+        issues.push({
+          code: 'global_chain_break',
+          message: 'duplicate entry_hash detected in audit window',
+          entryHash: entry.entry_hash,
+          eventId: entry.eventId,
+        });
+      }
+      entriesByHash.set(entry.entry_hash, entry);
+    }
+
+    for (const entry of validEntries) {
+      if (entry.prev_hash === 'GENESIS') continue;
+      if (entriesByHash.has(entry.prev_hash)) {
+        globalChildCount.set(entry.prev_hash, (globalChildCount.get(entry.prev_hash) ?? 0) + 1);
+      } else {
+        globalExternalPrevRefs.push(entry);
+      }
+    }
+
+    for (const [entryHash, childCount] of globalChildCount.entries()) {
+      if (childCount > 1) {
+        const entry = entriesByHash.get(entryHash);
+        issues.push({
+          code: 'global_chain_break',
+          message: 'multiple newer entries point to the same global predecessor',
+          entryHash,
+          eventId: entry?.eventId,
+        });
+      }
+    }
+
+    if (globalExternalPrevRefs.length > 1) {
+      issues.push({
+        code: 'global_chain_break',
+        message: 'multiple entries point outside of current global audit window',
+        entryHash: globalExternalPrevRefs[0]?.entry_hash,
+        eventId: globalExternalPrevRefs[0]?.eventId,
+      });
+    }
+
+    const globalHeads = validEntries.filter((entry) => !globalChildCount.has(entry.entry_hash));
+    if (validEntries.length > 0 && globalHeads.length !== 1) {
+      issues.push({
+        code: 'global_chain_break',
+        message: 'global chain must have exactly one head in audit window',
+      });
+    }
+
+    const globalHead = globalHeads[0] ?? null;
+    let oldestInWindowEntry: AuditEvent | null = null;
+
+    if (globalHead) {
+      const visited = new Set<string>();
+      let current: AuditEvent | null = globalHead;
+      while (current) {
+        if (visited.has(current.entry_hash)) {
+          issues.push({
+            code: 'global_chain_break',
+            message: 'cycle detected in global chain',
+            entryHash: current.entry_hash,
+            eventId: current.eventId,
+          });
+          break;
+        }
+        visited.add(current.entry_hash);
+        oldestInWindowEntry = current;
+
+        if (current.prev_hash === 'GENESIS') break;
+        current = entriesByHash.get(current.prev_hash) ?? null;
+      }
+
+      if (visited.size !== validEntries.length) {
+        issues.push({
+          code: 'global_chain_break',
+          message: 'global chain is disconnected within audit window',
+          entryHash: globalHead.entry_hash,
+          eventId: globalHead.eventId,
+        });
+      }
+    }
+
+    const entriesByEvent = new Map<string, AuditEvent[]>();
+    for (const entry of validEntries) {
+      const bucket = entriesByEvent.get(entry.eventId);
+      if (bucket) bucket.push(entry);
+      else entriesByEvent.set(entry.eventId, [entry]);
+    }
+
+    for (const [eventId, streamEntries] of entriesByEvent.entries()) {
+      const streamByHash = new Map<string, AuditEvent>();
+      const streamChildCount = new Map<string, number>();
+      const streamExternalPrevRefs: AuditEvent[] = [];
+
+      for (const entry of streamEntries) {
+        if (streamByHash.has(entry.entry_hash)) {
+          issues.push({
+            code: 'stream_chain_break',
+            message: 'duplicate entry_hash detected in event stream',
+            entryHash: entry.entry_hash,
+            eventId,
+          });
+        }
+        streamByHash.set(entry.entry_hash, entry);
+      }
+
+      for (const entry of streamEntries) {
+        const streamPrevHash = entry.stream_prev_hash ?? 'GENESIS';
+        if (streamPrevHash === 'GENESIS') continue;
+        if (streamByHash.has(streamPrevHash)) {
+          streamChildCount.set(streamPrevHash, (streamChildCount.get(streamPrevHash) ?? 0) + 1);
+        } else {
+          streamExternalPrevRefs.push(entry);
+        }
+      }
+
+      for (const [entryHash, childCount] of streamChildCount.entries()) {
+        if (childCount > 1) {
+          issues.push({
+            code: 'stream_chain_break',
+            message: 'multiple newer stream entries point to the same predecessor',
+            entryHash,
+            eventId,
+          });
+        }
+      }
+
+      if (streamExternalPrevRefs.length > 1) {
+        issues.push({
+          code: 'stream_chain_break',
+          message: 'multiple stream entries point outside of current event window',
+          entryHash: streamExternalPrevRefs[0]?.entry_hash,
+          eventId,
+        });
+      }
+
+      const streamHeads = streamEntries.filter((entry) => !streamChildCount.has(entry.entry_hash));
+      if (streamHeads.length !== 1) {
+        issues.push({
+          code: 'stream_chain_break',
+          message: 'event stream must have exactly one head in audit window',
+          entryHash: streamHeads[0]?.entry_hash,
+          eventId,
+        });
+        continue;
+      }
+
+      const visited = new Set<string>();
+      let current: AuditEvent | null = streamHeads[0];
+      while (current) {
+        if (visited.has(current.entry_hash)) {
+          issues.push({
+            code: 'stream_chain_break',
+            message: 'cycle detected in event stream chain',
+            entryHash: current.entry_hash,
+            eventId,
+          });
+          break;
+        }
+        visited.add(current.entry_hash);
+        const streamPrevHash: string = typeof current.stream_prev_hash === 'string'
+          ? current.stream_prev_hash
+          : 'GENESIS';
+        if (streamPrevHash === 'GENESIS') break;
+        current = streamByHash.get(streamPrevHash) ?? null;
+      }
+
+      if (visited.size !== streamEntries.length) {
+        issues.push({
+          code: 'stream_chain_break',
+          message: 'event stream chain is disconnected within audit window',
+          entryHash: streamHeads[0].entry_hash,
+          eventId,
+        });
+      }
     }
 
     return {
@@ -807,8 +986,8 @@ export class SchoolStore implements DurableObject {
       mode,
       checked: entries.length,
       limit,
-      globalHead: entries[0]?.entry_hash ?? null,
-      oldestInWindow: entries.at(-1)?.entry_hash ?? null,
+      globalHead: globalHead?.entry_hash ?? null,
+      oldestInWindow: oldestInWindowEntry?.entry_hash ?? null,
       verifyImmutable: shouldVerifyImmutable,
       issues,
       warnings: Array.from(warningSet.values()),

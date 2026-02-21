@@ -234,7 +234,7 @@ Reviewer shortcut: \`./wene-mobile/src/screens/user/UserScanScreen.tsx\` と \`.
    - `AUDIT_LOGS`（R2、production で immutable mode を使う場合は必須）
    - `AUDIT_INDEX`（KV、検索用メタインデックス。任意）
 4. Cloudflare Workersへデプロイします。
-5. WorkerのURL（例: `https://we-ne-school-api.<subdomain>.workers.dev`）を控えます。
+5. WorkerのURL（正規: `https://instant-grant-core.haruki-kira3.workers.dev`）を控えます。
 6. PoPランタイム状態を確認します:
    - `GET /v1/school/pop-status` が `enforceOnchainPop: true` かつ `signerConfigured: true` を返すこと。
 7. 監査ランタイム状態を確認します:
@@ -311,7 +311,7 @@ chmod +x scripts/build-all.sh
 
 \`\`\`bash
 cd wene-mobile
-EXPO_PUBLIC_SCHOOL_API_BASE_URL="https://<your-worker>.workers.dev" npm run export:web
+EXPO_PUBLIC_SCHOOL_API_BASE_URL="https://instant-grant-core.haruki-kira3.workers.dev" npm run export:web
 npm run deploy:pages
 npm run verify:pages
 \`\`\`

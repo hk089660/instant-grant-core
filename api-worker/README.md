@@ -53,7 +53,7 @@ npm i
 npx wrangler deploy
 ```
 
-デプロイ後に表示される URL（例: `https://we-ne-school-api.<subdomain>.workers.dev`）を、Pages の環境変数 `EXPO_PUBLIC_API_BASE_URL` に設定する。
+デプロイ後に表示される URL（正規: `https://instant-grant-core.haruki-kira3.workers.dev`）を、Pages の環境変数 `EXPO_PUBLIC_API_BASE_URL` に設定する。
 
 ### PoP（Proof of Process）署名設定（必須）
 
