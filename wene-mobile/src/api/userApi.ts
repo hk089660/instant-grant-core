@@ -6,7 +6,7 @@
 import { httpPost } from './http/httpClient';
 
 export function getBaseUrl(): string {
-  // Web: _redirects で /api/* → Workers プロキシされるため、同一オリジンを使う（CORS回避）
+  // Web: Pages Functions で /api/* を Worker に中継するため、同一オリジンを使う（CORS回避）
   if (typeof window !== 'undefined' && window.location?.origin) {
     return window.location.origin;
   }

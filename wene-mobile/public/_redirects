@@ -1,18 +1,19 @@
-/api/*  https://instant-grant-core.haruki-kira3.workers.dev/api/:splat  200
-/v1/*   https://instant-grant-core.haruki-kira3.workers.dev/v1/:splat   200
-/metadata/*   https://instant-grant-core.haruki-kira3.workers.dev/metadata/:splat   200
-#
-# Fallback for Cloudflare auto-deploy bundles that still reference
-# vector icon fonts under /assets/node_modules/.../Fonts/*.ttf.
-# Serve those from /fonts/*.ttf shipped in public/fonts.
+# API routes are handled by Cloudflare Pages Functions (functions/[[path]].ts).
+# Keep _redirects relative-only to satisfy Pages validation.
+
+# Fallback for vector icon font paths referenced by some bundles.
 /assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/*  /fonts/:splat  200
 /assets/node_modules/expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/*   /fonts/:splat  200
-/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/*                        /fonts/:splat  200
-/expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/*                         /fonts/:splat  200
-/_expo/*      /_expo/:splat      200
-/assets/*     /assets/:splat     200
-/fonts/*      /fonts/:splat      200
-/favicon.ico  /favicon.ico       200
-/metadata.json /metadata.json    200
-/version.txt  /version.txt       200
-/*      /index.html                                                     200
+/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/*                       /fonts/:splat  200
+/expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/*                        /fonts/:splat  200
+
+# Static asset passthrough
+/favicon.ico    /favicon.ico     200
+/metadata.json  /metadata.json   200
+/version.txt    /version.txt     200
+/_expo/*        /_expo/:splat    200
+/assets/*       /assets/:splat   200
+/fonts/*        /fonts/:splat    200
+
+# SPA fallback
+/*              /index.html      200

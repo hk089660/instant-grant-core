@@ -23,7 +23,7 @@ function resolveApiMode(): 'http' {
 }
 
 function resolveBaseUrl(): string {
-  // Web: _redirects で /v1/* → Workers プロキシされるため同一オリジンを最優先
+  // Web: Pages Functions で /v1/* を Worker に中継するため同一オリジンを最優先
   if (typeof window !== 'undefined' && window.location?.origin) {
     return window.location.origin;
   }
