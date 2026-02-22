@@ -18,9 +18,25 @@ import { initiatePhantomConnect } from '../../utils/phantom';
 import { setPhantomWebReturnPath } from '../../utils/phantomWebReturnPath';
 import * as nacl from 'tweetnacl';
 import { issueEventTicketToken } from '../../solana/adminTicketIssuer';
+import { isSimulationFailedError } from '../../solana/sendTx';
 import { getPhantomExtensionProvider, getPhantomExtensionPubkey } from '../../wallet/phantomExtension';
 
 type Step = 'form' | 'preview' | 'done';
+
+function formatAdminCreateError(error: unknown): string {
+    if (isSimulationFailedError(error)) {
+        const logs = Array.isArray(error.simLogs) ? error.simLogs.filter(Boolean) : [];
+        const tail = logs.slice(-8).join('\n');
+        const base = typeof error.message === 'string' && error.message.trim().length > 0
+            ? error.message
+            : '送信に失敗しました（事前検証で失敗）';
+        return tail.length > 0 ? `${base}\n\n[simulation logs]\n${tail}` : base;
+    }
+    if (error && typeof error === 'object' && 'message' in error) {
+        return String((error as { message: string }).message);
+    }
+    return 'イベントの作成に失敗しました';
+}
 
 export const AdminCreateEventScreen: React.FC = () => {
     const router = useRouter();
@@ -275,8 +291,7 @@ export const AdminCreateEventScreen: React.FC = () => {
             setCreatedEvent(event);
             setStep('done');
         } catch (e: unknown) {
-            const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: string }).message) : 'イベントの作成に失敗しました';
-            setError(msg);
+            setError(formatAdminCreateError(e));
         } finally {
             setLoading(false);
         }

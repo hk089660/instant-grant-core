@@ -60,9 +60,41 @@ export function formatSendError(message: string): string {
     return '署名後に期限切れになりました。もう一度お試しください';
   }
   if (lower.includes('transaction simulation failed')) {
+    const compact = message.replace(/.*transaction simulation failed:?/i, '').trim();
+    if (compact.length > 0) {
+      return `送信に失敗しました（事前検証で失敗）。${compact}`;
+    }
     return '送信に失敗しました（事前検証で失敗）。ログを確認してください';
   }
   return message;
+}
+
+type SendErrorWithLogs = Error & {
+  logs?: string[];
+  getLogs?: (connection: ReturnType<typeof getConnection>) => Promise<string[]>;
+};
+
+async function extractSimulationLogs(error: unknown): Promise<string[] | null> {
+  const asError = error as SendErrorWithLogs | null | undefined;
+  if (!asError || typeof asError !== 'object') return null;
+
+  if (Array.isArray(asError.logs) && asError.logs.length > 0) {
+    return asError.logs.map((line) => String(line));
+  }
+
+  if (typeof asError.getLogs === 'function') {
+    try {
+      const connection = getConnection();
+      const fetched = await asError.getLogs(connection);
+      if (Array.isArray(fetched) && fetched.length > 0) {
+        return fetched.map((line) => String(line));
+      }
+    } catch {
+      // no-op
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -201,10 +233,24 @@ export async function sendSignedTx(
       break;
     } catch (error) {
       const rawMsg = error instanceof Error ? error.message : String(error);
+      const simLogs = await extractSimulationLogs(error);
       if (isTransientNetworkError(rawMsg) && attempt < NETWORK_RETRY_MAX) {
         console.warn(`[sendSignedTx] sendRawTransaction network retry ${attempt}/${NETWORK_RETRY_MAX}:`, rawMsg);
         await sleep(attempt * 800);
         continue;
+      }
+      if (
+        rawMsg.toLowerCase().includes('transaction simulation failed') &&
+        Array.isArray(simLogs) &&
+        simLogs.length > 0
+      ) {
+        const capped = simLogs.length > 50 ? simLogs.slice(-50) : simLogs;
+        console.error('Failed to send transaction (preflight logs):', capped);
+        throw createSimulationFailedError(
+          formatSendError(rawMsg),
+          rawMsg,
+          capped
+        );
       }
       console.error('Failed to send transaction:', error);
       throw new Error(formatSendError(rawMsg));

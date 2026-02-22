@@ -327,7 +327,7 @@ export async function issueEventTicketToken(
     setupSignatures.push(await signAndSendTx(tx1, params.phantom, [mintKeypair]));
   }
 
-  // Tx2: Grant作成 + Vaultへ初期入金
+  // Tx2: PoP設定 + Grant作成 + Vaultへ初期入金
   {
     const program = getProgram() as any;
     const nowTs = Math.floor(Date.now() / 1000);
@@ -358,6 +358,29 @@ export async function issueEventTicketToken(
       signerPubkey: popSignerPubkey,
     });
 
+    const fundGrantIx = await program.methods
+      .fundGrant(new BN(bootstrapAmount.toString()))
+      .accounts({
+        grant: grantPda,
+        mint,
+        vault: vaultPda,
+        fromAta: ownerAta,
+        funder: authority,
+        authority,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .instruction();
+
+    const tx2 = new Transaction().add(
+      upsertPopConfigIx,
+      createGrantIx,
+      fundGrantIx
+    );
+    setupSignatures.push(await signAndSendTx(tx2, params.phantom));
+  }
+
+  // Tx3: Metadata作成（txサイズ/compute負荷を抑えるため分離）
+  {
     const metadataIx = createCreateMetadataAccountV3Instruction(
       {
         metadata: metadataPda,
@@ -384,19 +407,12 @@ export async function issueEventTicketToken(
       TOKEN_METADATA_PROGRAM_ID
     );
 
-    const fundGrantIx = await program.methods
-      .fundGrant(new BN(bootstrapAmount.toString()))
-      .accounts({
-        grant: grantPda,
-        mint,
-        vault: vaultPda,
-        fromAta: ownerAta,
-        funder: authority,
-        authority,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .instruction();
+    const tx3 = new Transaction().add(metadataIx);
+    setupSignatures.push(await signAndSendTx(tx3, params.phantom));
+  }
 
+  // Tx4: mint/freeze authority を放棄（最終確定）
+  {
     const revokeMintAuthorityIx = createSetAuthorityInstruction(
       mint,
       authority,
@@ -415,15 +431,11 @@ export async function issueEventTicketToken(
       TOKEN_PROGRAM_ID
     );
 
-    const tx2 = new Transaction().add(
-      upsertPopConfigIx,
-      createGrantIx,
-      metadataIx,
-      fundGrantIx,
+    const tx4 = new Transaction().add(
       revokeMintAuthorityIx,
       revokeFreezeAuthorityIx
     );
-    setupSignatures.push(await signAndSendTx(tx2, params.phantom));
+    setupSignatures.push(await signAndSendTx(tx4, params.phantom));
   }
 
   return {
