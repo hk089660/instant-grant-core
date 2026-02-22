@@ -13,8 +13,7 @@ new_sqlite_classes = ["SchoolStore"]
 # Pages ドメインを CORS に指定する場合はここで変数化（デプロイ時はダッシュボードで設定推奨）
 # [vars]
 [vars]
-CORS_ORIGIN = "https://instant-grant-core.dev"
-ADMIN_PASSWORD = "change-this-in-dashboard"
+CORS_ORIGIN = "https://instant-grant-core.pages.dev"
 AUDIT_IMMUTABLE_MODE = "required"
 AUDIT_IMMUTABLE_FETCH_TIMEOUT_MS = "5000"
 # AUDIT_IMMUTABLE_INGEST_URL = "https://your-immutable-ingest.example/v1/audit"
@@ -24,12 +23,12 @@ AUDIT_IMMUTABLE_FETCH_TIMEOUT_MS = "5000"
 # NOTE:
 # Configure these bindings with real resource IDs/names in Cloudflare dashboard
 # (or uncomment and fill values here) before production deployment.
-# [[r2_buckets]]
-# binding = "AUDIT_LOGS"
-# bucket_name = "instant-grant-core-audit"
-# preview_bucket_name = "instant-grant-core-audit-preview"
+[[r2_buckets]]
+binding = "AUDIT_LOGS"
+bucket_name = "instant-grant-core-audit"
+preview_bucket_name = "instant-grant-core-audit"
 
-# [[kv_namespaces]]
-# binding = "AUDIT_INDEX"
-# id = "<production-kv-namespace-id>"
-# preview_id = "<preview-kv-namespace-id>"
+[[kv_namespaces]]
+binding = "AUDIT_INDEX"
+id = "2d73e1e5818447f8b965958831469901"
+preview_id = "2d73e1e5818447f8b965958831469901"
