@@ -8,11 +8,19 @@ export interface AdminAuthSession {
   token: string;
   role: AdminSessionRole;
   source?: 'password' | 'demo';
+  adminName?: string;
+  adminId?: string;
   createdAt: string;
 }
 
 function normalizeToken(token: unknown): string {
   return typeof token === 'string' ? token.trim() : '';
+}
+
+function normalizeOptionalText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  return normalized || undefined;
 }
 
 export async function saveAdminSession(session: AdminAuthSession): Promise<void> {
@@ -31,6 +39,8 @@ export async function loadAdminSession(): Promise<AdminAuthSession | null> {
       token,
       role,
       source: parsed.source === 'demo' ? 'demo' : 'password',
+      adminName: normalizeOptionalText(parsed.adminName),
+      adminId: normalizeOptionalText(parsed.adminId),
       createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date().toISOString(),
     };
   } catch {
@@ -46,4 +56,3 @@ export async function getAdminToken(): Promise<string | null> {
 export async function clearAdminSession(): Promise<void> {
   await AsyncStorage.removeItem(ADMIN_AUTH_STORAGE_KEY);
 }
-

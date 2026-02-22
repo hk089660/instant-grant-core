@@ -3436,7 +3436,29 @@ export class SchoolStore implements DurableObject {
     }
 
     if (path === '/v1/school/events' && request.method === 'GET') {
+      const url = new URL(request.url);
+      const scope = (url.searchParams.get('scope') ?? '').trim().toLowerCase();
       const items = await this.store.getEvents();
+
+      if (scope === 'mine') {
+        const operator = await this.authenticateOperator(request);
+        if (!operator) {
+          return this.unauthorizedResponse();
+        }
+        if (operator.role === 'master') {
+          return Response.json({ items, nextCursor: undefined });
+        }
+
+        const ownership = await Promise.all(
+          items.map(async (event) => {
+            const owner = await this.getEventOwnerRecord(event.id);
+            return owner?.adminId === operator.adminId;
+          })
+        );
+        const filtered = items.filter((_, index) => ownership[index] === true);
+        return Response.json({ items: filtered, nextCursor: undefined });
+      }
+
       return Response.json({ items, nextCursor: undefined });
     }
 

@@ -31,10 +31,16 @@ export const AdminLoginScreen: React.FC = () => {
     try {
       const result = await loginAdmin(password);
       if (result.success && result.role) {
+        const infoName = typeof result.info?.name === 'string' ? result.info.name.trim() : '';
+        const infoAdminId = typeof result.info?.adminId === 'string' ? result.info.adminId.trim() : '';
+        const resolvedName =
+          infoName || (result.role === 'master' ? 'Master Operator' : 'Admin Operator');
         await saveAdminSession({
           token: password,
           role: result.role,
           source,
+          adminName: resolvedName,
+          adminId: infoAdminId || undefined,
           createdAt: new Date().toISOString(),
         });
         router.replace('/admin' as any);

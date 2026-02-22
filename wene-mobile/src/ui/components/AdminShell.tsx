@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AppText } from './AppText';
 import { adminTheme } from '../adminTheme';
-import { clearAdminSession } from '../../lib/adminAuth';
+import { loginAdmin } from '../../api/adminApi';
+import { clearAdminSession, loadAdminSession, saveAdminSession } from '../../lib/adminAuth';
 
 interface AdminShellProps {
   title: string;
@@ -13,6 +14,41 @@ interface AdminShellProps {
 
 export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
   const router = useRouter();
+  const [adminName, setAdminName] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    loadAdminSession()
+      .then(async (session) => {
+        if (!session || cancelled) return;
+        if (session.adminName) {
+          setAdminName(session.adminName);
+          return;
+        }
+        const refreshed = await loginAdmin(session.token);
+        const resolvedNameRaw = typeof refreshed.info?.name === 'string' ? refreshed.info.name.trim() : '';
+        const resolvedName = resolvedNameRaw || (session.role === 'master' ? 'Master Operator' : '');
+        if (!resolvedName || cancelled) return;
+        setAdminName(resolvedName);
+        await saveAdminSession({
+          ...session,
+          adminName: resolvedName,
+          adminId:
+            typeof refreshed.info?.adminId === 'string' && refreshed.info.adminId.trim()
+              ? refreshed.info.adminId.trim()
+              : session.adminId,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAdminName('');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleLogout = async () => {
     await clearAdminSession();
     router.replace('/admin/login' as any);
@@ -21,12 +57,23 @@ export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <AppText variant="h3" style={styles.logo}>
-          we-ne Admin
-        </AppText>
-        <AppText variant="caption" style={styles.pageTitle}>
-          {title}
-        </AppText>
+        <View style={styles.headerTop}>
+          <View style={styles.headerTitleBlock}>
+            <AppText variant="h3" style={styles.logo}>
+              we-ne Admin
+            </AppText>
+            <AppText variant="caption" style={styles.pageTitle}>
+              {title}
+            </AppText>
+          </View>
+          <View style={styles.headerRightTop}>
+            {adminName ? (
+              <AppText variant="caption" style={styles.adminName}>
+                管理者: {adminName}
+              </AppText>
+            ) : null}
+          </View>
+        </View>
         <View style={styles.right}>
           <View style={styles.nav}>
             <TouchableOpacity onPress={() => router.push('/admin' as any)}>
@@ -73,6 +120,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: adminTheme.colors.border,
   },
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: adminTheme.spacing.sm,
+  },
+  headerTitleBlock: {
+    flex: 1,
+  },
+  headerRightTop: {
+    maxWidth: '45%',
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+  },
   logo: {
     color: adminTheme.colors.text,
     fontWeight: '800',
@@ -80,6 +141,10 @@ const styles = StyleSheet.create({
   pageTitle: {
     color: adminTheme.colors.textSecondary,
     marginTop: 2,
+  },
+  adminName: {
+    color: adminTheme.colors.textSecondary,
+    textAlign: 'right',
   },
   right: {
     marginTop: adminTheme.spacing.xs,

@@ -44,7 +44,7 @@ export async function fetchAdminEvents(): Promise<(SchoolEvent & { claimedCount:
   const base = getBaseUrl();
   return withAdminAuth(async () => {
     const headers = await getAdminAuthHeaders();
-    const data = await httpGet<{ items: (SchoolEvent & { claimedCount: number })[] }>(`${base}/v1/school/events`, { headers });
+    const data = await httpGet<{ items: (SchoolEvent & { claimedCount: number })[] }>(`${base}/v1/school/events?scope=mine`, { headers });
     return data.items;
   });
 }
@@ -108,16 +108,24 @@ export async function verifyAdminPassword(password: string): Promise<boolean> {
 
 export type AdminRole = 'master' | 'admin';
 
+export interface AdminLoginInfo {
+  adminId?: string;
+  name?: string;
+  source?: 'master' | 'invite' | 'demo';
+  createdAt?: string;
+  status?: 'active' | 'revoked';
+}
+
 export interface AdminLoginResult {
   success: boolean;
   role?: AdminRole;
-  info?: any;
+  info?: AdminLoginInfo;
 }
 
 export async function loginAdmin(password: string): Promise<AdminLoginResult> {
   const base = getBaseUrl();
   try {
-    const res = await httpPost<{ ok: boolean; role?: AdminRole; info?: any }>(`${base}/api/admin/login`, { password });
+    const res = await httpPost<{ ok: boolean; role?: AdminRole; info?: AdminLoginInfo }>(`${base}/api/admin/login`, { password });
     if (res?.ok) {
       return { success: true, role: res.role, info: res.info };
     }
