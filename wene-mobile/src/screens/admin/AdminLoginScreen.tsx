@@ -19,7 +19,6 @@ export const AdminLoginScreen: React.FC = () => {
   const [passcode, setPasscode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const demoPasscode = (process.env.EXPO_PUBLIC_ADMIN_DEMO_PASSWORD ?? '').trim();
 
   const performLogin = async (password: string, source: 'password' | 'demo') => {
     setError(null);
@@ -50,14 +49,6 @@ export const AdminLoginScreen: React.FC = () => {
 
   const handleLogin = async () => {
     await performLogin(passcode, 'password');
-  };
-
-  const handleDemoLogin = async () => {
-    if (!demoPasscode) {
-      setError('デモログイン用コードが未設定です');
-      return;
-    }
-    await performLogin(demoPasscode, 'demo');
   };
 
   return (
@@ -96,20 +87,6 @@ export const AdminLoginScreen: React.FC = () => {
           disabled={loading}
           style={styles.loginButton}
         />
-
-        {/* Demo Login Button */}
-        <View style={styles.demoContainer}>
-          <View style={styles.divider} />
-          <AppText variant="caption" style={styles.demoNote}>
-            ※審査・デモ環境用
-          </AppText>
-          <Button
-            title="デモ管理者としてログイン"
-            onPress={handleDemoLogin}
-            disabled={loading}
-            style={styles.demoButton}
-          />
-        </View>
       </View>
     </SafeAreaView>
   );
@@ -176,27 +153,5 @@ const styles = StyleSheet.create({
     borderColor: adminTheme.colors.border,
     height: 50,
     justifyContent: 'center',
-  },
-  demoContainer: {
-    marginTop: 40,
-    alignItems: 'center',
-  },
-  divider: {
-    height: 1,
-    width: '100%',
-    backgroundColor: adminTheme.colors.border,
-    opacity: 0.3,
-    marginBottom: 20,
-  },
-  demoNote: {
-    color: adminTheme.colors.textTertiary,
-    marginBottom: 8,
-    fontSize: 12,
-  },
-  demoButton: {
-    backgroundColor: '#2c3e50', // Slightly lighter drak grey for demo
-    width: '100%',
-    borderWidth: 0,
-    height: 44,
   },
 });
