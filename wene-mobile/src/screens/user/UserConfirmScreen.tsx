@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback, useState } from 'react';
-import { View, StyleSheet, Alert, Platform, ToastAndroid } from 'react-native';
+import { View, StyleSheet, Alert, Platform, ToastAndroid, ScrollView, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { PublicKey } from '@solana/web3.js';
@@ -499,137 +499,142 @@ export const UserConfirmScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.content}>
-        <AppText variant="h2" style={styles.title}>
-          内容を確認
-        </AppText>
-        <AppText variant="caption" style={styles.subtitle}>
-          参加するイベントの内容を確認してください
-        </AppText>
-
-        {eventLoading ? (
-          <Card style={styles.card}>
-            <Loading />
-            <AppText variant="caption" style={{ textAlign: 'center', marginTop: 8 }}>
-              イベント情報を読み込み中…
-            </AppText>
-          </Card>
-        ) : event ? (
-          <Card style={styles.card}>
-            <AppText variant="h3">{event.title}</AppText>
-            <AppText variant="caption" style={styles.eventMeta}>{event.datetime}</AppText>
-            <AppText variant="caption" style={styles.eventMeta}>主催: {event.host}</AppText>
-            <AppText variant="caption" style={styles.eventMeta}>
-              受給ルール: {claimIntervalDays}日ごと / {maxClaimsPerInterval == null ? '無制限' : `${maxClaimsPerInterval}回まで`}
-            </AppText>
-            {eventHasOnchainConfig && (
-              <AppText variant="small" style={styles.noticeText}>
-                ※ Phantom接続は任意です。接続した場合はオンチェーン証跡（tx/receipt）も記録されます。
-              </AppText>
-            )}
-            {!onchainPolicyCompatible && (
-              <AppText variant="small" style={styles.noticeText}>
-                ※ カスタム受給ルール時は、オンチェーン配布が同一期間で上限に達した場合にオフチェーン記録のみ更新されることがあります。
-              </AppText>
-            )}
-            {event.state && event.state !== 'published' && (
-              <AppText variant="small" style={styles.warningText}>
-                ※ このイベントは現在受付していません（状態: {event.state}）
-              </AppText>
-            )}
-          </Card>
-        ) : (
-          <Card style={styles.card}>
-            <AppText variant="caption" style={styles.warningText}>
-              イベントが見つかりません（ID: {targetEventId}）
-            </AppText>
-          </Card>
-        )}
-
-        {!walletReady && (
-          <Card style={styles.walletCard}>
-            <AppText variant="caption" style={styles.walletHint}>
-              {eventHasOnchainConfig
-                ? 'Phantom未接続でも参加できます。接続するとオンチェーン証跡（tx/receipt）を追加できます。'
-                : 'Phantom未接続でも参加できます。'}
-            </AppText>
-            <Button
-              title="Phantomを接続（任意）"
-              variant="secondary"
-              onPress={() => router.push('/wallet' as any)}
-              style={styles.walletButton}
-            />
-          </Card>
-        )}
-
-        {showPinInput && (
-          <Card style={styles.pinCard}>
-            <AppText variant="caption" style={styles.pinLabel}>
-              PINを入力して参加を確定してください
-            </AppText>
-            <View style={styles.pinInputWrap}>
-              {/* TextInput */}
-              <PinInput value={pin} onChange={setPin} disabled={status === 'loading'} />
-            </View>
-          </Card>
-        )}
-
-        {error ? (
-          <AppText variant="caption" style={styles.apiErrorText}>
-            {error}
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <AppText variant="h2" style={styles.title}>
+            内容を確認
           </AppText>
-        ) : null}
+          <AppText variant="caption" style={styles.subtitle}>
+            参加するイベントの内容を確認してください
+          </AppText>
 
-        {status === 'loading' && waitingForPhantom ? (
-          <Card style={styles.fallbackCard}>
-            <AppText variant="caption" style={styles.fallbackText}>
-              Phantomで署名後にこの画面へ戻ってください。戻れない場合は待機を中断して再試行できます。
-            </AppText>
-            <Button
-              title="署名待機を中断する"
-              variant="secondary"
-              onPress={handleCancelPhantomWait}
-              style={styles.fallbackButton}
-            />
-          </Card>
-        ) : null}
-
-        {/* アクションボタン群 */}
-        <View style={styles.actionGroup}>
-          <Button
-            title={
-              status === 'loading'
-                ? '処理中…'
-                : showPinInput
-                  ? '参加を確定する'
-                  : '参加する'
-            }
-            onPress={handleParticipate}
-            loading={status === 'loading'}
-            disabled={
-              status === 'loading' ||
-              !event ||
-              (event.state != null && event.state !== 'published')
-            }
-          />
-          {!showPinInput && event && event.state === 'published' && walletReady && (
-            <AppText variant="small" style={styles.actionHint}>
-              PINを入力して参加を確定します
-            </AppText>
+          {eventLoading ? (
+            <Card style={styles.card}>
+              <Loading />
+              <AppText variant="caption" style={{ textAlign: 'center', marginTop: 8 }}>
+                イベント情報を読み込み中…
+              </AppText>
+            </Card>
+          ) : event ? (
+            <Card style={styles.card}>
+              <AppText variant="h3">{event.title}</AppText>
+              <AppText variant="caption" style={styles.eventMeta}>{event.datetime}</AppText>
+              <AppText variant="caption" style={styles.eventMeta}>主催: {event.host}</AppText>
+              <AppText variant="caption" style={styles.eventMeta}>
+                受給ルール: {claimIntervalDays}日ごと / {maxClaimsPerInterval == null ? '無制限' : `${maxClaimsPerInterval}回まで`}
+              </AppText>
+              {eventHasOnchainConfig && (
+                <AppText variant="small" style={styles.noticeText}>
+                  ※ Phantom接続は任意です。接続した場合はオンチェーン証跡（tx/receipt）も記録されます。
+                </AppText>
+              )}
+              {!onchainPolicyCompatible && (
+                <AppText variant="small" style={styles.noticeText}>
+                  ※ カスタム受給ルール時は、オンチェーン配布が同一期間で上限に達した場合にオフチェーン記録のみ更新されることがあります。
+                </AppText>
+              )}
+              {event.state && event.state !== 'published' && (
+                <AppText variant="small" style={styles.warningText}>
+                  ※ このイベントは現在受付していません（状態: {event.state}）
+                </AppText>
+              )}
+            </Card>
+          ) : (
+            <Card style={styles.card}>
+              <AppText variant="caption" style={styles.warningText}>
+                イベントが見つかりません（ID: {targetEventId}）
+              </AppText>
+            </Card>
           )}
+
           {!walletReady && (
-            <AppText variant="small" style={styles.actionHint}>
-              Phantom未接続時はオフチェーン参加として参加履歴に記録されます
-            </AppText>
+            <Card style={styles.walletCard}>
+              <AppText variant="caption" style={styles.walletHint}>
+                {eventHasOnchainConfig
+                  ? 'Phantom未接続でも参加できます。接続するとオンチェーン証跡（tx/receipt）を追加できます。'
+                  : 'Phantom未接続でも参加できます。'}
+              </AppText>
+              <Button
+                title="Phantomを接続（任意）"
+                variant="secondary"
+                onPress={() => router.push('/wallet' as any)}
+                style={styles.walletButton}
+              />
+            </Card>
           )}
-          <Button
-            title="戻る"
-            variant="secondary"
-            onPress={() => router.back()}
-            style={styles.backButton}
-          />
-        </View>
-      </View>
+
+          {showPinInput && (
+            <Card style={styles.pinCard}>
+              <AppText variant="caption" style={styles.pinLabel}>
+                PINを入力して参加を確定してください
+              </AppText>
+              <View style={styles.pinInputWrap}>
+                {/* TextInput */}
+                <PinInput value={pin} onChange={setPin} disabled={status === 'loading'} />
+              </View>
+            </Card>
+          )}
+
+          {error ? (
+            <AppText variant="caption" style={styles.apiErrorText}>
+              {error}
+            </AppText>
+          ) : null}
+
+          {status === 'loading' && waitingForPhantom ? (
+            <Card style={styles.fallbackCard}>
+              <AppText variant="caption" style={styles.fallbackText}>
+                Phantomで署名後にこの画面へ戻ってください。戻れない場合は待機を中断して再試行できます。
+              </AppText>
+              <Button
+                title="署名待機を中断する"
+                variant="secondary"
+                onPress={handleCancelPhantomWait}
+                style={styles.fallbackButton}
+              />
+            </Card>
+          ) : null}
+
+          {/* アクションボタン群 */}
+          <View style={styles.actionGroup}>
+            <Button
+              title={
+                status === 'loading'
+                  ? '処理中…'
+                  : showPinInput
+                    ? '参加を確定する'
+                    : '参加する'
+              }
+              onPress={handleParticipate}
+              loading={status === 'loading'}
+              disabled={
+                status === 'loading' ||
+                !event ||
+                (event.state != null && event.state !== 'published')
+              }
+            />
+            {!showPinInput && event && event.state === 'published' && walletReady && (
+              <AppText variant="small" style={styles.actionHint}>
+                PINを入力して参加を確定します
+              </AppText>
+            )}
+            {!walletReady && (
+              <AppText variant="small" style={styles.actionHint}>
+                Phantom未接続時はオフチェーン参加として参加履歴に記録されます
+              </AppText>
+            )}
+            <Button
+              title="戻る"
+              variant="secondary"
+              onPress={() => router.back()}
+              style={styles.backButton}
+            />
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
@@ -659,8 +664,9 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background,
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
     padding: theme.spacing.lg,
+    paddingBottom: theme.spacing.xl,
   },
   title: {
     marginBottom: theme.spacing.xs,
@@ -717,7 +723,7 @@ const styles = StyleSheet.create({
     letterSpacing: 8,
   },
   actionGroup: {
-    marginTop: theme.spacing.sm,
+    marginTop: 'auto',
   },
   actionHint: {
     color: theme.colors.textTertiary,
