@@ -568,6 +568,14 @@ export class SchoolStore implements DurableObject {
     return null;
   }
 
+  private hasAnyOnchainProofField(fields: {
+    walletAddress: string;
+    txSignature: string;
+    receiptPubkey: string;
+  }): boolean {
+    return Boolean(fields.txSignature || fields.receiptPubkey);
+  }
+
   private async buildPopEntryHash(params: {
     prevHash: Uint8Array;
     streamPrevHash: Uint8Array;
@@ -3672,29 +3680,32 @@ export class SchoolStore implements DurableObject {
         } as SchoolClaimResult);
       }
       if (this.isOnchainPopEnforced() && this.isEventOnchainConfigured(event)) {
-        let signerConfigured = false;
-        try {
-          signerConfigured = this.getPopSigner() !== null;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          return Response.json({
-            success: false,
-            error: { code: 'retryable', message: `PoP設定エラー: ${message}` },
-          } as SchoolClaimResult);
-        }
-        if (!signerConfigured) {
-          return Response.json({
-            success: false,
-            error: { code: 'retryable', message: 'PoP署名設定が未完了のためオンチェーン参加を受け付けできません' },
-          } as SchoolClaimResult);
-        }
         const fields = this.getOnchainProofFields(body);
-        const invalidReason = this.validateOnchainProofFields(fields);
-        if (invalidReason) {
-          return Response.json({
-            success: false,
-            error: { code: 'wallet_required', message: `オンチェーンPoP証跡が必要です: ${invalidReason}` },
-          } as SchoolClaimResult);
+        const hasOnchainProof = this.hasAnyOnchainProofField(fields);
+        if (hasOnchainProof) {
+          let signerConfigured = false;
+          try {
+            signerConfigured = this.getPopSigner() !== null;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return Response.json({
+              success: false,
+              error: { code: 'retryable', message: `PoP設定エラー: ${message}` },
+            } as SchoolClaimResult);
+          }
+          if (!signerConfigured) {
+            return Response.json({
+              success: false,
+              error: { code: 'retryable', message: 'PoP署名設定が未完了のためオンチェーン参加を受け付けできません' },
+            } as SchoolClaimResult);
+          }
+          const invalidReason = this.validateOnchainProofFields(fields);
+          if (invalidReason) {
+            return Response.json({
+              success: false,
+              error: { code: 'wallet_required', message: `オンチェーンPoP証跡が必要です: ${invalidReason}` },
+            } as SchoolClaimResult);
+          }
         }
       }
       const walletAddress = this.normalizeStringField(body.walletAddress);
@@ -3878,20 +3889,23 @@ export class SchoolStore implements DurableObject {
         return Response.json({ error: 'event not available' }, { status: 400 });
       }
       if (this.isOnchainPopEnforced() && this.isEventOnchainConfigured(event)) {
-        let signerConfigured = false;
-        try {
-          signerConfigured = this.getPopSigner() !== null;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          return Response.json({ error: `PoP configuration error: ${message}` }, { status: 500 });
-        }
-        if (!signerConfigured) {
-          return Response.json({ error: 'PoP signer is not configured' }, { status: 500 });
-        }
         const proofFields = this.getOnchainProofFields(body);
-        const invalidReason = this.validateOnchainProofFields(proofFields);
-        if (invalidReason) {
-          return Response.json({ error: `on-chain claim proof required: ${invalidReason}` }, { status: 400 });
+        const hasOnchainProof = this.hasAnyOnchainProofField(proofFields);
+        if (hasOnchainProof) {
+          let signerConfigured = false;
+          try {
+            signerConfigured = this.getPopSigner() !== null;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return Response.json({ error: `PoP configuration error: ${message}` }, { status: 500 });
+          }
+          if (!signerConfigured) {
+            return Response.json({ error: 'PoP signer is not configured' }, { status: 500 });
+          }
+          const invalidReason = this.validateOnchainProofFields(proofFields);
+          if (invalidReason) {
+            return Response.json({ error: `on-chain claim proof required: ${invalidReason}` }, { status: 400 });
+          }
         }
       }
       const already = await this.store.hasClaimed(eventId, userId, event);

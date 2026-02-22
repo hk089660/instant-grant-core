@@ -68,11 +68,7 @@ export const UserConfirmScreen: React.FC = () => {
   const maxClaimsPerInterval = event?.maxClaimsPerInterval === null
     ? null
     : (event?.maxClaimsPerInterval ?? 1);
-  const enforceOnchainPop = !['0', 'false', 'off', 'no'].includes(
-    (process.env.EXPO_PUBLIC_ENFORCE_ONCHAIN_POP ?? 'true').trim().toLowerCase()
-  );
   const eventHasOnchainConfig = Boolean(event?.solanaMint && event?.solanaAuthority && event?.solanaGrantId);
-  const onchainRequired = enforceOnchainPop && eventHasOnchainConfig;
   const onchainPolicyCompatible = claimIntervalDays === 30 && maxClaimsPerInterval === 1;
   const walletReady = Boolean(
     walletPubkey &&
@@ -289,6 +285,7 @@ export const UserConfirmScreen: React.FC = () => {
       return;
     }
 
+    let skipOnchainByPopup = false;
     if (
       Platform.OS === 'web' &&
       walletReady &&
@@ -298,8 +295,10 @@ export const UserConfirmScreen: React.FC = () => {
     ) {
       const prepared = preparePhantomWebPopup();
       if (!prepared) {
-        setError('Phantom署名ポップアップを開けません。ブラウザでポップアップを許可して再試行してください。');
-        return;
+        skipOnchainByPopup = true;
+        if (__DEV__) {
+          console.warn('[UserConfirmScreen] popup blocked; continue with off-chain claim');
+        }
       }
     }
 
@@ -323,12 +322,9 @@ export const UserConfirmScreen: React.FC = () => {
       const shouldAttemptOnchain = Boolean(
         walletReady &&
         walletPubkey &&
-        eventHasOnchainConfig
+        eventHasOnchainConfig &&
+        !skipOnchainByPopup
       );
-
-      if (onchainRequired && !shouldAttemptOnchain) {
-        throw new Error('この参加券はオンチェーンPoP必須です。Phantomを接続してから再実行してください。');
-      }
 
       if (shouldAttemptOnchain) {
         const ownerWallet = walletPubkey;
@@ -352,24 +348,27 @@ export const UserConfirmScreen: React.FC = () => {
             onchainMsg.includes('既に受給済み') ||
             onchainMsgLower.includes('already in use') ||
             onchainMsgLower.includes('account already in use');
-          if (!mayBeAlreadyClaimed) {
-            throw onchainError;
-          }
-
-          onchainBlockedByPeriod = true;
-          if (storedTicket?.txSignature) {
-            txSignature = storedTicket.txSignature;
-            receiptPubkey = storedTicket.receiptPubkey;
-            popEntryHash = storedTicket.popEntryHash;
-            popAuditHash = storedTicket.popAuditHash;
-            popSigner = storedTicket.popSigner;
-          }
-          distributedMint = event.solanaMint ?? undefined;
-          if (__DEV__) {
-            console.log('[UserConfirmScreen] on-chain distribution blocked by period', {
+          if (mayBeAlreadyClaimed) {
+            onchainBlockedByPeriod = true;
+            if (storedTicket?.txSignature) {
+              txSignature = storedTicket.txSignature;
+              receiptPubkey = storedTicket.receiptPubkey;
+              popEntryHash = storedTicket.popEntryHash;
+              popAuditHash = storedTicket.popAuditHash;
+              popSigner = storedTicket.popSigner;
+            }
+            distributedMint = event.solanaMint ?? undefined;
+            if (__DEV__) {
+              console.log('[UserConfirmScreen] on-chain distribution blocked by period', {
+                eventId: targetEventId,
+                onchainPolicyCompatible,
+                hasStoredTicket: Boolean(storedTicket?.txSignature),
+              });
+            }
+          } else if (__DEV__) {
+            console.warn('[UserConfirmScreen] on-chain claim failed; continue with off-chain claim', {
               eventId: targetEventId,
-              onchainPolicyCompatible,
-              hasStoredTicket: Boolean(storedTicket?.txSignature),
+              message: onchainMsg,
             });
           }
         }
@@ -491,7 +490,6 @@ export const UserConfirmScreen: React.FC = () => {
     clearUser,
     router,
     eventHasOnchainConfig,
-    onchainRequired,
     onchainPolicyCompatible,
     claimIntervalDays,
     maxClaimsPerInterval,
@@ -524,9 +522,9 @@ export const UserConfirmScreen: React.FC = () => {
             <AppText variant="caption" style={styles.eventMeta}>
               受給ルール: {claimIntervalDays}日ごと / {maxClaimsPerInterval == null ? '無制限' : `${maxClaimsPerInterval}回まで`}
             </AppText>
-            {onchainRequired && (
+            {eventHasOnchainConfig && (
               <AppText variant="small" style={styles.noticeText}>
-                ※ この参加券はオンチェーンPoP必須です。Phantom接続と署名が必要です。
+                ※ Phantom接続は任意です。接続した場合はオンチェーン証跡（tx/receipt）も記録されます。
               </AppText>
             )}
             {!onchainPolicyCompatible && (
@@ -551,12 +549,12 @@ export const UserConfirmScreen: React.FC = () => {
         {!walletReady && (
           <Card style={styles.walletCard}>
             <AppText variant="caption" style={styles.walletHint}>
-              {onchainRequired
-                ? 'このイベントはPhantom接続が必須です。接続後に参加を確定してください。'
-                : 'Phantom未接続でも参加できます。接続するとSPL参加券がウォレットに配布されます。'}
+              {eventHasOnchainConfig
+                ? 'Phantom未接続でも参加できます。接続するとオンチェーン証跡（tx/receipt）を追加できます。'
+                : 'Phantom未接続でも参加できます。'}
             </AppText>
             <Button
-              title={onchainRequired ? 'Phantomを接続（必須）' : 'Phantomを接続（任意）'}
+              title="Phantomを接続（任意）"
               variant="secondary"
               onPress={() => router.push('/wallet' as any)}
               style={styles.walletButton}
@@ -611,8 +609,7 @@ export const UserConfirmScreen: React.FC = () => {
             disabled={
               status === 'loading' ||
               !event ||
-              (event.state != null && event.state !== 'published') ||
-              (onchainRequired && !walletReady)
+              (event.state != null && event.state !== 'published')
             }
           />
           {!showPinInput && event && event.state === 'published' && walletReady && (
@@ -622,9 +619,7 @@ export const UserConfirmScreen: React.FC = () => {
           )}
           {!walletReady && (
             <AppText variant="small" style={styles.actionHint}>
-              {onchainRequired
-                ? 'このイベントはPhantom接続が必須です'
-                : 'Phantom未接続時はオフチェーン参加として確定されます'}
+              Phantom未接続時はオフチェーン参加として参加履歴に記録されます
             </AppText>
           )}
           <Button

@@ -279,7 +279,7 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     expect(message[0]).toBe(2);
   });
 
-  it('rejects user claim without on-chain proof on on-chain configured event', async () => {
+  it('accepts user claim without on-chain proof on on-chain configured event (off-chain fallback)', async () => {
     const createRes = await store.fetch(
       new Request('https://example.com/v1/school/events', {
         method: 'POST',
@@ -319,12 +319,13 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
         }),
       })
     );
-    expect(claimRes.status).toBe(400);
-    const body = (await claimRes.json()) as { error?: string };
-    expect(body.error).toContain('on-chain claim proof required');
+    expect(claimRes.status).toBe(200);
+    const body = (await claimRes.json()) as { status?: string; confirmationCode?: string };
+    expect(body.status).toBe('created');
+    expect(typeof body.confirmationCode).toBe('string');
   });
 
-  it('rejects /v1/school/claims without tx proof on on-chain configured event', async () => {
+  it('accepts /v1/school/claims without tx proof on on-chain configured event (off-chain fallback)', async () => {
     const createRes = await store.fetch(
       new Request('https://example.com/v1/school/events', {
         method: 'POST',
@@ -357,9 +358,9 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     const result = (await res.json()) as {
       success?: boolean;
       error?: { code?: string; message?: string };
+      confirmationCode?: string;
     };
-    expect(result.success).toBe(false);
-    expect(result.error?.code).toBe('wallet_required');
-    expect(result.error?.message).toContain('オンチェーンPoP証跡');
+    expect(result.success).toBe(true);
+    expect(typeof result.confirmationCode).toBe('string');
   });
 });

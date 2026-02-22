@@ -14,7 +14,7 @@ export const UserEventsScreen: React.FC = () => {
   const router = useRouter();
   const [events, setEvents] = useState<SchoolEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
-  const { tickets, loadTickets, isJoined } = useRecipientTicketStore();
+  const { tickets, loadTickets } = useRecipientTicketStore();
 
   // イベント一覧を API から取得
   useEffect(() => {
@@ -43,18 +43,23 @@ export const UserEventsScreen: React.FC = () => {
     }, [loadTickets])
   );
 
-  // 参加済みイベント
-  const joinedEvents = events.filter((event) => isJoined(event.id));
-  // 未参加のイベント
-  const availableEvents = events.filter(
-    (event) => !isJoined(event.id) && event.state === 'published'
-  );
+  const joinedEvents = tickets.map((ticket) => {
+    const event = events.find((item) => item.id === ticket.eventId);
+    return {
+      id: ticket.eventId,
+      title: event?.title ?? ticket.eventName,
+      datetime: event?.datetime ?? '-',
+      host: event?.host ?? '-',
+      solanaMint: event?.solanaMint,
+    };
+  });
 
   const handleOpenJoinedTicket = useCallback(
-    (event: SchoolEvent) => {
-      const joinedTicket = tickets.find((ticket) => ticket.eventId === event.id);
+    (eventId: string) => {
+      const joinedTicket = tickets.find((ticket) => ticket.eventId === eventId);
+      if (!joinedTicket) return;
       router.push(
-        schoolRoutes.success(event.id, {
+        schoolRoutes.success(eventId, {
           tx: joinedTicket?.txSignature,
           receipt: joinedTicket?.receiptPubkey,
           popEntryHash: joinedTicket?.popEntryHash,
@@ -76,7 +81,7 @@ export const UserEventsScreen: React.FC = () => {
           参加券
         </AppText>
         <AppText variant="caption" style={styles.subtitle}>
-          参加済みと受付中のイベントを表示しています
+          参加履歴を表示しています
         </AppText>
 
         <Button
@@ -86,13 +91,19 @@ export const UserEventsScreen: React.FC = () => {
           style={styles.mainButton}
         />
 
-        {/* 参加済み */}
+        {/* 参加履歴 */}
         <View style={styles.section}>
           <AppText variant="h3">参加済み（{joinedEvents.length}件）</AppText>
           {joinedEvents.length === 0 ? (
-            <AppText variant="caption" style={styles.emptyText}>
-              参加済みのイベントはありません
-            </AppText>
+            eventsLoading ? (
+              <AppText variant="caption" style={styles.emptyText}>
+                読み込み中…
+              </AppText>
+            ) : (
+              <AppText variant="caption" style={styles.emptyText}>
+                参加済みのイベントはありません
+              </AppText>
+            )
           ) : (
             joinedEvents.map((event) => (
               <EventRow
@@ -101,42 +112,12 @@ export const UserEventsScreen: React.FC = () => {
                 datetime={event.datetime}
                 host={event.host}
                 leftSlot={<StatusDot color="#38b000" />}
-                onPress={() => handleOpenJoinedTicket(event)}
+                onPress={() => handleOpenJoinedTicket(event.id)}
                 solanaMint={event.solanaMint}
               />
             ))
           )}
         </View>
-
-        {/* 受付中のイベント */}
-        <View style={styles.section}>
-          <AppText variant="h3">受付中（{availableEvents.length}件）</AppText>
-          {eventsLoading ? (
-            <AppText variant="caption" style={styles.emptyText}>
-              読み込み中…
-            </AppText>
-          ) : availableEvents.length === 0 ? (
-            <AppText variant="caption" style={styles.emptyText}>
-              受付中のイベントはありません
-            </AppText>
-          ) : (
-            availableEvents.map((event) => (
-              <EventRow
-                key={event.id}
-                title={event.title}
-                datetime={event.datetime}
-                host={event.host}
-                leftSlot={<StatusDot color="#f5c542" />}
-                onPress={() => router.push(schoolRoutes.confirm(event.id) as any)}
-                solanaMint={event.solanaMint}
-              />
-            ))
-          )}
-        </View>
-
-        <AppText variant="small" style={styles.helper}>
-          🟢 参加済み　🟡 受付中
-        </AppText>
       </ScrollView>
     </SafeAreaView>
   );
@@ -170,8 +151,5 @@ const styles = StyleSheet.create({
   emptyText: {
     color: theme.colors.textTertiary,
     marginTop: theme.spacing.sm,
-  },
-  helper: {
-    color: theme.colors.textTertiary,
   },
 });
