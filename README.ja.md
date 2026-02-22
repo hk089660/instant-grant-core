@@ -8,10 +8,11 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 - 利用者: `https://instant-grant-core.pages.dev/`
 - 管理者: `https://instant-grant-core.pages.dev/admin/login`（デモログインコード: `83284ab4d9874e54b301dcf7ea6a6056`）
 
-**Status as of 2026-02-22**
+**Status（2026-02-22 / February 22, 2026 時点）**
 
 ## クイックナビ
 - [Top Summary](#top-summary)
+- [審査向け証拠ハイライト](#審査向け証拠ハイライト)
 - [可視化サマリー](#可視化サマリー)
 - [審査向け補足（減点リスク対策）](#審査向け補足減点リスク対策)
 - [Verification Evidence (UI)](#verification-evidence-ui)
@@ -24,18 +25,33 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 ## Top Summary
 - これは何か: 運用プロセスのログを検証可能レシートに結合し、Solana上の PoP 検証付き claim を方針で optional/required 切替できる3層システムです。
 - 誰のためか: イベント参加者（学生/利用者）と、運用する管理者・運営者のための実装です。
-- [Implemented] 学生/利用者の参加は、対応経路では wallet なしで完了できます（off-chain 参加券として `confirmationCode` + `ticketReceipt` を発行）。
+- [Implemented] 学生/利用者導線は方針連動の2モードです。wallet不要の off-chain Attend（`confirmationCode` + `ticketReceipt`）と、方針で必要時のみ wallet署名を使う on-chain Redeem を切替できます。
 - [Implemented] オンチェーン決済証跡（devnet）は実装済みで、イベント方針で optional/required を切替できます。required の場合は on-chain claim と PoP 証跡（tx/receipt/Explorer）が必須です。
 - [Implemented] 説明責任ある運用: admin/master 導線で PoP/runtime 状態、送金監査ログ、権限別開示/検索を確認できます。
 - [Implemented] 管理者の参加券検索は所有者スコープです。admin は自分が発行したイベント分のみ検索対象で、master は全体対象です。
 - [Implemented] PoPのUI確認: 管理者イベント一覧に `PoP稼働証明` を表示し、`enforceOnchainPop` / `signerConfigured` を `/v1/school/pop-status` と紐付けて確認できます。
 - [Implemented] Hash Chain稼働UI: イベント詳細で `送金監査 (Hash Chain)` を表示し、on/off-chain の各記録で `prevHash -> entryHash` を確認できます。
+- [Implemented] Master監査のPII制御: 初期は `pii: hidden` で非表示、`Show PII` の明示操作時のみ表示します。
 - [Implemented] 利用者向け証跡UI: 成功画面で `confirmationCode`、監査レシート（`receipt_id`, `receipt_hash`）、PoP証跡コピー導線（条件付き）を表示します。
 - [Implemented] 管理者のイベント発行は、管理者認証に加えて Phantom 接続と runtime readiness を必須にしています。
 - [Implemented] 検証用 endpoint: `/v1/school/pop-status`、`/v1/school/runtime-status`、`/v1/school/audit-status`、`/api/audit/receipts/verify-code`。
 - 現在の公開先（We-ne）: 利用者 `https://instant-grant-core.pages.dev/` / 管理者 `https://instant-grant-core.pages.dev/admin/login`。
 - 成熟度: 本番完成形ではなく、再現性と第三者検証性を重視したプロトタイプです。
 - リポジトリ内の事実ソース: `api-worker/src/storeDO.ts`、`wene-mobile/src/screens/user/*`、`wene-mobile/src/screens/admin/*`、`grant_program/programs/grant_program/src/lib.rs`。
+
+## 審査向け証拠ハイライト
+- 学生ウォレットレス導線:
+  - `/r/school/:eventId` は `joinToken` により wallet不要 Attend が可能。
+  - `/u/*` はイベント方針がオンチェーン必須でない場合に wallet不要で完了。
+- PoP稼働証明（UI + endpoint）:
+  - UI導線: `/admin` -> `PoP Runtime Proof` / `PoP稼働証明` カード。
+  - 主表示: `enforceOnchainPop`、`signerConfigured`、`signerPubkey`、`checkedAt`、`/v1/school/pop-status`。
+- Hash Chain監査:
+  - UI導線: `/admin/events/:eventId` -> `送金監査 (Hash Chain)`。
+  - 主表示: `hash: <prev> -> <current>`、`chain: <prev> -> <current>`。
+- Master監査（PII hidden）:
+  - UIコード: `wene-mobile/app/master/index.tsx`（公開URLは非掲載）。
+  - PIIは初期非表示（`pii: hidden`）で、`Show PII` 明示操作時のみ表示。
 
 ## 審査向け補足（減点リスク対策）
 - Solana依存性: settlement と PoP 検証の実体は `grant_program` にあり、off-chain Attend は入口導線です。
@@ -72,7 +88,7 @@ flowchart LR
 ## Verification Evidence (UI)
 - [Implemented] PoP稼働証明:
   - 管理者UI導線: `/admin`（イベント一覧）で `PoP Runtime Proof` / `PoP稼働証明` パネルを確認。
-  - UI表示項目: `enforceOnchainPop`、`signerConfigured`、`signerPubkey`、`verification endpoint: /v1/school/pop-status`。
+  - UI表示項目: `enforceOnchainPop`、`signerConfigured`、`signerPubkey`、`checkedAt`、`verification endpoint: /v1/school/pop-status`。
   - バックエンド根拠: `GET /v1/school/pop-status`（`api-worker/src/storeDO.ts`）。
   - 本READMEでの PoP「ready」判定は `enforceOnchainPop=true` かつ `signerConfigured=true`。
 - [Implemented] Transfer Audit (Hash Chain):
@@ -312,7 +328,7 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
 ### 4) UI上の証跡位置
 - PoP稼働証明カード:
   - `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`
-  - `PoP稼働証明`、`/v1/school/pop-status` 表示
+  - `PoP稼働証明`、`checkedAt`、`/v1/school/pop-status` 表示
 - Hash Chain稼働 + on/off-chain 送金監査分離:
   - `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`
   - `送金監査 (Hash Chain)`、`On-chain署名` / `Off-chain監査署名`、`hash: ... -> ...` / `chain: ... -> ...`

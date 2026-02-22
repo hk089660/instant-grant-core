@@ -8,10 +8,11 @@ Public prototype for auditable school/public participation and grant operations 
 - User: `https://instant-grant-core.pages.dev/`
 - Admin: `https://instant-grant-core.pages.dev/admin/login` (Demo login code: `83284ab4d9874e54b301dcf7ea6a6056`)
 
-**Status as of 2026-02-22**
+**Status (as of February 22, 2026 / 2026-02-22)**
 
 ## Quick Navigation
 - [Top Summary](#top-summary)
+- [Reviewer Evidence Highlights](#reviewer-evidence-highlights)
 - [Visual Overview](#visual-overview)
 - [Verification Evidence (UI)](#verification-evidence-ui)
 - [What’s Implemented Now](#whats-implemented-now)
@@ -23,18 +24,33 @@ Public prototype for auditable school/public participation and grant operations 
 ## Top Summary
 - What it is: a 3-layer system that binds operational process logs to verifiable receipts, and optionally to Solana settlement.
 - Who it is for: students/users who join events, and operators (admin/master) who run and audit distribution.
-- [Implemented] Student/user participation can be completed walletless via off-chain participation ticket issuance (`confirmationCode` + `ticketReceipt`) on supported paths.
-- [Optional] On-chain settlement evidence is an optional devnet path; tx/receipt/Explorer outputs appear only when the on-chain claim route is actually used.
+- [Implemented] Student/user flow has two policy-gated modes: walletless off-chain Attend (`confirmationCode` + `ticketReceipt`) and wallet-signed on-chain Redeem (only when event policy requires on-chain proof).
+- [Implemented] On-chain settlement evidence on devnet is available and switchable by event policy (`optional`/`required`); when required, tx/receipt/Explorer evidence is mandatory.
 - [Implemented] Accountable operator workflow: admin/master flows expose PoP/runtime status, transfer audit logs, and role-based disclosure/search.
 - [Implemented] Admin participant search is owner-scoped: admin accounts search only tickets from their own issued events; master keeps full scope.
 - [Implemented] UI-level PoP confirmation is available: admin events screen shows `PoP Runtime Proof` with `enforceOnchainPop` + `signerConfigured`, linked to `/v1/school/pop-status`.
 - [Implemented] Hash-chain operation UI is available: admin event detail shows `Transfer Audit (Hash Chain)` with `prevHash -> entryHash` links for both on-chain and off-chain records.
+- [Implemented] Master audit/disclosure is constrained and explicit: sensitive fields are hidden by default (`pii: hidden`) and only revealed via explicit `Show PII` action on master screen.
 - [Implemented] User evidence UI is available on success screen: `confirmationCode`, participation audit receipt (`receipt_id`, `receipt_hash`), and optional PoP proof copy actions.
 - [Implemented] Admin event issuance requires authenticated operator + connected Phantom wallet + runtime readiness checks.
 - [Implemented] Verifiability endpoints include `/v1/school/pop-status`, `/v1/school/runtime-status`, `/v1/school/audit-status`, and `/api/audit/receipts/verify-code`.
 - Current deployment (We-ne): User `https://instant-grant-core.pages.dev/` / Admin `https://instant-grant-core.pages.dev/admin/login`.
 - Maturity: prototype focused on reproducibility and reviewer-verifiable evidence, not a production-complete public system.
 - Source of truth in this repo: `api-worker/src/storeDO.ts`, `wene-mobile/src/screens/user/*`, `wene-mobile/src/screens/admin/*`, `grant_program/programs/grant_program/src/lib.rs`.
+
+## Reviewer Evidence Highlights
+- Walletless student path:
+  - `/r/school/:eventId` can complete Attend walletless via `joinToken`.
+  - `/u/*` can complete walletless only when event policy does not enforce on-chain proof.
+- PoP runtime proof (UI + endpoint):
+  - UI route: `/admin` -> `PoP Runtime Proof` card.
+  - Expected visible fields: `enforceOnchainPop`, `signerConfigured`, `signerPubkey`, `checkedAt`, and endpoint `/v1/school/pop-status`.
+- Hash-chain transfer audit:
+  - UI route: `/admin/events/:eventId` -> `Transfer Audit (Hash Chain)`.
+  - Expected visible chain evidence: `hash: <prev> -> <current>` and `chain: <prev> -> <current>`.
+- Master audit/disclosure with PII control:
+  - UI code path: `wene-mobile/app/master/index.tsx` (public URL intentionally not listed).
+  - PII is hidden by default (`pii: hidden`) and requires explicit `Show PII` toggle.
 
 ## Visual Overview
 ```mermaid
@@ -56,7 +72,7 @@ flowchart LR
 
 ## Stage Clarity
 > - [Implemented] Off-chain Attend issues a participation ticket (`confirmationCode` + `ticketReceipt`) without requiring a wallet when policy allows.
-> - [Optional] On-chain redeem/proof runs only on the on-chain path; tx signature / receipt pubkey / Explorer evidence are conditional outputs.
+> - [Implemented] On-chain redeem/proof is implemented and policy-gated (`optional`/`required`); tx signature / receipt pubkey / Explorer evidence are produced when on-chain path executes.
 > - [Implemented] PoP/runtime/audit operational checks are exposed via public endpoints and shown in admin UI.
 > - [Planned] Advanced anti-sybil eligibility modules, federation-ready operations, and chain-agnostic adapter design are roadmap items.
 
@@ -66,7 +82,7 @@ Public grants and school participation often expose only final outcomes, leaving
 ## Verification Evidence (UI)
 - [Implemented] PoP runtime proof:
   - Admin UI route: `/admin` (Events list) -> open `PoP Runtime Proof` / `PoP稼働証明` panel.
-  - UI fields: `enforceOnchainPop`, `signerConfigured`, `signerPubkey`, and `verification endpoint: /v1/school/pop-status`.
+  - UI fields: `enforceOnchainPop`, `signerConfigured`, `signerPubkey`, `checkedAt`, and `verification endpoint: /v1/school/pop-status`.
   - Backing endpoint: `GET /v1/school/pop-status` (see `api-worker/src/storeDO.ts`).
   - PoP "ready" for operation is interpreted as `enforceOnchainPop=true` and `signerConfigured=true` in this panel.
 - [Implemented] Transfer Audit (Hash Chain):
@@ -305,7 +321,7 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
 ### 4) Where evidence appears in UI
 - PoP runtime evidence card:
   - `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`
-  - labels include `PoP稼働証明` and endpoint `/v1/school/pop-status`
+  - labels include `PoP稼働証明`, `checkedAt`, and endpoint `/v1/school/pop-status`
 - Hash-chain operation + on/off-chain transfer separation:
   - `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`
   - labels include `送金監査 (Hash Chain)`, `On-chain署名`, `Off-chain監査署名`, and chain display (`hash: ... -> ...`, `chain: ... -> ...`)
