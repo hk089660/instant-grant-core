@@ -139,6 +139,17 @@ export interface InviteCodeRecord {
   revokedBy?: string | null;
 }
 
+type InviteCodeRecordPayload = Partial<InviteCodeRecord> & {
+  code?: string;
+  adminId?: string;
+  name?: string;
+  source?: string;
+  status?: string;
+  createdAt?: string;
+  revokedAt?: string | null;
+  revokedBy?: string | null;
+};
+
 async function readErrorMessage(res: Response, fallback: string): Promise<string> {
   try {
     const body = await res.json() as { error?: string; message?: string };
@@ -147,6 +158,36 @@ async function readErrorMessage(res: Response, fallback: string): Promise<string
   } catch {
     return `${fallback} (HTTP ${res.status})`;
   }
+}
+
+function normalizeInviteCodeRecord(payload: InviteCodeRecordPayload, fallbackName = 'Unknown Admin'): InviteCodeRecord | null {
+  const code = typeof payload?.code === 'string' ? payload.code.trim() : '';
+  if (!code) return null;
+
+  const name =
+    typeof payload?.name === 'string' && payload.name.trim()
+      ? payload.name.trim()
+      : fallbackName;
+  const createdAt =
+    typeof payload?.createdAt === 'string' && payload.createdAt.trim()
+      ? payload.createdAt
+      : new Date().toISOString();
+  const revokedAt = typeof payload?.revokedAt === 'string' ? payload.revokedAt : null;
+  const adminId =
+    typeof payload?.adminId === 'string' && payload.adminId.trim()
+      ? payload.adminId.trim()
+      : `legacy-${code.slice(0, 8)}`;
+
+  return {
+    code,
+    adminId,
+    name,
+    source: 'invite',
+    status: payload?.status === 'revoked' || Boolean(revokedAt) ? 'revoked' : 'active',
+    createdAt,
+    revokedAt,
+    revokedBy: typeof payload?.revokedBy === 'string' ? payload.revokedBy : null,
+  };
 }
 
 /** 招待コード発行 (Master Only) */
@@ -168,20 +209,12 @@ export async function createInviteCode(masterPassword: string, name: string): Pr
   if (!res.ok) {
     throw new Error(await readErrorMessage(res, 'Failed to create invite code'));
   }
-  const json = await res.json() as Partial<InviteCodeRecord> & { code?: string; adminId?: string; createdAt?: string; name?: string };
-  if (!json?.code || !json?.adminId) {
+  const json = await res.json() as InviteCodeRecordPayload;
+  const normalized = normalizeInviteCodeRecord(json, trimmedName);
+  if (!normalized) {
     throw new Error('Invalid invite response');
   }
-  return {
-    code: json.code,
-    adminId: json.adminId,
-    name: typeof json.name === 'string' && json.name.trim() ? json.name.trim() : trimmedName,
-    source: 'invite',
-    status: json.status === 'revoked' ? 'revoked' : 'active',
-    createdAt: typeof json.createdAt === 'string' ? json.createdAt : new Date().toISOString(),
-    revokedAt: json.revokedAt ?? null,
-    revokedBy: json.revokedBy ?? null,
-  };
+  return normalized;
 }
 
 /** 招待コード一覧取得 (Master Only) */
@@ -196,8 +229,11 @@ export async function fetchInviteCodes(masterPassword: string, includeRevoked = 
   });
 
   if (!res.ok) return [];
-  const json = await res.json();
-  return json.invites || [];
+  const json = await res.json() as { invites?: InviteCodeRecordPayload[] };
+  const invitesRaw = Array.isArray(json?.invites) ? json.invites : [];
+  return invitesRaw
+    .map((item) => normalizeInviteCodeRecord(item))
+    .filter((item): item is InviteCodeRecord => item !== null);
 }
 
 /** 招待コード無効化 (Master Only) */
@@ -235,11 +271,12 @@ export async function renameInviteCode(masterPassword: string, params: {
   if (!res.ok) {
     throw new Error(await readErrorMessage(res, 'Failed to rename invite code'));
   }
-  const json = await res.json() as { invite?: InviteCodeRecord };
-  if (!json?.invite) {
+  const json = await res.json() as { invite?: InviteCodeRecordPayload } & InviteCodeRecordPayload;
+  const normalized = normalizeInviteCodeRecord(json.invite ?? json, params.name.trim() || 'Unknown Admin');
+  if (!normalized) {
     throw new Error('Invalid rename response');
   }
-  return json.invite;
+  return normalized;
 }
 
 /** Audit Log (Master Only) */
