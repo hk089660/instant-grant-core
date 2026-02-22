@@ -7,29 +7,30 @@ Public prototype for auditable school/public participation and grant operations 
 ## Top Summary
 - What it is: a 3-layer system that binds operational process logs to verifiable receipts, and optionally to Solana settlement.
 - Who it is for: students/users who join events, and operators (admin/master) who run and audit distribution.
-- [Implemented] Student flow supports walletless `Participation Ticket (off-chain Attend)` with `confirmationCode + ticketReceipt`.
-- [Optional] `On-chain Redeem` is executed only when wallet + event policy/config path is used; tx/receipt evidence appears only for those executions.
-- Third-party verifiable today: PoP runtime status, audit integrity status, ticket verify-by-code API, and Explorer links when on-chain path is used.
-- Design principle: non-custodial signatures where on-chain is used, plus accountability by immutable process audit chain.
+- [Implemented] Minimal-friction participation: walletless `Participation Ticket (off-chain Attend)` can issue `confirmationCode + ticketReceipt` on supported paths.
+- [Optional] `On-chain Redeem` runs only when wallet + on-chain event config path is used; tx/receipt/Explorer evidence appears only in that path.
+- [Implemented] Accountable operator workflow: admin/master flows expose PoP/runtime status, transfer audit logs, and role-based disclosure/search.
+- [Implemented] Admin event issuance requires authenticated operator + connected Phantom wallet + runtime readiness checks.
+- [Implemented] Verifiability endpoints include `/v1/school/pop-status`, `/v1/school/runtime-status`, `/v1/school/audit-status`, and `/api/audit/receipts/verify-code`.
 - Current deployment: `https://instant-grant-core.pages.dev/` (user) and `/admin/login` (operator).
 - Maturity: prototype focused on reproducibility and reviewer-verifiable evidence, not a production-complete public system.
 - Source of truth in this repo: `api-worker/src/storeDO.ts`, `wene-mobile/src/screens/user/*`, `wene-mobile/src/screens/admin/*`, `grant_program/programs/grant_program/src/lib.rs`.
+
+## Project Direction
+- [Implemented] Near-term Solana contribution: a reproducible reference implementation for accountable P2P public operations with auditable administration and verifiable receipts.
+- [Implemented] Current scope is practical: student/user participation + operator workflows (admin/master) with concrete verification endpoints and UI evidence.
+- [Planned] Generalize the current design toward an administration-operable federation model, so multiple institutions can operate under explicit disclosure and audit boundaries.
+- [Planned] Generalize settlement interfaces toward chain-agnostic adapters in the future public infrastructure direction, while Solana remains the active implementation in this PoC.
+- [Planned] This grant/PoC stage does not include launching a new independent chain.
 
 ## Stage Clarity
 > - [Implemented] Off-chain Attend issues a participation ticket (`confirmationCode` + `ticketReceipt`) without requiring a wallet when policy allows.
 > - [Optional] On-chain redeem/proof runs only on the on-chain path; tx signature / receipt pubkey / Explorer evidence are conditional outputs.
 > - [Implemented] PoP/runtime/audit operational checks are exposed via public endpoints and shown in admin UI.
-> - [Planned] Advanced anti-sybil eligibility modules and broader federation are roadmap items.
+> - [Planned] Advanced anti-sybil eligibility modules, federation-ready operations, and chain-agnostic adapter design are roadmap items.
 
 ## Why This Matters
-Public grants, school participation, and benefit operations often expose only final outcomes, not the decision/process trail that produced them.
-
-Result-only transparency is insufficient for public trust. Reviewers and auditors need to verify:
-- who executed which operation,
-- whether process logs are tamper-evident,
-- and how process evidence links to settlement evidence.
-
-This repository focuses on that process-accountability gap.
+Public grants and school participation often expose only final outcomes, leaving process decisions opaque; this project addresses that by making operator actions, audit-chain integrity, and settlement-linked evidence independently verifiable.
 
 ## What’s Implemented Now
 
@@ -43,7 +44,8 @@ This repository focuses on that process-accountability gap.
 | Master strict disclosure (`master > admin`) | `Implemented` | `/api/master/transfers`, `/api/master/admin-disclosures`, `wene-mobile/app/master/index.tsx` |
 | Server-side indexed search with DO SQLite persistence | `Implemented` | `/api/master/search`, `api-worker/src/storeDO.ts` (`master_search_*` tables) |
 | FairScale/advanced anti-sybil identity layer | `Planned` | `docs/ROADMAP.md` |
-| Dedicated sovereign chain operation | `Planned` | roadmap direction only (not implemented in this repo) |
+| Administration-operable federation model (multi-institution ops) | `Planned` | roadmap/design direction (not implemented in this repo) |
+| Chain-agnostic settlement adapters (future public infrastructure) | `Planned` | roadmap direction; no independent chain launch in this grant/PoC stage |
 
 ### 1) Student/User Experience
 - `Implemented`: User flow screens are present and connected: `/u/scan` → `/u/confirm` → `/u/success`.
@@ -233,9 +235,9 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
 
 | Milestone | Deliverable | Success Criteria | Reviewer-verifiable Evidence |
 |---|---|---|---|
-| M1: Reproducibility Pack | Fast reviewer runbook and stable verification steps for live + local | A reviewer can execute runtime checks and tests without hidden setup | This README + `api-worker/package.json` scripts + `wene-mobile/package.json` scripts |
-| M2: Evidence-first Ticket UX/API | Make `Participation Ticket (off-chain)` the primary evidence artifact across flows | `confirmationCode + ticketReceipt` is visible in UI and verifiable by API for created/already paths | `wene-mobile/src/screens/user/UserSuccessScreen.tsx`, `/api/audit/receipts/verify-code`, `api-worker/src/storeDO.ts` |
-| M3: Scale-ready operator verification (planned) | Harden indexed search and policy modules; add L1 adapter abstraction (not a new chain launch) | Search and disclosure stay stable with larger datasets; policy modules are test-covered and explicit | `/api/master/search`, `api-worker/src/storeDO.ts` (SQLite index), future PR/tests for adapter abstraction |
+| M1: Reproducibility + Evidence (10-minute review) | [Implemented] Reviewer runbook for live + local verification with explicit evidence points | A reviewer can verify runtime status + ticket evidence in about 10 minutes without hidden setup | This README + `/v1/school/pop-status` + `/v1/school/runtime-status` + `/api/audit/receipts/verify-code` |
+| M2: Accountability Strengthening | [Implemented] Ops evidence surfaces (`PoP稼働証明`, transfer on/off-chain split, role-based disclosures); [Implemented] integrity check API (`/api/master/audit-integrity`) | Operators can inspect process evidence and auditors can run integrity checks with master auth | `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`, `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`, `wene-mobile/app/master/index.tsx`, `api-worker/src/storeDO.ts` |
+| M3: Federation-ready Generalization | [Planned] Doc-level federation model + minimal PoC hooks for chain-agnostic adapter boundaries (not a new chain launch) | Design docs and adapter/federation interfaces are explicit and testable without changing current Solana reference path | `docs/ROADMAP.md` + future PRs for adapter/federation interfaces |
 
 ## Scope Clarity
 
@@ -247,8 +249,8 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
 >
 > **Out of scope (planned)**
 > - Full walletless on-chain settlement for every event policy
-> - Federation across institutions/municipalities
-> - Dedicated sovereign chain deployment
+> - Production federation rollout across institutions/municipalities (design generalization only in this stage)
+> - Launching a new independent chain in this grant/PoC stage
 
 ## Links and Docs
 - Architecture: `docs/ARCHITECTURE.md`

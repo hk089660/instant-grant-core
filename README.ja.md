@@ -7,29 +7,30 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 ## Top Summary
 - これは何か: 運用プロセスのログを検証可能レシートに結合し、必要時のみSolana決済へ結合する3層システムです。
 - 誰のためか: イベント参加者（学生/利用者）と、運用する管理者・運営者のための実装です。
-- [Implemented] 学生導線は wallet 不要の `Participation Ticket (off-chain Attend)` を `confirmationCode + ticketReceipt` で発行できます。
-- [Optional] `On-chain Redeem` は wallet + イベント方針/設定の導線を実行した場合のみ動作し、tx/receipt 証跡もその場合のみ出力されます。
-- 今日検証できること: PoP稼働状態、監査整合性、コード起点の参加券検証API、オンチェーン時のExplorer証跡。
-- 設計原則: オンチェーン時は非保管署名、全体は不変監査チェーンで説明責任を担保します。
+- [Implemented] 低摩擦の参加導線: 対応経路では wallet 不要の `Participation Ticket (off-chain Attend)` を `confirmationCode + ticketReceipt` として発行できます。
+- [Optional] `On-chain Redeem` は wallet + on-chain 設定付きイベント導線でのみ実行され、tx/receipt/Explorer 証跡もその場合のみ出力されます。
+- [Implemented] 説明責任ある運用: admin/master 導線で PoP/runtime 状態、送金監査ログ、権限別開示/検索を確認できます。
+- [Implemented] 管理者のイベント発行は、管理者認証に加えて Phantom 接続と runtime readiness を必須にしています。
+- [Implemented] 検証用 endpoint: `/v1/school/pop-status`、`/v1/school/runtime-status`、`/v1/school/audit-status`、`/api/audit/receipts/verify-code`。
 - 現在の公開先: `https://instant-grant-core.pages.dev/`（利用者）と `/admin/login`（運用者）。
 - 成熟度: 本番完成形ではなく、再現性と第三者検証性を重視したプロトタイプです。
 - リポジトリ内の事実ソース: `api-worker/src/storeDO.ts`、`wene-mobile/src/screens/user/*`、`wene-mobile/src/screens/admin/*`、`grant_program/programs/grant_program/src/lib.rs`。
+
+## Project Direction
+- [Implemented] 近接のSolana貢献: 監査可能な運用（accountable P2P public operations）を、再現可能な参照実装として提示します。
+- [Implemented] 現在の実装範囲は実務寄りで、学生/利用者の参加導線と admin/master の運用証跡を第三者が検証できます。
+- [Planned] 現行設計を、複数機関が共同運用できる administration-operable federation model に一般化します。
+- [Planned] 将来の公共基盤に向けて settlement interface を chain-agnostic adapter へ一般化します（PoC段階の実装基盤は引き続きSolana）。
+- [Planned] この助成/PoC段階で独立チェーンを新規立ち上げる計画は含みません。
 
 ## Stage Clarity
 > - [Implemented] Off-chain Attend は、方針が許すイベントで wallet なしでも参加券（`confirmationCode` + `ticketReceipt`）を発行します。
 > - [Optional] On-chain redeem / PoP は on-chain 導線でのみ実行され、tx signature / receipt pubkey / Explorer 証跡は条件付きで表示されます。
 > - [Implemented] PoP/runtime/audit の運用確認は公開 endpoint と管理者UIで確認できます。
-> - [Planned] 高度な Sybil 耐性モジュールや機関連携拡張はロードマップ項目です。
+> - [Planned] 高度なSybil耐性、連合運用向け設計、chain-agnostic adapter 設計はロードマップ項目です。
 
 ## なぜ重要か（課題）
-給付・学校参加の運用では、最終結果だけが見え、意思決定や処理過程の検証が難しいことが多くあります。
-
-結果だけの透明性では不十分です。審査・監査では次を検証できる必要があります。
-- 誰がどの操作を実行したか
-- プロセスログが改ざん検知可能か
-- プロセス証跡と決済証跡がどう結び付くか
-
-本リポジトリは、この「過程の説明責任」の不足を埋めることを主目的にしています。
+給付や学校参加の運用は最終結果だけが公開されやすく、処理過程の透明性が不足しがちなため、誰が何を実行したか・監査チェーンが整合しているか・決済証跡とどう結び付くかを第三者が検証できる形で示すことが重要です。
 
 ## 現在実装されていること
 
@@ -43,7 +44,8 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 | 運営者優先の厳格開示（`master > admin`） | `Implemented` | `/api/master/transfers`、`/api/master/admin-disclosures`、`wene-mobile/app/master/index.tsx` |
 | サーバー側インデックス検索（DO SQLite永続化） | `Implemented` | `/api/master/search`、`api-worker/src/storeDO.ts`（`master_search_*`テーブル） |
 | FairScale等の高度なSybil耐性 | `Planned` | `docs/ROADMAP.md` |
-| 独自チェーン常時運用 | `Planned` | 方向性のみ（このリポジトリには未実装） |
+| 連合運用モデル（複数機関の共同運用） | `Planned` | 設計/ロードマップ段階（このリポジトリには未実装） |
+| chain-agnostic な決済 adapter（将来の公共基盤） | `Planned` | 方向性のみ（この助成/PoC段階で独立チェーン立ち上げは行わない） |
 
 ### 1) 学生/利用者体験
 - `Implemented`: 参加導線は `/u/scan` → `/u/confirm` → `/u/success` で接続済み。
@@ -233,9 +235,9 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
 
 | マイルストーン | Deliverable | Success Criteria | Reviewer向け証跡 |
 |---|---|---|---|
-| M1: 再現パック整備 | レビュー用最短手順と検証手順の固定化 | 初見レビュアーが隠し設定なしで稼働確認・テスト実行できる | 本README + `api-worker/package.json` + `wene-mobile/package.json` |
-| M2: 証跡主役の参加券UX/API | `Participation Ticket (off-chain)` を主証跡として統一 | `confirmationCode + ticketReceipt` が created/already の両経路で表示・検証できる | `wene-mobile/src/screens/user/UserSuccessScreen.tsx`、`/api/audit/receipts/verify-code`、`api-worker/src/storeDO.ts` |
-| M3: 規模拡大対応（planned） | 検索/開示の安定化とL1 adapter abstraction（新規チェーン立ち上げではない） | 件数増加時も検索/開示が安定し、方針モジュールがテスト可能になる | `/api/master/search`、`api-worker/src/storeDO.ts`（SQLite index）、今後のPR/テスト |
+| M1: 再現性 + 証跡整備（10分レビュー） | [Implemented] Live/Localを短時間で検証できる手順と証跡導線を固定化 | 初見レビュアーが隠し設定なしで約10分で稼働確認と証跡確認を実行できる | 本README + `/v1/school/pop-status` + `/v1/school/runtime-status` + `/api/audit/receipts/verify-code` |
+| M2: 説明責任の強化 | [Implemented] 運用証跡UI（`PoP稼働証明`、on/off-chain送金監査分離、権限別開示）+ [Implemented] 整合性確認API（`/api/master/audit-integrity`） | 運用者が証跡を確認でき、監査者が master 認証で整合性チェックを実行できる | `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`、`wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`、`wene-mobile/app/master/index.tsx`、`api-worker/src/storeDO.ts` |
+| M3: 連合運用に向けた一般化 | [Planned] federation model 文書化 + chain-agnostic adapter 境界の最小PoCフック（新規チェーン立ち上げは対象外） | 現行Solana参照実装を維持したまま、連合運用/adapter境界が明示される | `docs/ROADMAP.md` + 今後のPR（adapter/federation interface） |
 
 ## Scope Clarity
 
@@ -247,8 +249,8 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
 >
 > **評価対象外（Out of scope, planned）**
 > - 全イベントでの完全walletlessオンチェーン決済
-> - 自治体/機関間の連合運用
-> - 独自チェーンの本格運用
+> - 自治体/機関間の本番連合運用展開（この段階では設計一般化のみ）
+> - この助成/PoC段階での独立チェーン新規立ち上げ
 
 ## Links and Docs
 - アーキテクチャ: `docs/ARCHITECTURE.md`
