@@ -7,10 +7,11 @@ import type {
   ParticipationTicketReceipt,
   RegisterBody,
   SchoolClaimResult,
+  SchoolClaimResultSuccess,
   UserClaimBody,
   UserClaimResponse,
 } from './types';
-import { ClaimStore, type IClaimStorage } from './claimLogic';
+import { ClaimStore, normalizeSubject, type IClaimStorage } from './claimLogic';
 import type { AuditActor, AuditEvent } from './audit/types';
 import { canonicalize, sha256Hex } from './audit/hash';
 import { parseAuditImmutableMode, persistImmutableAuditEntry } from './audit/immutable';
@@ -102,6 +103,7 @@ const MASTER_SEARCH_SQL_DOC_CHUNK_SIZE = 250;
 const PARTICIPATION_TICKET_RECEIPT_VERSION = 1;
 const PARTICIPATION_TICKET_RECEIPT_TYPE = 'participation_audit_receipt';
 const PARTICIPATION_TICKET_VERIFY_ENDPOINT = '/api/audit/receipts/verify';
+const PARTICIPATION_TICKET_VERIFY_BY_CODE_ENDPOINT = '/api/audit/receipts/verify-code';
 
 type AuditIntegrityIssue = {
   code: string;
@@ -2818,7 +2820,7 @@ export class SchoolStore implements DurableObject {
   }
 
   private actorForAudit(path: string, request: Request, body: unknown): AuditActor {
-    if (path === '/api/audit/receipts/verify') {
+    if (path === '/api/audit/receipts/verify' || path === '/api/audit/receipts/verify-code') {
       return { type: 'auditor', id: 'public' };
     }
 
@@ -3062,6 +3064,38 @@ export class SchoolStore implements DurableObject {
       const report = await this.verifyParticipationTicketReceipt(receipt);
       const status = report.ok ? 200 : 409;
       return Response.json(report, { status });
+    }
+
+    // POST /api/audit/receipts/verify-code (public)
+    if (path === '/api/audit/receipts/verify-code' && request.method === 'POST') {
+      let body: { eventId?: unknown; confirmationCode?: unknown };
+      try {
+        body = (await request.json()) as { eventId?: unknown; confirmationCode?: unknown };
+      } catch {
+        return Response.json({ error: 'invalid body' }, { status: 400 });
+      }
+      const eventId = this.normalizeStringField(body?.eventId);
+      const confirmationCode = this.normalizeStringField(body?.confirmationCode);
+      if (!eventId || !confirmationCode) {
+        return Response.json({ error: 'eventId and confirmationCode are required' }, { status: 400 });
+      }
+      const receipt = this.parseParticipationTicketReceipt(
+        await this.ctx.storage.get(ticketReceiptByCodeKey(eventId, confirmationCode))
+      );
+      if (!receipt) {
+        return Response.json({ error: 'ticket receipt not found' }, { status: 404 });
+      }
+      const verification = await this.verifyParticipationTicketReceipt(receipt);
+      const status = verification.ok ? 200 : 409;
+      return Response.json({
+        ok: verification.ok,
+        checkedAt: verification.checkedAt,
+        eventId,
+        confirmationCode,
+        receipt,
+        verification,
+        verifyByCodeEndpoint: PARTICIPATION_TICKET_VERIFY_BY_CODE_ENDPOINT,
+      }, { status });
     }
 
     // GET /api/admin/transfers (Admin or Master, transfer identifiers visible / PII hidden)
@@ -3641,51 +3675,104 @@ export class SchoolStore implements DurableObject {
           } as SchoolClaimResult);
         }
       }
-      const result = await this.store.submitClaim(body);
-
-      // Audit Log
-      if (result.success && !result.alreadyJoined) {
-        const walletAddress = this.normalizeStringField(body.walletAddress);
-        const joinToken = this.normalizeStringField(body.joinToken);
-        const txSignature = this.normalizeStringField(body.txSignature);
-        const receiptPubkey = this.normalizeStringField(body.receiptPubkey);
-        const recipient: TransferParty | null = walletAddress
-          ? { type: 'wallet', id: walletAddress }
-          : joinToken
-            ? { type: 'join_token', id: joinToken }
-            : null;
-        const pii: Record<string, string> = {};
-        if (walletAddress) pii.walletAddress = walletAddress;
-        if (joinToken) pii.joinToken = joinToken;
-
-        if (recipient) {
-          await this.appendAuditLog(
-            'WALLET_CLAIM',
-            { type: 'wallet', id: recipient.id },
-            {
-              eventId,
-              status: 'created',
-              transfer: this.buildClaimTransferPayload({
-                eventId,
-                event,
-                recipient,
-                txSignature,
-                receiptPubkey,
-              }),
-              ...(Object.keys(pii).length > 0 ? { pii } : {}),
-            },
-            eventId
-          );
-        } else {
-          await this.appendAuditLog(
-            'WALLET_CLAIM',
-            { type: 'wallet', id: 'unknown' },
-            { eventId, status: 'created' },
-            eventId
-          );
-        }
+      const walletAddress = this.normalizeStringField(body.walletAddress);
+      const joinToken = this.normalizeStringField(body.joinToken);
+      const subject = normalizeSubject(walletAddress ?? undefined, joinToken ?? undefined);
+      if (!subject) {
+        return Response.json({
+          success: false,
+          error: { code: 'wallet_required', message: 'Phantomに接続してください' },
+        } as SchoolClaimResult);
       }
-      return Response.json(result);
+
+      const issuedConfirmationCode = genConfirmationCode();
+      const result = await this.store.submitClaim(body, { confirmationCode: issuedConfirmationCode });
+      if (!result.success) {
+        return Response.json(result);
+      }
+
+      let confirmationCode = result.confirmationCode;
+      if (!confirmationCode) {
+        const rec = await this.store.getClaimRecord(eventId, subject);
+        confirmationCode = rec?.confirmationCode;
+      }
+
+      if (result.alreadyJoined) {
+        const ticketReceipt =
+          confirmationCode
+            ? await this.getParticipationTicketReceipt(eventId, subject, confirmationCode)
+            : null;
+        const alreadyResponse: SchoolClaimResultSuccess = {
+          ...result,
+          ...(confirmationCode ? { confirmationCode } : {}),
+          ...(ticketReceipt ? { ticketReceipt } : {}),
+        };
+        return Response.json(alreadyResponse);
+      }
+
+      const txSignature = this.normalizeStringField(body.txSignature);
+      const receiptPubkey = this.normalizeStringField(body.receiptPubkey);
+      const recipient: TransferParty | null = walletAddress
+        ? { type: 'wallet', id: walletAddress }
+        : joinToken
+          ? { type: 'join_token', id: joinToken }
+          : null;
+      const pii: Record<string, string> = {};
+      if (walletAddress) pii.walletAddress = walletAddress;
+      if (joinToken) pii.joinToken = joinToken;
+
+      let auditEntry: AuditEvent;
+      if (recipient) {
+        auditEntry = await this.appendAuditLog(
+          'WALLET_CLAIM',
+          { type: 'wallet', id: recipient.id },
+          {
+            eventId,
+            status: 'created',
+            ...(confirmationCode ? { confirmationCode } : {}),
+            transfer: this.buildClaimTransferPayload({
+              eventId,
+              event,
+              recipient,
+              txSignature,
+              receiptPubkey,
+            }),
+            ...(Object.keys(pii).length > 0 ? { pii } : {}),
+          },
+          eventId
+        );
+      } else {
+        auditEntry = await this.appendAuditLog(
+          'WALLET_CLAIM',
+          { type: 'wallet', id: 'unknown' },
+          {
+            eventId,
+            status: 'created',
+            ...(confirmationCode ? { confirmationCode } : {}),
+          },
+          eventId
+        );
+      }
+
+      const ticketReceipt =
+        confirmationCode
+          ? await this.buildParticipationTicketReceipt({
+            eventId,
+            subject,
+            confirmationCode,
+            auditEntry,
+          })
+          : null;
+      if (ticketReceipt) {
+        await this.storeParticipationTicketReceipt(eventId, subject, ticketReceipt);
+      }
+
+      const createdResponse: SchoolClaimResultSuccess = {
+        ...result,
+        ...(confirmationCode ? { confirmationCode } : {}),
+        ...(ticketReceipt ? { ticketReceipt } : {}),
+      };
+      return Response.json(createdResponse);
     }
 
     // POST /api/auth/verify

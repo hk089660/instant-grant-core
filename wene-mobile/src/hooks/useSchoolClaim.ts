@@ -27,6 +27,7 @@ export interface UseSchoolClaimResult {
   isRetryable: boolean;
   event: SchoolEvent | null;
   isJoined: boolean;
+  lastSuccess: SchoolClaimResultSuccess | null;
   handleClaim: () => Promise<void>;
   reset: () => void;
 }
@@ -38,7 +39,8 @@ export function useSchoolClaim(
   const [status, setStatus] = useState<SchoolClaimStatus>('idle');
   const [errorInfo, setErrorInfo] = useState<SchoolClaimErrorInfo | null>(null);
   const [event, setEvent] = useState<SchoolEvent | null>(null);
-  const { isJoined } = useRecipientTicketStore();
+  const [lastSuccess, setLastSuccess] = useState<SchoolClaimResultSuccess | null>(null);
+  const { isJoined, addTicket } = useRecipientTicketStore();
   const onSuccess = options?.onSuccess;
 
   useEffect(() => {
@@ -72,21 +74,35 @@ export function useSchoolClaim(
     const result = await submitSchoolClaim(eventId, options);
 
     if (result.success) {
+      setLastSuccess(result);
       if (result.alreadyJoined) {
         setStatus('already');
       } else {
         setStatus('success');
+      }
+      if (event) {
+        await addTicket({
+          eventId,
+          eventName: event.title,
+          joinedAt: Date.now(),
+          txSignature: result.txSignature,
+          receiptPubkey: result.receiptPubkey,
+          confirmationCode: result.confirmationCode,
+          auditReceiptId: result.ticketReceipt?.receiptId,
+          auditReceiptHash: result.ticketReceipt?.receiptHash,
+        }).catch(() => { });
       }
       onSuccess?.(result);
     } else {
       setStatus('error');
       setErrorInfo(result.error);
     }
-  }, [eventId, event, onSuccess]);
+  }, [eventId, event, addTicket, onSuccess]);
 
   const reset = useCallback(() => {
     setStatus('idle');
     setErrorInfo(null);
+    setLastSuccess(null);
   }, []);
 
   return {
@@ -96,6 +112,7 @@ export function useSchoolClaim(
     isRetryable: errorInfo?.code === 'retryable' || errorInfo?.code === 'wallet_required',
     event,
     isJoined: eventId ? isJoined(eventId) : false,
+    lastSuccess,
     handleClaim,
     reset,
   };

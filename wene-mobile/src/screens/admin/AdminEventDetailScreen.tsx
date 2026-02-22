@@ -7,6 +7,14 @@ import { adminTheme } from '../../ui/adminTheme';
 import { fetchAdminEvent, fetchAdminTransferLogs, fetchClaimants, type Claimant, type TransferLogEntry } from '../../api/adminApi';
 import type { SchoolEvent } from '../../types/school';
 
+function isOnchainTransfer(item: TransferLogEntry): boolean {
+  return (
+    item.transfer.mode === 'onchain' ||
+    Boolean(item.transfer.txSignature) ||
+    Boolean(item.transfer.receiptPubkey)
+  );
+}
+
 export const AdminEventDetailScreen: React.FC = () => {
   const router = useRouter();
   const { eventId } = useLocalSearchParams<{ eventId: string }>();
@@ -121,6 +129,15 @@ export const AdminEventDetailScreen: React.FC = () => {
     if (value.length <= start + end + 3) return value;
     return `${value.slice(0, start)}...${value.slice(-end)}`;
   };
+
+  const onchainTransfers = useMemo(
+    () => transfers.filter((item) => isOnchainTransfer(item)),
+    [transfers]
+  );
+  const offchainTransfers = useMemo(
+    () => transfers.filter((item) => !isOnchainTransfer(item)),
+    [transfers]
+  );
 
   if (loading) {
     return (
@@ -259,6 +276,9 @@ export const AdminEventDetailScreen: React.FC = () => {
             {transfers.length} 件 / レベル: {transferStrictLevel ?? '-'}
           </AppText>
           <AppText variant="small" style={styles.muted}>
+            On-chain署名: {onchainTransfers.length} 件 / Off-chain監査署名: {offchainTransfers.length} 件
+          </AppText>
+          <AppText variant="small" style={styles.muted}>
             最終取得: {formatTime(transferCheckedAt ?? undefined)}
           </AppText>
         </View>
@@ -284,33 +304,87 @@ export const AdminEventDetailScreen: React.FC = () => {
             </View>
           ) : (
             <>
-              {transfers.map((item) => (
-                <View key={item.entryHash} style={styles.transferRow}>
-                  <View style={styles.transferHeader}>
-                    <AppText variant="small" style={styles.cardText}>
-                      {item.event} / {formatTime(item.ts)}
-                    </AppText>
-                    <AppText variant="small" style={styles.cardDim}>
-                      {item.transfer.mode}
-                    </AppText>
+              <View style={styles.transferGroup}>
+                <View style={styles.transferGroupHeader}>
+                  <AppText variant="body" style={styles.cardText}>
+                    On-chain署名
+                  </AppText>
+                  <View style={[styles.transferModeBadge, styles.onchainBadge]}>
+                    <AppText variant="small" style={styles.transferModeText}>tx + receipt</AppText>
                   </View>
-                  <AppText variant="small" style={styles.cardMuted}>
-                    送金主: {item.transfer.sender.type}:{item.transfer.sender.id}
-                  </AppText>
-                  <AppText variant="small" style={styles.cardMuted}>
-                    送金先: {item.transfer.recipient.type}:{item.transfer.recipient.id}
-                  </AppText>
-                  <AppText variant="small" style={styles.cardMuted}>
-                    配布量: {item.transfer.amount ?? '-'} / Mint: {shorten(item.transfer.mint)}
-                  </AppText>
-                  <AppText variant="small" style={styles.hashMono}>
-                    tx: {shorten(item.transfer.txSignature)} / receipt: {shorten(item.transfer.receiptPubkey)}
-                  </AppText>
-                  <AppText variant="small" style={styles.hashMono}>
-                    hash: {shorten(item.prevHash, 8, 8)} → {shorten(item.entryHash, 8, 8)}
-                  </AppText>
                 </View>
-              ))}
+                {onchainTransfers.length === 0 ? (
+                  <AppText variant="caption" style={styles.cardMuted}>
+                    On-chain署名の記録はありません
+                  </AppText>
+                ) : (
+                  onchainTransfers.map((item) => (
+                    <View key={`on:${item.entryHash}`} style={styles.transferRow}>
+                      <View style={styles.transferHeader}>
+                        <AppText variant="small" style={styles.cardText}>
+                          {item.event} / {formatTime(item.ts)}
+                        </AppText>
+                      </View>
+                      <AppText variant="small" style={styles.cardMuted}>
+                        送金主: {item.transfer.sender.type}:{item.transfer.sender.id}
+                      </AppText>
+                      <AppText variant="small" style={styles.cardMuted}>
+                        送金先: {item.transfer.recipient.type}:{item.transfer.recipient.id}
+                      </AppText>
+                      <AppText variant="small" style={styles.cardMuted}>
+                        配布量: {item.transfer.amount ?? '-'} / Mint: {shorten(item.transfer.mint)}
+                      </AppText>
+                      <AppText variant="small" style={styles.hashMono}>
+                        tx: {shorten(item.transfer.txSignature)} / receipt: {shorten(item.transfer.receiptPubkey)}
+                      </AppText>
+                      <AppText variant="small" style={styles.hashMono}>
+                        hash: {shorten(item.prevHash, 8, 8)} → {shorten(item.entryHash, 8, 8)}
+                      </AppText>
+                    </View>
+                  ))
+                )}
+              </View>
+
+              <View style={styles.transferGroup}>
+                <View style={styles.transferGroupHeader}>
+                  <AppText variant="body" style={styles.cardText}>
+                    Off-chain監査署名
+                  </AppText>
+                  <View style={[styles.transferModeBadge, styles.offchainBadge]}>
+                    <AppText variant="small" style={styles.transferModeText}>hash chain receipt</AppText>
+                  </View>
+                </View>
+                {offchainTransfers.length === 0 ? (
+                  <AppText variant="caption" style={styles.cardMuted}>
+                    Off-chain監査署名の記録はありません
+                  </AppText>
+                ) : (
+                  offchainTransfers.map((item) => (
+                    <View key={`off:${item.entryHash}`} style={styles.transferRow}>
+                      <View style={styles.transferHeader}>
+                        <AppText variant="small" style={styles.cardText}>
+                          {item.event} / {formatTime(item.ts)}
+                        </AppText>
+                      </View>
+                      <AppText variant="small" style={styles.cardMuted}>
+                        送金主: {item.transfer.sender.type}:{item.transfer.sender.id}
+                      </AppText>
+                      <AppText variant="small" style={styles.cardMuted}>
+                        送金先: {item.transfer.recipient.type}:{item.transfer.recipient.id}
+                      </AppText>
+                      <AppText variant="small" style={styles.cardMuted}>
+                        配布量: {item.transfer.amount ?? '-'} / Mint: {shorten(item.transfer.mint)}
+                      </AppText>
+                      <AppText variant="small" style={styles.hashMono}>
+                        監査署名(hash): {shorten(item.entryHash, 10, 10)}
+                      </AppText>
+                      <AppText variant="small" style={styles.hashMono}>
+                        chain: {shorten(item.prevHash, 8, 8)} → {shorten(item.entryHash, 8, 8)}
+                      </AppText>
+                    </View>
+                  ))
+                )}
+              </View>
             </>
           )}
         </Card>
@@ -422,6 +496,30 @@ const styles = StyleSheet.create({
     paddingVertical: adminTheme.spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: adminTheme.colors.border,
+  },
+  transferGroup: {
+    marginBottom: adminTheme.spacing.md,
+  },
+  transferGroupHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: adminTheme.spacing.xs,
+  },
+  transferModeBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  onchainBadge: {
+    backgroundColor: 'rgba(0, 200, 83, 0.18)',
+  },
+  offchainBadge: {
+    backgroundColor: 'rgba(3, 169, 244, 0.18)',
+  },
+  transferModeText: {
+    color: adminTheme.colors.text,
+    fontSize: 11,
   },
   transferHeader: {
     flexDirection: 'row',

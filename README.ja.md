@@ -79,6 +79,7 @@ PoP が追加する要素:
 1. 参加者は `userId + PIN` で参加し、`confirmationCode` と `ticketReceipt` を受け取る（Attend）
 2. `ticketReceipt` には `entryHash` / `prevHash` / `streamPrevHash` / immutable sink 参照 / `receiptHash` を格納
 3. 第三者は `POST /api/audit/receipts/verify` で整合性（レシートハッシュ、連鎖リンク、immutable payload hash、sink参照）を検証できる
+4. 監査側は `POST /api/audit/receipts/verify-code` に `{ eventId, confirmationCode }` を投げてコード起点でも検証できる
 
 この設計にした理由:
 - 暗号資産ウォレットを持たない生徒・保護者にも学校ユースケースを広げるため

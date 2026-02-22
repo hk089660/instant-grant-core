@@ -5,7 +5,7 @@
  * 「参加しました」「参加履歴に保存されました」のみ表示。
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,12 +15,32 @@ import { useSchoolClaim } from '../hooks/useSchoolClaim';
 import { useRecipientTicketStore } from '../store/recipientTicketStore';
 import { schoolRoutes } from '../lib/schoolRoutes';
 import { useEventIdFromParams } from '../hooks/useEventIdFromParams';
+import { copyTextWithFeedback } from '../utils/copyText';
 
 export const SchoolClaimScreen: React.FC = () => {
   const router = useRouter();
   const { eventId, isValid } = useEventIdFromParams({ redirectOnInvalid: true });
-  const { loadTickets } = useRecipientTicketStore();
-  const { status, error, errorInfo, isRetryable, event, isJoined, handleClaim } = useSchoolClaim(eventId ?? undefined);
+  const { loadTickets, getTicketByEventId } = useRecipientTicketStore();
+  const { status, error, isRetryable, event, isJoined, lastSuccess, handleClaim } = useSchoolClaim(eventId ?? undefined);
+  const ticket = eventId ? getTicketByEventId(eventId) : undefined;
+  const confirmationCode = lastSuccess?.confirmationCode ?? ticket?.confirmationCode;
+  const auditReceiptId = lastSuccess?.ticketReceipt?.receiptId ?? ticket?.auditReceiptId;
+  const auditReceiptHash = lastSuccess?.ticketReceipt?.receiptHash ?? ticket?.auditReceiptHash;
+
+  const handleCopyReceipt = useCallback(async () => {
+    const payload = [
+      'Participation Ticket Receipt',
+      `eventId: ${eventId ?? '-'}`,
+      `confirmation_code: ${confirmationCode ?? '-'}`,
+      `receipt_id: ${auditReceiptId ?? '-'}`,
+      `receipt_hash: ${auditReceiptHash ?? '-'}`,
+      'verify_api: /api/audit/receipts/verify-code',
+    ].join('\n');
+
+    await copyTextWithFeedback(payload, {
+      successMessage: '参加券レシートをコピーしました',
+    });
+  }, [eventId, confirmationCode, auditReceiptId, auditReceiptHash]);
 
   useEffect(() => {
     loadTickets().catch(() => {});
@@ -67,6 +87,37 @@ export const SchoolClaimScreen: React.FC = () => {
                 </AppText>
               )}
             </Card>
+            {(confirmationCode || auditReceiptId || auditReceiptHash) && (
+              <Card style={styles.mainCard}>
+                <AppText variant="body" style={styles.successText}>
+                  参加券（監査レシート）
+                </AppText>
+                {confirmationCode && (
+                  <AppText variant="caption" style={styles.secondaryText}>
+                    確認コード: #{confirmationCode}
+                  </AppText>
+                )}
+                {auditReceiptId && (
+                  <AppText variant="caption" style={styles.secondaryText} selectable>
+                    receipt_id: {auditReceiptId}
+                  </AppText>
+                )}
+                {auditReceiptHash && (
+                  <AppText variant="caption" style={styles.secondaryText} selectable>
+                    receipt_hash: {auditReceiptHash}
+                  </AppText>
+                )}
+                <AppText variant="caption" style={styles.eventName}>
+                  第三者は /api/audit/receipts/verify-code で検証できます
+                </AppText>
+                <Button
+                  title="参加券レシートをコピー"
+                  onPress={handleCopyReceipt}
+                  variant="secondary"
+                  style={styles.copyButton}
+                />
+              </Card>
+            )}
             <Button title="ホームに戻る" onPress={() => router.replace(schoolRoutes.home as any)} variant="primary" style={styles.button} />
           </View>
         </ScrollView>
@@ -159,6 +210,10 @@ const styles = StyleSheet.create({
   },
   button: {
     marginBottom: theme.spacing.sm,
+  },
+  copyButton: {
+    marginTop: theme.spacing.sm,
+    marginBottom: 0,
   },
   centerContent: {
     flex: 1,

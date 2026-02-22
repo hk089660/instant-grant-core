@@ -344,7 +344,10 @@ export class ClaimStore {
     return event;
   }
 
-  async submitClaim(body: ClaimBody): Promise<SchoolClaimResult> {
+  async submitClaim(
+    body: ClaimBody,
+    options?: { confirmationCode?: string }
+  ): Promise<SchoolClaimResult> {
     const eventId = typeof body?.eventId === 'string' ? body.eventId.trim() : '';
     const walletAddress = typeof body?.walletAddress === 'string' ? body.walletAddress : undefined;
     const joinToken = typeof body?.joinToken === 'string' ? body.joinToken : undefined;
@@ -369,10 +372,20 @@ export class ClaimStore {
 
     const allowance = await this.checkClaimAllowance(eventId, subject, event);
     if (!allowance.allowed) {
-      return { success: true, eventName: event.title, alreadyJoined: true };
+      return {
+        success: true,
+        eventName: event.title,
+        alreadyJoined: true,
+        confirmationCode: allowance.latestConfirmationCode,
+      };
     }
 
-    await this.addClaim(eventId, subject);
-    return { success: true, eventName: event.title, alreadyJoined: false };
+    await this.addClaim(eventId, subject, options?.confirmationCode);
+    return {
+      success: true,
+      eventName: event.title,
+      alreadyJoined: false,
+      confirmationCode: options?.confirmationCode,
+    };
   }
 }

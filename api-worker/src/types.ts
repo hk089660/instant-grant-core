@@ -48,6 +48,8 @@ export interface SchoolClaimResultSuccess {
   receiptPubkey?: string;
   explorerTxUrl?: string;
   explorerReceiptUrl?: string;
+  confirmationCode?: string;
+  ticketReceipt?: ParticipationTicketReceipt;
 }
 
 export interface SchoolClaimResultFailure {

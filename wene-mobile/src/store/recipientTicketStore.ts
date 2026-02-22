@@ -12,6 +12,9 @@ export interface RecipientTicket {
   popEntryHash?: string;
   popAuditHash?: string;
   popSigner?: string;
+  confirmationCode?: string;
+  auditReceiptId?: string;
+  auditReceiptHash?: string;
 }
 
 interface RecipientTicketStore {
@@ -46,6 +49,9 @@ const loadFromStorage = async (): Promise<RecipientTicket[]> => {
           popEntryHash: typeof raw.popEntryHash === 'string' ? raw.popEntryHash : undefined,
           popAuditHash: typeof raw.popAuditHash === 'string' ? raw.popAuditHash : undefined,
           popSigner: typeof raw.popSigner === 'string' ? raw.popSigner : undefined,
+          confirmationCode: typeof raw.confirmationCode === 'string' ? raw.confirmationCode : undefined,
+          auditReceiptId: typeof raw.auditReceiptId === 'string' ? raw.auditReceiptId : undefined,
+          auditReceiptHash: typeof raw.auditReceiptHash === 'string' ? raw.auditReceiptHash : undefined,
         } as RecipientTicket;
       })
       .filter((ticket): ticket is RecipientTicket => ticket !== null);
@@ -68,6 +74,9 @@ function mergeTicket(existing: RecipientTicket, incoming: RecipientTicket): Reci
     popEntryHash: incoming.popEntryHash ?? existing.popEntryHash,
     popAuditHash: incoming.popAuditHash ?? existing.popAuditHash,
     popSigner: incoming.popSigner ?? existing.popSigner,
+    confirmationCode: incoming.confirmationCode ?? existing.confirmationCode,
+    auditReceiptId: incoming.auditReceiptId ?? existing.auditReceiptId,
+    auditReceiptHash: incoming.auditReceiptHash ?? existing.auditReceiptHash,
   };
 }
 

@@ -125,6 +125,64 @@ describe('participation audit receipt', () => {
     expect(body.ticketReceipt?.audit.eventId).toBe(eventId);
   });
 
+  it('returns ticket receipt on /v1/school/claims and supports verify-by-code', async () => {
+    const createRes = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'school receipt event',
+          datetime: '2026/02/22 11:00',
+          host: 'admin',
+          ticketTokenAmount: 1,
+        }),
+      })
+    );
+    expect(createRes.status).toBe(201);
+    const event = (await createRes.json()) as { id: string };
+
+    const claimRes = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: event.id,
+          joinToken: 'student-join-token',
+        }),
+      })
+    );
+    expect(claimRes.status).toBe(200);
+    const claimBody = (await claimRes.json()) as {
+      success: boolean;
+      confirmationCode?: string;
+      ticketReceipt?: ParticipationTicketReceipt;
+    };
+    expect(claimBody.success).toBe(true);
+    expect(typeof claimBody.confirmationCode).toBe('string');
+    expect(claimBody.ticketReceipt?.type).toBe('participation_audit_receipt');
+    expect(claimBody.ticketReceipt?.confirmationCode).toBe(claimBody.confirmationCode);
+
+    const verifyRes = await store.fetch(
+      new Request('https://example.com/api/audit/receipts/verify-code', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: event.id,
+          confirmationCode: claimBody.confirmationCode,
+        }),
+      })
+    );
+    expect(verifyRes.status).toBe(200);
+    const verifyBody = (await verifyRes.json()) as {
+      ok: boolean;
+      receipt?: ParticipationTicketReceipt;
+      verification?: { ok?: boolean };
+    };
+    expect(verifyBody.ok).toBe(true);
+    expect(verifyBody.receipt?.confirmationCode).toBe(claimBody.confirmationCode);
+    expect(verifyBody.verification?.ok).toBe(true);
+  });
+
   it('verifies ticket receipt and detects tampering', async () => {
     const { eventId, userId } = await prepareEventAndUser();
 

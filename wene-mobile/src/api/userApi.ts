@@ -4,6 +4,7 @@
  */
 
 import { httpPost } from './http/httpClient';
+import type { ParticipationTicketReceipt } from '../types/school';
 
 export function getBaseUrl(): string {
   // Web: Pages Functions で /api/* を Worker に中継するため、同一オリジンを使う（CORS回避）
@@ -22,31 +23,6 @@ export function getBaseUrl(): string {
 
 export interface RegisterResponse {
   userId: string;
-}
-
-export interface ParticipationTicketReceipt {
-  version: 1;
-  type: 'participation_audit_receipt';
-  receiptId: string;
-  receiptHash: string;
-  issuedAt: string;
-  confirmationCode: string;
-  subjectCommitment: string;
-  verifyEndpoint: string;
-  audit: {
-    event: string;
-    eventId: string;
-    entryHash: string;
-    prevHash: string;
-    streamPrevHash: string;
-    immutableMode: 'off' | 'best_effort' | 'required';
-    immutablePayloadHash: string | null;
-    immutableSinks: Array<{
-      sink: 'r2_entry' | 'r2_stream' | 'kv_index' | 'immutable_ingest';
-      ref: string;
-      at: string;
-    }>;
-  };
 }
 
 export interface UserClaimResponse {

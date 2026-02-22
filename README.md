@@ -79,6 +79,7 @@ How it works:
 1. A participant joins with `userId + PIN` and receives `confirmationCode` and `ticketReceipt` (Attend).
 2. `ticketReceipt` includes `entryHash`, `prevHash`, `streamPrevHash`, immutable sink references, and `receiptHash`.
 3. Any third party can verify consistency via `POST /api/audit/receipts/verify` (receipt hash, chain links, immutable payload hash, sink refs).
+4. Auditors can also verify by code via `POST /api/audit/receipts/verify-code` with `{ eventId, confirmationCode }`.
 
 Why this design:
 - It expands school use cases to students and guardians who do not have crypto wallets.

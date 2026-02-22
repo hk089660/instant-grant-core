@@ -91,12 +91,26 @@ export const UserSuccessScreen: React.FC = () => {
             popEntryHash,
             popAuditHash,
             popSigner,
+            confirmationCode: typeof confirmationCode === 'string' ? confirmationCode : undefined,
+            auditReceiptId,
+            auditReceiptHash,
           });
         }
       })
       .catch(() => { if (!cancelled) setEvent(null); });
     return () => { cancelled = true; };
-  }, [targetEventId, addTicket, txSignature, receiptPubkey, popEntryHash, popAuditHash, popSigner]);
+  }, [
+    targetEventId,
+    addTicket,
+    txSignature,
+    receiptPubkey,
+    popEntryHash,
+    popAuditHash,
+    popSigner,
+    confirmationCode,
+    auditReceiptId,
+    auditReceiptHash,
+  ]);
 
   const isAlready = already === '1' || status === 'already';
   const explorerTxUrl = resolvedTx ? `https://explorer.solana.com/tx/${resolvedTx}?cluster=devnet` : null;
@@ -121,15 +135,16 @@ export const UserSuccessScreen: React.FC = () => {
     const payload = [
       'Participation Audit Receipt',
       `eventId: ${targetEventId ?? '-'}`,
+      `confirmation_code: ${confirmationCode ?? '-'}`,
       `receipt_id: ${auditReceiptId ?? '-'}`,
       `receipt_hash: ${auditReceiptHash ?? '-'}`,
-      'verify_api: /api/audit/receipts/verify',
+      'verify_api: /api/audit/receipts/verify-code',
     ].join('\n');
 
     await copyTextWithFeedback(payload, {
       successMessage: '監査レシート情報をコピーしました',
     });
-  }, [targetEventId, auditReceiptId, auditReceiptHash]);
+  }, [targetEventId, confirmationCode, auditReceiptId, auditReceiptHash]);
 
   if (!isValid) return null;
 
@@ -185,7 +200,7 @@ export const UserSuccessScreen: React.FC = () => {
               </AppText>
             )}
             <AppText variant="small" style={styles.codeHint}>
-              第三者は verify API で監査チェーン整合性を検証できます。
+              第三者は verify-code API で監査チェーン整合性を検証できます。
             </AppText>
             <Button
               title="監査レシートをコピー"

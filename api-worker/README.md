@@ -17,7 +17,7 @@ Hono による最小構成の API。`wene-mobile`（Cloudflare Pages）から固
   - レスポンス: 作成された `SchoolEvent`
 - `POST /v1/school/claims`  
   - リクエスト: `{ eventId: string; walletAddress?: string; joinToken?: string; txSignature?: string; receiptPubkey?: string }`  
-  - レスポンス: `SchoolClaimResult`  
+  - レスポンス: `SchoolClaimResult`（`success=true` の場合 `confirmationCode` と `ticketReceipt` を返却）  
   - **walletAddress 未指定かつ joinToken 未指定** → `wallet_required`（Phantom誘導用）  
   - `ENFORCE_ONCHAIN_POP=true` かつ on-chain 設定済みイベント（`solanaMint`/`solanaAuthority`/`solanaGrantId`）では、`walletAddress + txSignature + receiptPubkey` を必須化
   - `POST /api/events/:eventId/claim`（userId+PIN）でも同様に on-chain 証跡を必須化
@@ -29,6 +29,10 @@ Hono による最小構成の API。`wene-mobile`（Cloudflare Pages）から固
   - リクエスト: `{ receipt: ParticipationTicketReceipt }`（または receipt オブジェクト直送）
   - レスポンス: `ok`, `checks`, `issues`, `proof`
   - 第三者が受け取った参加券レシートの整合性（ハッシュ・監査チェーン・immutable payload）を検証できる
+- `POST /api/audit/receipts/verify-code`（公開）
+  - リクエスト: `{ eventId: string; confirmationCode: string }`
+  - レスポンス: `{ ok, receipt, verification }`
+  - 参加券のコードだけで第三者検証を実行できる（審査・監査導線向け）
 - `GET /v1/school/pop-status`
   - レスポンス: `{ enforceOnchainPop: boolean; signerConfigured: boolean; signerPubkey?: string | null; error?: string | null }`
 - `GET /v1/school/audit-status`
@@ -75,6 +79,7 @@ Hono による最小構成の API。`wene-mobile`（Cloudflare Pages）から固
 ### 運用モデル（Attend / Redeem）
 
 - Attend（主導線）: `POST /api/events/:eventId/claim` で `userId + PIN` により参加券（不変レシート）を発行
+- Attend（学校導線）: `POST /v1/school/claims` でも同様に `confirmationCode + ticketReceipt` を発行
 - Redeem（任意）: イベントが on-chain 設定済みで `ENFORCE_ONCHAIN_POP=true` の場合のみ wallet + tx + receipt を要求
 
 重要な整理:
