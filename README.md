@@ -12,7 +12,7 @@ Public prototype for auditable school/public participation and grant operations 
 - [Implemented] Accountable operator workflow: admin/master flows expose PoP/runtime status, transfer audit logs, and role-based disclosure/search.
 - [Implemented] Admin event issuance requires authenticated operator + connected Phantom wallet + runtime readiness checks.
 - [Implemented] Verifiability endpoints include `/v1/school/pop-status`, `/v1/school/runtime-status`, `/v1/school/audit-status`, and `/api/audit/receipts/verify-code`.
-- Current deployment: `https://instant-grant-core.pages.dev/` (user) and `/admin/login` (operator).
+- Current deployment (We-ne): User `https://instant-grant-core.pages.dev/` / Admin `https://instant-grant-core.pages.dev/admin/login`.
 - Maturity: prototype focused on reproducibility and reviewer-verifiable evidence, not a production-complete public system.
 - Source of truth in this repo: `api-worker/src/storeDO.ts`, `wene-mobile/src/screens/user/*`, `wene-mobile/src/screens/admin/*`, `grant_program/programs/grant_program/src/lib.rs`.
 

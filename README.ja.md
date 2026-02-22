@@ -12,7 +12,7 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 - [Implemented] 説明責任ある運用: admin/master 導線で PoP/runtime 状態、送金監査ログ、権限別開示/検索を確認できます。
 - [Implemented] 管理者のイベント発行は、管理者認証に加えて Phantom 接続と runtime readiness を必須にしています。
 - [Implemented] 検証用 endpoint: `/v1/school/pop-status`、`/v1/school/runtime-status`、`/v1/school/audit-status`、`/api/audit/receipts/verify-code`。
-- 現在の公開先: `https://instant-grant-core.pages.dev/`（利用者）と `/admin/login`（運用者）。
+- 現在の公開先（We-ne）: 利用者 `https://instant-grant-core.pages.dev/` / 管理者 `https://instant-grant-core.pages.dev/admin/login`。
 - 成熟度: 本番完成形ではなく、再現性と第三者検証性を重視したプロトタイプです。
 - リポジトリ内の事実ソース: `api-worker/src/storeDO.ts`、`wene-mobile/src/screens/user/*`、`wene-mobile/src/screens/admin/*`、`grant_program/programs/grant_program/src/lib.rs`。
 
