@@ -7,13 +7,19 @@ Public prototype for auditable school/public participation and grant operations 
 ## Top Summary
 - What it is: a 3-layer system that binds operational process logs to verifiable receipts, and optionally to Solana settlement.
 - Who it is for: students/users who join events, and operators (admin/master) who run and audit distribution.
-- Implemented now: `Participation Ticket (off-chain Attend)` with `confirmationCode + ticketReceipt`.
-- Implemented now: `On-chain Redeem (optional)` for on-chain-configured events, policy-gated by runtime settings.
+- [Implemented] Student flow supports walletless `Participation Ticket (off-chain Attend)` with `confirmationCode + ticketReceipt`.
+- [Optional] `On-chain Redeem` is executed only when wallet + event policy/config path is used; tx/receipt evidence appears only for those executions.
 - Third-party verifiable today: PoP runtime status, audit integrity status, ticket verify-by-code API, and Explorer links when on-chain path is used.
 - Design principle: non-custodial signatures where on-chain is used, plus accountability by immutable process audit chain.
 - Current deployment: `https://instant-grant-core.pages.dev/` (user) and `/admin/login` (operator).
 - Maturity: prototype focused on reproducibility and reviewer-verifiable evidence, not a production-complete public system.
 - Source of truth in this repo: `api-worker/src/storeDO.ts`, `wene-mobile/src/screens/user/*`, `wene-mobile/src/screens/admin/*`, `grant_program/programs/grant_program/src/lib.rs`.
+
+## Stage Clarity
+> - [Implemented] Off-chain Attend issues a participation ticket (`confirmationCode` + `ticketReceipt`) without requiring a wallet when policy allows.
+> - [Optional] On-chain redeem/proof runs only on the on-chain path; tx signature / receipt pubkey / Explorer evidence are conditional outputs.
+> - [Implemented] PoP/runtime/audit operational checks are exposed via public endpoints and shown in admin UI.
+> - [Planned] Advanced anti-sybil eligibility modules and broader federation are roadmap items.
 
 ## Why This Matters
 Public grants, school participation, and benefit operations often expose only final outcomes, not the decision/process trail that produced them.
@@ -169,27 +175,51 @@ cd ../wene-mobile && npm ci && npm run test:server && npx tsc --noEmit
 
 ## Verification Evidence
 
-### 1) PoP status endpoint
+### 1) Off-chain evidence `[Implemented]`
+From `/u/success` after Attend:
+- `confirmationCode`
+- `監査レシート（参加券）` (`receipt_id`, `receipt_hash`)
+- copy payload includes `verify_api: /api/audit/receipts/verify-code`
+
+Verify by code:
+```bash
+curl -s -X POST "https://instant-grant-core.pages.dev/api/audit/receipts/verify-code" \
+  -H "content-type: application/json" \
+  -d '{"eventId":"<EVENT_ID>","confirmationCode":"<CONFIRMATION_CODE>"}'
+```
+Expected: `ok=true` with chain/hash checks in `verification.checks`.
+
+### 2) On-chain evidence `[Optional]`
+Only when on-chain path is actually executed in `wene-mobile/src/screens/user/UserConfirmScreen.tsx`:
+- success UI shows `txSignature`, `receiptPubkey`, optional `mint`, PoP values
+- Explorer links appear only when those values exist
+
+Explorer format:
+- Tx: `https://explorer.solana.com/tx/<signature>?cluster=devnet`
+- Receipt/Mint: `https://explorer.solana.com/address/<pubkey>?cluster=devnet`
+
+### 3) PoP/runtime operational status `[Implemented]`
+Admin UI route:
+- `/admin` events list shows `PoP稼働証明` card in `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`
+- card displays `verification endpoint: /v1/school/pop-status`
+
+Runtime/API checks:
 ```bash
 curl -s https://instant-grant-core.pages.dev/v1/school/pop-status
-```
-`ready` equivalent condition in this endpoint:
-- `enforceOnchainPop=true`
-- `signerConfigured=true`
-
-### 2) Runtime and audit operational integrity
-```bash
 curl -s https://instant-grant-core.pages.dev/v1/school/runtime-status
 curl -s https://instant-grant-core.pages.dev/v1/school/audit-status
+```
+Interpretation:
+- `pop-status.enforceOnchainPop=true` and `pop-status.signerConfigured=true` indicates on-chain PoP enforcement is configured.
+- `runtime-status.ready=true` means operational prerequisites are satisfied.
+- `audit-status.operationalReady=true` means immutable sink path is available.
+- `audit-integrity.ok=true` confirms recent chain integrity checks:
+```bash
 curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
   "https://instant-grant-core.pages.dev/api/master/audit-integrity?limit=50"
 ```
-Interpretation:
-- `runtime-status.ready=true` means operational prerequisites are satisfied.
-- `audit-status.operationalReady=true` means immutable sink path is available.
-- `audit-integrity.ok=true` means recent chain integrity checks passed.
 
-### 3) Where evidence appears in UI
+### 4) Where evidence appears in UI
 - PoP runtime evidence card:
   - `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`
   - labels include `PoP稼働証明` and endpoint `/v1/school/pop-status`
@@ -198,11 +228,6 @@ Interpretation:
   - labels include `On-chain署名` and `Off-chain監査署名`
 - Participation ticket evidence card and copy action:
   - `wene-mobile/src/screens/user/UserSuccessScreen.tsx`
-
-### 4) Explorer evidence
-When on-chain path is used, success UI provides direct links:
-- Tx: `https://explorer.solana.com/tx/<signature>?cluster=devnet`
-- Receipt/Mint address pages: `https://explorer.solana.com/address/<pubkey>?cluster=devnet`
 
 ## Milestones / What Grant Funds
 

@@ -7,13 +7,19 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 ## Top Summary
 - これは何か: 運用プロセスのログを検証可能レシートに結合し、必要時のみSolana決済へ結合する3層システムです。
 - 誰のためか: イベント参加者（学生/利用者）と、運用する管理者・運営者のための実装です。
-- 現在の実装: `Participation Ticket (off-chain Attend)` を `confirmationCode + ticketReceipt` で発行できます。
-- 現在の実装: `On-chain Redeem (optional)` は、オンチェーン設定済みイベントで方針に応じて有効化されます。
+- [Implemented] 学生導線は wallet 不要の `Participation Ticket (off-chain Attend)` を `confirmationCode + ticketReceipt` で発行できます。
+- [Optional] `On-chain Redeem` は wallet + イベント方針/設定の導線を実行した場合のみ動作し、tx/receipt 証跡もその場合のみ出力されます。
 - 今日検証できること: PoP稼働状態、監査整合性、コード起点の参加券検証API、オンチェーン時のExplorer証跡。
 - 設計原則: オンチェーン時は非保管署名、全体は不変監査チェーンで説明責任を担保します。
 - 現在の公開先: `https://instant-grant-core.pages.dev/`（利用者）と `/admin/login`（運用者）。
 - 成熟度: 本番完成形ではなく、再現性と第三者検証性を重視したプロトタイプです。
 - リポジトリ内の事実ソース: `api-worker/src/storeDO.ts`、`wene-mobile/src/screens/user/*`、`wene-mobile/src/screens/admin/*`、`grant_program/programs/grant_program/src/lib.rs`。
+
+## Stage Clarity
+> - [Implemented] Off-chain Attend は、方針が許すイベントで wallet なしでも参加券（`confirmationCode` + `ticketReceipt`）を発行します。
+> - [Optional] On-chain redeem / PoP は on-chain 導線でのみ実行され、tx signature / receipt pubkey / Explorer 証跡は条件付きで表示されます。
+> - [Implemented] PoP/runtime/audit の運用確認は公開 endpoint と管理者UIで確認できます。
+> - [Planned] 高度な Sybil 耐性モジュールや機関連携拡張はロードマップ項目です。
 
 ## なぜ重要か（課題）
 給付・学校参加の運用では、最終結果だけが見え、意思決定や処理過程の検証が難しいことが多くあります。
@@ -169,27 +175,51 @@ cd ../wene-mobile && npm ci && npm run test:server && npx tsc --noEmit
 
 ## Verification Evidence
 
-### 1) PoP status endpoint
+### 1) Off-chain証跡 `[Implemented]`
+`/u/success` の参加完了時に確認:
+- `confirmationCode`
+- `監査レシート（参加券）`（`receipt_id`, `receipt_hash`）
+- コピー内容に `verify_api: /api/audit/receipts/verify-code` を含む
+
+コード検証:
+```bash
+curl -s -X POST "https://instant-grant-core.pages.dev/api/audit/receipts/verify-code" \
+  -H "content-type: application/json" \
+  -d '{"eventId":"<EVENT_ID>","confirmationCode":"<CONFIRMATION_CODE>"}'
+```
+期待値: `ok=true` と `verification.checks`（連鎖/ハッシュ検証）が返る。
+
+### 2) On-chain証跡 `[Optional]`
+`wene-mobile/src/screens/user/UserConfirmScreen.tsx` の on-chain 導線を実行した場合のみ:
+- 成功画面に `txSignature`、`receiptPubkey`、（任意で）`mint`、PoP値が表示
+- 値があるときだけ Explorer リンクが表示
+
+Explorer形式:
+- Tx: `https://explorer.solana.com/tx/<signature>?cluster=devnet`
+- Receipt/Mint: `https://explorer.solana.com/address/<pubkey>?cluster=devnet`
+
+### 3) PoP/runtime運用状態 `[Implemented]`
+管理者UIルート:
+- `/admin` のイベント一覧に `PoP稼働証明` カードを表示（`wene-mobile/src/screens/admin/AdminEventsScreen.tsx`）
+- カード内に `verification endpoint: /v1/school/pop-status` を表示
+
+Runtime/API検証:
 ```bash
 curl -s https://instant-grant-core.pages.dev/v1/school/pop-status
-```
-このendpointでの稼働判定:
-- `enforceOnchainPop=true`
-- `signerConfigured=true`
-
-### 2) Runtime / audit integrity
-```bash
 curl -s https://instant-grant-core.pages.dev/v1/school/runtime-status
 curl -s https://instant-grant-core.pages.dev/v1/school/audit-status
+```
+判定基準:
+- `pop-status.enforceOnchainPop=true` かつ `pop-status.signerConfigured=true` で on-chain PoP 強制設定が有効。
+- `runtime-status.ready=true` で運用前提が成立
+- `audit-status.operationalReady=true` で immutable sink が稼働
+- `audit-integrity.ok=true` で最近の監査連鎖整合性が成立:
+```bash
 curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
   "https://instant-grant-core.pages.dev/api/master/audit-integrity?limit=50"
 ```
-判定基準:
-- `runtime-status.ready=true` で運用前提が成立
-- `audit-status.operationalReady=true` で immutable sink が稼働
-- `audit-integrity.ok=true` で最近の監査連鎖整合性が成立
 
-### 3) UI上の証跡位置
+### 4) UI上の証跡位置
 - PoP稼働証明カード:
   - `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`
   - `PoP稼働証明`、`/v1/school/pop-status` 表示
@@ -198,11 +228,6 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
   - `On-chain署名` / `Off-chain監査署名`
 - 参加券証跡カードとコピー導線:
   - `wene-mobile/src/screens/user/UserSuccessScreen.tsx`
-
-### 4) Explorer証跡
-オンチェーン導線を使った場合、成功画面から直接確認可能:
-- Tx: `https://explorer.solana.com/tx/<signature>?cluster=devnet`
-- Receipt/Mint: `https://explorer.solana.com/address/<pubkey>?cluster=devnet`
 
 ## Milestones / 助成金で実施する範囲
 
