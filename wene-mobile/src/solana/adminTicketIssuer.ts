@@ -26,7 +26,7 @@ import { GRANT_PROGRAM_ID } from './config';
 import { getConnection, getProgram } from './anchorClient';
 import { getGrantPda, getPopConfigPda, getVaultPda } from './grantProgram';
 import { signTransaction } from '../utils/phantom';
-import { sendSignedTx } from './sendTx';
+import { sendSignedTx, isSimulationFailedError } from './sendTx';
 import { setPhantomWebReturnPath } from '../utils/phantomWebReturnPath';
 import type { PhantomExtensionProvider } from '../wallet/phantomExtension';
 
@@ -203,6 +203,25 @@ function buildUpsertPopConfigInstruction(params: {
   });
 }
 
+function hasFallbackNotFoundSignal(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return (
+    normalized.includes('instructionfallbacknotfound') ||
+    normalized.includes('fallback functions are not supported') ||
+    normalized.includes('custom program error: 0x65')
+  );
+}
+
+function isUnsupportedUpsertPopConfigError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error ?? '');
+  if (hasFallbackNotFoundSignal(msg)) return true;
+  if (isSimulationFailedError(error)) {
+    const logs = Array.isArray(error.simLogs) ? error.simLogs : [];
+    return logs.some((line) => hasFallbackNotFoundSignal(String(line)));
+  }
+  return false;
+}
+
 async function signAndSendTx(
   tx: Transaction,
   phantom: AdminPhantomContext,
@@ -287,6 +306,27 @@ export async function issueEventTicketToken(
   );
   const setupSignatures: string[] = [];
 
+  // Tx0: PoP設定（互換運用）
+  // 旧バイナリでは upsert_pop_config が未実装のため、
+  // fallback エラー時は発行を継続する。
+  {
+    const upsertPopConfigIx = buildUpsertPopConfigInstruction({
+      authority,
+      popConfigPda,
+      signerPubkey: popSignerPubkey,
+    });
+    const tx0 = new Transaction().add(upsertPopConfigIx);
+    try {
+      setupSignatures.push(await signAndSendTx(tx0, params.phantom));
+    } catch (error) {
+      if (isUnsupportedUpsertPopConfigError(error)) {
+        console.warn('[issueEventTicketToken] upsert_pop_config unsupported on deployed program; continue without pop-config upsert');
+      } else {
+        throw error;
+      }
+    }
+  }
+
   // Tx1: 新規mint作成 + admin ATA作成 + 初期供給mint
   {
     const connection = getConnection();
@@ -327,7 +367,7 @@ export async function issueEventTicketToken(
     setupSignatures.push(await signAndSendTx(tx1, params.phantom, [mintKeypair]));
   }
 
-  // Tx2: PoP設定 + Grant作成 + Vaultへ初期入金
+  // Tx2: Grant作成 + Vaultへ初期入金
   {
     const program = getProgram() as any;
     const nowTs = Math.floor(Date.now() / 1000);
@@ -352,12 +392,6 @@ export async function issueEventTicketToken(
       })
       .instruction();
 
-    const upsertPopConfigIx = buildUpsertPopConfigInstruction({
-      authority,
-      popConfigPda,
-      signerPubkey: popSignerPubkey,
-    });
-
     const fundGrantIx = await program.methods
       .fundGrant(new BN(bootstrapAmount.toString()))
       .accounts({
@@ -372,7 +406,6 @@ export async function issueEventTicketToken(
       .instruction();
 
     const tx2 = new Transaction().add(
-      upsertPopConfigIx,
       createGrantIx,
       fundGrantIx
     );
