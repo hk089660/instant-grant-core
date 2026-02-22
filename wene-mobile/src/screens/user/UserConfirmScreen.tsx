@@ -16,7 +16,7 @@ import { useRecipientStore } from '../../store/recipientStore';
 import { usePhantomStore } from '../../store/phantomStore';
 import { useRecipientTicketStore } from '../../store/recipientTicketStore';
 import { buildClaimTx } from '../../solana/txBuilders';
-import { sendSignedTx, isBlockhashExpiredError } from '../../solana/sendTx';
+import { sendSignedTx, isBlockhashExpiredError, isSimulationFailedError } from '../../solana/sendTx';
 import { getConnection } from '../../solana/singleton';
 import { fetchSplBalance } from '../../solana/wallet';
 import { signTransaction } from '../../utils/phantom';
@@ -25,6 +25,26 @@ import { setPhantomWebReturnPath } from '../../utils/phantomWebReturnPath';
 import type { SchoolEvent } from '../../types/school';
 
 const SIGN_TIMEOUT_MS = 120_000;
+
+function buildSendErrorDebugText(error: unknown): string {
+  const lines: string[] = [];
+  if (error && typeof error === 'object' && 'message' in error) {
+    lines.push(String((error as { message?: unknown }).message ?? ''));
+  }
+  if (isSimulationFailedError(error) && Array.isArray(error.simLogs) && error.simLogs.length > 0) {
+    lines.push(error.simLogs.join('\n'));
+  }
+  return lines.filter(Boolean).join('\n');
+}
+
+function shouldRetryWithLegacyClaim(error: unknown): boolean {
+  const lower = buildSendErrorDebugText(error).toLowerCase();
+  if (!lower) return false;
+  if (lower.includes('instructionfallbacknotfound')) return true;
+  if (lower.includes('account: token_program') && lower.includes('invalidprogramid')) return true;
+  if (lower.includes('account: token_program') && lower.includes('program id was not as expected')) return true;
+  return false;
+}
 
 export const UserConfirmScreen: React.FC = () => {
   const router = useRouter();
@@ -128,15 +148,17 @@ export const UserConfirmScreen: React.FC = () => {
     }
 
     const recipientPubkey = new PublicKey(walletPubkey);
+    let forceLegacyClaim = false;
     let built = await buildClaimTx({
       campaignId: targetEventId,
       recipientPubkey,
       solanaMint: event.solanaMint,
       solanaAuthority: event.solanaAuthority,
       solanaGrantId: event.solanaGrantId,
+      forceLegacyClaim,
     });
 
-    let retried = false;
+    let retriedForBlockhash = false;
     while (true) {
       const { redirectLink, appUrl } = buildSignRedirectContext();
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -182,14 +204,30 @@ export const UserConfirmScreen: React.FC = () => {
         };
       } catch (sendError) {
         const msg = sendError instanceof Error ? sendError.message : String(sendError);
-        if (!retried && isBlockhashExpiredError(msg)) {
-          retried = true;
+        if (!retriedForBlockhash && isBlockhashExpiredError(msg)) {
+          retriedForBlockhash = true;
           built = await buildClaimTx({
             campaignId: targetEventId,
             recipientPubkey,
             solanaMint: event.solanaMint,
             solanaAuthority: event.solanaAuthority,
             solanaGrantId: event.solanaGrantId,
+            forceLegacyClaim,
+          });
+          continue;
+        }
+        if (!forceLegacyClaim && shouldRetryWithLegacyClaim(sendError)) {
+          forceLegacyClaim = true;
+          if (typeof __DEV__ !== 'undefined' && __DEV__) {
+            console.warn('[UserConfirmScreen] on-chain PoP claim incompatible; retry with legacy claim');
+          }
+          built = await buildClaimTx({
+            campaignId: targetEventId,
+            recipientPubkey,
+            solanaMint: event.solanaMint,
+            solanaAuthority: event.solanaAuthority,
+            solanaGrantId: event.solanaGrantId,
+            forceLegacyClaim: true,
           });
           continue;
         }
@@ -400,8 +438,12 @@ export const UserConfirmScreen: React.FC = () => {
         const msg = String((e as { message: string }).message);
         if (msg.includes('invalid pin')) {
           setError('PINが正しくありません');
+        } else if (msg.includes('PoP設定が未初期化')) {
+          setError('このイベントのPoP設定が未初期化です。運営に再発行を依頼してください。');
+        } else if (msg.includes('PoP証明の取得に失敗')) {
+          setError(msg);
         } else if (msg.includes('PoP') || msg.includes('pop')) {
-          setError('オンチェーン検証用のPoP証明が無効です。再試行してください。');
+          setError(`オンチェーンPoP検証エラー: ${msg}`);
         } else if (msg.includes('既に受給済み')) {
           setError(
             onchainPolicyCompatible

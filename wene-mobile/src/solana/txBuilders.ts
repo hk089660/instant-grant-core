@@ -157,6 +157,41 @@ function buildClaimGrantInstruction(params: {
   });
 }
 
+function buildLegacyClaimGrantInstruction(params: {
+  grant: PublicKey;
+  mint: PublicKey;
+  vault: PublicKey;
+  claimer: PublicKey;
+  claimerAta: PublicKey;
+  receipt: PublicKey;
+  periodIndex: bigint;
+}): TransactionInstruction {
+  const data = Buffer.alloc(16);
+  CLAIM_GRANT_DISCRIMINATOR.copy(data, 0);
+  data.writeBigUInt64LE(params.periodIndex, 8);
+
+  return new TransactionInstruction({
+    programId: GRANT_PROGRAM_ID,
+    keys: [
+      { pubkey: params.grant, isSigner: false, isWritable: true },
+      { pubkey: params.mint, isSigner: false, isWritable: false },
+      { pubkey: params.vault, isSigner: false, isWritable: true },
+      { pubkey: params.claimer, isSigner: true, isWritable: true },
+      { pubkey: params.claimerAta, isSigner: false, isWritable: true },
+      { pubkey: params.receipt, isSigner: false, isWritable: true },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
+    ],
+    data,
+  });
+}
+
+function shouldUseOnchainPopClaim(): boolean {
+  const raw = (process.env.EXPO_PUBLIC_ENABLE_ONCHAIN_POP_CLAIM ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
 /**
  * Claim Transaction 構築パラメータ
  */
@@ -167,6 +202,7 @@ export interface BuildClaimTxParams {
   solanaMint?: string | null;
   solanaAuthority?: string | null;
   solanaGrantId?: string | null;
+  forceLegacyClaim?: boolean;
 }
 
 /**
@@ -276,9 +312,13 @@ export async function buildClaimTx(
   const [popStatePda] = getPopStatePda(grantPda);
   const [popConfigPda] = getPopConfigPda(authority);
 
-  const popConfigInfo = await connection.getAccountInfo(popConfigPda, 'confirmed');
-  if (!popConfigInfo) {
-    throw new Error('PoP設定が未初期化です。管理者側で参加券を再発行してください');
+  const onchainPopClaimEnabled = !params.forceLegacyClaim && shouldUseOnchainPopClaim();
+  const popConfigInfo = onchainPopClaimEnabled
+    ? await connection.getAccountInfo(popConfigPda, 'confirmed')
+    : null;
+  const usePopProof = onchainPopClaimEnabled && Boolean(popConfigInfo);
+  if (onchainPopClaimEnabled && !popConfigInfo && typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.warn('[buildClaimTx] pop_config missing; fallback to legacy claim_grant flow');
   }
 
   // 既存レシートがある場合は、同一期間の再受給が不可能（Program仕様）なので事前に中断
@@ -335,21 +375,27 @@ export async function buildClaimTx(
   }
 
   const claimerAta = await getAssociatedTokenAddress(mint, recipientPubkey);
-  const popProof = await fetchPopClaimProof({
-    eventId: campaignId,
-    grant: grantPda,
-    claimer: recipientPubkey,
-    periodIndex,
-  });
+  let popProof: PopClaimProofResponse | null = null;
+  let signerPubkey: PublicKey | null = null;
+  let messageBytes: Buffer | null = null;
+  let signatureBytes: Buffer | null = null;
+  if (usePopProof) {
+    popProof = await fetchPopClaimProof({
+      eventId: campaignId,
+      grant: grantPda,
+      claimer: recipientPubkey,
+      periodIndex,
+    });
 
-  const signerPubkey = new PublicKey(popProof.signerPubkey);
-  const messageBytes = Buffer.from(popProof.messageBase64, 'base64');
-  const signatureBytes = Buffer.from(popProof.signatureBase64, 'base64');
-  if (messageBytes.length < 1 || !SUPPORTED_POP_PROOF_MESSAGE_VERSIONS.has(messageBytes[0])) {
-    throw new Error('PoP証明メッセージのバージョンが不正です（サポート外）');
-  }
-  if (signatureBytes.length !== 64) {
-    throw new Error('PoP署名の長さが不正です');
+    signerPubkey = new PublicKey(popProof.signerPubkey);
+    messageBytes = Buffer.from(popProof.messageBase64, 'base64');
+    signatureBytes = Buffer.from(popProof.signatureBase64, 'base64');
+    if (messageBytes.length < 1 || !SUPPORTED_POP_PROOF_MESSAGE_VERSIONS.has(messageBytes[0])) {
+      throw new Error('PoP証明メッセージのバージョンが不正です（サポート外）');
+    }
+    if (signatureBytes.length !== 64) {
+      throw new Error('PoP署名の長さが不正です');
+    }
   }
 
   const tx = new Transaction();
@@ -366,26 +412,40 @@ export async function buildClaimTx(
       )
     );
   }
-  tx.add(
-    Ed25519Program.createInstructionWithPublicKey({
-      publicKey: signerPubkey.toBytes(),
-      message: messageBytes,
-      signature: signatureBytes,
-    })
-  );
-  tx.add(
-    buildClaimGrantInstruction({
-      grant: grantPda,
-      mint,
-      vault: vaultPda,
-      claimer: recipientPubkey,
-      claimerAta,
-      receipt: receiptPda,
-      popState: popStatePda,
-      popConfig: popConfigPda,
-      periodIndex,
-    })
-  );
+  if (usePopProof && signerPubkey && messageBytes && signatureBytes) {
+    tx.add(
+      Ed25519Program.createInstructionWithPublicKey({
+        publicKey: signerPubkey.toBytes(),
+        message: messageBytes,
+        signature: signatureBytes,
+      })
+    );
+    tx.add(
+      buildClaimGrantInstruction({
+        grant: grantPda,
+        mint,
+        vault: vaultPda,
+        claimer: recipientPubkey,
+        claimerAta,
+        receipt: receiptPda,
+        popState: popStatePda,
+        popConfig: popConfigPda,
+        periodIndex,
+      })
+    );
+  } else {
+    tx.add(
+      buildLegacyClaimGrantInstruction({
+        grant: grantPda,
+        mint,
+        vault: vaultPda,
+        claimer: recipientPubkey,
+        claimerAta,
+        receipt: receiptPda,
+        periodIndex,
+      })
+    );
+  }
 
   // recentBlockhash / lastValidBlockHeight を必ず取得（sendSignedTx の confirmContext に常に渡すため）
   const { blockhash: recentBlockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
@@ -409,9 +469,9 @@ export async function buildClaimTx(
       claimerAta,
       periodIndex,
       mint,
-      popProofAuditHash: popProof.auditHash,
-      popProofEntryHash: popProof.entryHash,
-      popProofSignerPubkey: popProof.signerPubkey,
+      popProofAuditHash: popProof?.auditHash ?? '',
+      popProofEntryHash: popProof?.entryHash ?? '',
+      popProofSignerPubkey: popProof?.signerPubkey ?? '',
     },
   };
 }
