@@ -8,17 +8,40 @@ Public prototype for auditable school/public participation and grant operations 
 - User: `https://instant-grant-core.pages.dev/`
 - Admin: `https://instant-grant-core.pages.dev/admin/login` (Demo login code: `83284ab4d9874e54b301dcf7ea6a6056`)
 
+## Quick Navigation
+- [Top Summary](#top-summary)
+- [Visual Overview](#visual-overview)
+- [What’s Implemented Now](#whats-implemented-now)
+- [Architecture](#architecture)
+- [Reviewer Quickstart (10 Minutes)](#reviewer-quickstart-10-minutes)
+- [Verification Evidence](#verification-evidence)
+- [Milestones / What Grant Funds](#milestones--what-grant-funds)
+
 ## Top Summary
 - What it is: a 3-layer system that binds operational process logs to verifiable receipts, and optionally to Solana settlement.
 - Who it is for: students/users who join events, and operators (admin/master) who run and audit distribution.
 - [Implemented] Minimal-friction participation: walletless `Participation Ticket (off-chain Attend)` can issue `confirmationCode + ticketReceipt` on supported paths.
 - [Optional] `On-chain Redeem` runs only when wallet + on-chain event config path is used; tx/receipt/Explorer evidence appears only in that path.
 - [Implemented] Accountable operator workflow: admin/master flows expose PoP/runtime status, transfer audit logs, and role-based disclosure/search.
+- [Implemented] UI-level PoP confirmation is available: admin events screen shows `PoP Runtime Proof` with `enforceOnchainPop` + `signerConfigured`, linked to `/v1/school/pop-status`.
+- [Implemented] Hash-chain operation UI is available: admin event detail shows `Transfer Audit (Hash Chain)` with `prevHash -> entryHash` links for both on-chain and off-chain records.
+- [Implemented] User evidence UI is available on success screen: `confirmationCode`, participation audit receipt (`receipt_id`, `receipt_hash`), and optional PoP proof copy actions.
 - [Implemented] Admin event issuance requires authenticated operator + connected Phantom wallet + runtime readiness checks.
 - [Implemented] Verifiability endpoints include `/v1/school/pop-status`, `/v1/school/runtime-status`, `/v1/school/audit-status`, and `/api/audit/receipts/verify-code`.
 - Current deployment (We-ne): User `https://instant-grant-core.pages.dev/` / Admin `https://instant-grant-core.pages.dev/admin/login`.
 - Maturity: prototype focused on reproducibility and reviewer-verifiable evidence, not a production-complete public system.
 - Source of truth in this repo: `api-worker/src/storeDO.ts`, `wene-mobile/src/screens/user/*`, `wene-mobile/src/screens/admin/*`, `grant_program/programs/grant_program/src/lib.rs`.
+
+## Visual Overview
+```mermaid
+flowchart LR
+  U["Student/User UI\n/u/*, /r/school/:eventId"] --> C["Claim API\n/v1/school/claims\n/api/events/:eventId/claim"]
+  A["Admin/Master UI\n/admin/*, /master/*"] --> C
+  C --> H["Audit Hash Chain\nprevHash -> entryHash"]
+  C --> R["Participation Ticket Receipt\nconfirmationCode + receiptHash"]
+  R --> V["Verify API\n/api/audit/receipts/verify-code"]
+  C -. Optional on-chain path .-> S["Solana Program\ngrant_program"]
+```
 
 ## Project Direction
 - [Implemented] Near-term Solana contribution: a reproducible reference implementation for accountable P2P public operations with auditable administration and verifiable receipts.
@@ -78,6 +101,7 @@ Public grants and school participation often expose only final outcomes, leaving
 - `Implemented`: Event detail view includes:
   - participant list + confirmation codes
   - transfer audit grouped as `On-chain署名` and `Off-chain監査署名`
+  - hash-chain operation labels and links (`Transfer Audit (Hash Chain)`, `hash: <prev> -> <entry>`, `chain: <prev> -> <entry>`)
   - Code: `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`
 - `Implemented`: Master dashboard can issue/revoke/rename admin codes, inspect disclosures, and run indexed search.
   - UI: `wene-mobile/app/master/index.tsx`
@@ -96,6 +120,30 @@ Public grants and school participation often expose only final outcomes, leaving
 - `Planned`: stronger anti-sybil/eligibility integration (e.g., FairScale-class gating).
 
 ## Architecture
+
+```mermaid
+flowchart TB
+  subgraph L3["L3: UI [Implemented]"]
+    U1["User UI\n/u/*, /r/school/:eventId"]
+    A1["Admin/Master UI\n/admin/*, /master/*"]
+  end
+
+  subgraph L2["L2: Process Proof + Ops API [Implemented]"]
+    W["Cloudflare Worker + Durable Object"]
+    HC["Append-only Audit Hash Chain"]
+    VR["Receipt Verify / Disclosure / Search APIs"]
+  end
+
+  subgraph L1["L1: Settlement [Implemented, policy-gated/optional]"]
+    SP["Solana Anchor Program\ngrant_program"]
+  end
+
+  U1 --> W
+  A1 --> W
+  W --> HC
+  W --> VR
+  W -. Optional per event .-> SP
+```
 
 ```text
 L3: UI (Implemented)
@@ -229,9 +277,9 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
 - PoP runtime evidence card:
   - `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`
   - labels include `PoP稼働証明` and endpoint `/v1/school/pop-status`
-- On-chain vs off-chain transfer separation:
+- Hash-chain operation + on/off-chain transfer separation:
   - `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`
-  - labels include `On-chain署名` and `Off-chain監査署名`
+  - labels include `送金監査 (Hash Chain)`, `On-chain署名`, `Off-chain監査署名`, and chain display (`hash: ... -> ...`, `chain: ... -> ...`)
 - Participation ticket evidence card and copy action:
   - `wene-mobile/src/screens/user/UserSuccessScreen.tsx`
 
@@ -240,7 +288,7 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
 | Milestone | Deliverable | Success Criteria | Reviewer-verifiable Evidence |
 |---|---|---|---|
 | M1: Reproducibility + Evidence (10-minute review) | [Implemented] Reviewer runbook for live + local verification with explicit evidence points | A reviewer can verify runtime status + ticket evidence in about 10 minutes without hidden setup | This README + `/v1/school/pop-status` + `/v1/school/runtime-status` + `/api/audit/receipts/verify-code` |
-| M2: Accountability Strengthening | [Implemented] Ops evidence surfaces (`PoP稼働証明`, transfer on/off-chain split, role-based disclosures); [Implemented] integrity check API (`/api/master/audit-integrity`) | Operators can inspect process evidence and auditors can run integrity checks with master auth | `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`, `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`, `wene-mobile/app/master/index.tsx`, `api-worker/src/storeDO.ts` |
+| M2: Accountability Strengthening | [Implemented] Ops evidence surfaces (`PoP稼働証明`, `Transfer Audit (Hash Chain)`, transfer on/off-chain split, role-based disclosures); [Implemented] integrity check API (`/api/master/audit-integrity`) | Operators can inspect process evidence and auditors can run integrity checks with master auth | `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`, `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`, `wene-mobile/app/master/index.tsx`, `api-worker/src/storeDO.ts` |
 | M3: Federation-ready Generalization | [Planned] Doc-level federation model + minimal PoC hooks for chain-agnostic adapter boundaries (not a new chain launch) | Design docs and adapter/federation interfaces are explicit and testable without changing current Solana reference path | `docs/ROADMAP.md` + future PRs for adapter/federation interfaces |
 
 ## Scope Clarity

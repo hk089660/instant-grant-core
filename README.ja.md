@@ -8,17 +8,40 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 - 利用者: `https://instant-grant-core.pages.dev/`
 - 管理者: `https://instant-grant-core.pages.dev/admin/login`（デモログインコード: `83284ab4d9874e54b301dcf7ea6a6056`）
 
+## クイックナビ
+- [Top Summary](#top-summary)
+- [可視化サマリー](#可視化サマリー)
+- [現在実装されていること](#現在実装されていること)
+- [アーキテクチャ](#アーキテクチャ)
+- [Reviewer Quickstart（10分）](#reviewer-quickstart10分)
+- [Verification Evidence](#verification-evidence)
+- [Milestones / 助成金で実施する範囲](#milestones--助成金で実施する範囲)
+
 ## Top Summary
 - これは何か: 運用プロセスのログを検証可能レシートに結合し、必要時のみSolana決済へ結合する3層システムです。
 - 誰のためか: イベント参加者（学生/利用者）と、運用する管理者・運営者のための実装です。
 - [Implemented] 低摩擦の参加導線: 対応経路では wallet 不要の `Participation Ticket (off-chain Attend)` を `confirmationCode + ticketReceipt` として発行できます。
 - [Optional] `On-chain Redeem` は wallet + on-chain 設定付きイベント導線でのみ実行され、tx/receipt/Explorer 証跡もその場合のみ出力されます。
 - [Implemented] 説明責任ある運用: admin/master 導線で PoP/runtime 状態、送金監査ログ、権限別開示/検索を確認できます。
+- [Implemented] PoPのUI確認: 管理者イベント一覧に `PoP稼働証明` を表示し、`enforceOnchainPop` / `signerConfigured` を `/v1/school/pop-status` と紐付けて確認できます。
+- [Implemented] Hash Chain稼働UI: イベント詳細で `送金監査 (Hash Chain)` を表示し、on/off-chain の各記録で `prevHash -> entryHash` を確認できます。
+- [Implemented] 利用者向け証跡UI: 成功画面で `confirmationCode`、監査レシート（`receipt_id`, `receipt_hash`）、PoP証跡コピー導線（条件付き）を表示します。
 - [Implemented] 管理者のイベント発行は、管理者認証に加えて Phantom 接続と runtime readiness を必須にしています。
 - [Implemented] 検証用 endpoint: `/v1/school/pop-status`、`/v1/school/runtime-status`、`/v1/school/audit-status`、`/api/audit/receipts/verify-code`。
 - 現在の公開先（We-ne）: 利用者 `https://instant-grant-core.pages.dev/` / 管理者 `https://instant-grant-core.pages.dev/admin/login`。
 - 成熟度: 本番完成形ではなく、再現性と第三者検証性を重視したプロトタイプです。
 - リポジトリ内の事実ソース: `api-worker/src/storeDO.ts`、`wene-mobile/src/screens/user/*`、`wene-mobile/src/screens/admin/*`、`grant_program/programs/grant_program/src/lib.rs`。
+
+## 可視化サマリー
+```mermaid
+flowchart LR
+  U["利用者UI\n/u/*, /r/school/:eventId"] --> C["参加API\n/v1/school/claims\n/api/events/:eventId/claim"]
+  A["管理者/運営者UI\n/admin/*, /master/*"] --> C
+  C --> H["監査ハッシュチェーン\nprevHash -> entryHash"]
+  C --> R["参加券レシート\nconfirmationCode + receiptHash"]
+  R --> V["検証API\n/api/audit/receipts/verify-code"]
+  C -. イベント方針で任意のオンチェーン経路 .-> S["Solana Program\ngrant_program"]
+```
 
 ## Project Direction
 - [Implemented] 近接のSolana貢献: 監査可能な運用（accountable P2P public operations）を、再現可能な参照実装として提示します。
@@ -78,6 +101,7 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 - `Implemented`: イベント詳細画面で以下を表示:
   - 参加者一覧 + 確認コード
   - 送金監査ログの `On-chain署名` / `Off-chain監査署名` 分離
+  - Hash Chain の連鎖表示（`送金監査 (Hash Chain)`、`hash: <prev> -> <entry>`、`chain: <prev> -> <entry>`）
   - コード: `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`
 - `Implemented`: Master画面で招待コード発行/失効/改名、全開示、検索が可能。
   - UI: `wene-mobile/app/master/index.tsx`
@@ -96,6 +120,30 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 - `Planned`: FairScale等のより強いSybil耐性/資格判定連携。
 
 ## アーキテクチャ
+
+```mermaid
+flowchart TB
+  subgraph L3["L3: UI [Implemented]"]
+    U1["利用者UI\n/u/*, /r/school/:eventId"]
+    A1["管理者/運営者UI\n/admin/*, /master/*"]
+  end
+
+  subgraph L2["L2: Process Proof + Ops API [Implemented]"]
+    W["Cloudflare Worker + Durable Object"]
+    HC["追記型 監査ハッシュチェーン"]
+    VR["レシート検証 / 開示 / 検索API"]
+  end
+
+  subgraph L1["L1: Settlement [Implemented, 方針で任意]"]
+    SP["Solana Anchor Program\ngrant_program"]
+  end
+
+  U1 --> W
+  A1 --> W
+  W --> HC
+  W --> VR
+  W -. イベントごとに任意 .-> SP
+```
 
 ```text
 L3: UI（Implemented）
@@ -229,9 +277,9 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
 - PoP稼働証明カード:
   - `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`
   - `PoP稼働証明`、`/v1/school/pop-status` 表示
-- on/off-chain 送金監査分離:
+- Hash Chain稼働 + on/off-chain 送金監査分離:
   - `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`
-  - `On-chain署名` / `Off-chain監査署名`
+  - `送金監査 (Hash Chain)`、`On-chain署名` / `Off-chain監査署名`、`hash: ... -> ...` / `chain: ... -> ...`
 - 参加券証跡カードとコピー導線:
   - `wene-mobile/src/screens/user/UserSuccessScreen.tsx`
 
@@ -240,7 +288,7 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
 | マイルストーン | Deliverable | Success Criteria | Reviewer向け証跡 |
 |---|---|---|---|
 | M1: 再現性 + 証跡整備（10分レビュー） | [Implemented] Live/Localを短時間で検証できる手順と証跡導線を固定化 | 初見レビュアーが隠し設定なしで約10分で稼働確認と証跡確認を実行できる | 本README + `/v1/school/pop-status` + `/v1/school/runtime-status` + `/api/audit/receipts/verify-code` |
-| M2: 説明責任の強化 | [Implemented] 運用証跡UI（`PoP稼働証明`、on/off-chain送金監査分離、権限別開示）+ [Implemented] 整合性確認API（`/api/master/audit-integrity`） | 運用者が証跡を確認でき、監査者が master 認証で整合性チェックを実行できる | `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`、`wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`、`wene-mobile/app/master/index.tsx`、`api-worker/src/storeDO.ts` |
+| M2: 説明責任の強化 | [Implemented] 運用証跡UI（`PoP稼働証明`、`送金監査 (Hash Chain)`、on/off-chain送金監査分離、権限別開示）+ [Implemented] 整合性確認API（`/api/master/audit-integrity`） | 運用者が証跡を確認でき、監査者が master 認証で整合性チェックを実行できる | `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`、`wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`、`wene-mobile/app/master/index.tsx`、`api-worker/src/storeDO.ts` |
 | M3: 連合運用に向けた一般化 | [Planned] federation model 文書化 + chain-agnostic adapter 境界の最小PoCフック（新規チェーン立ち上げは対象外） | 現行Solana参照実装を維持したまま、連合運用/adapter境界が明示される | `docs/ROADMAP.md` + 今後のPR（adapter/federation interface） |
 
 ## Scope Clarity
