@@ -133,15 +133,53 @@ function resolveMetadataBaseUrl(): string {
   return 'https://instant-grant-core.haruki-kira3.workers.dev';
 }
 
-function resolvePopSignerPubkey(): PublicKey {
-  const raw = (process.env.EXPO_PUBLIC_POP_SIGNER_PUBKEY ?? '').trim();
+function normalizePubkeyString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+async function fetchPopSignerPubkeyFromRuntime(baseUrl: string): Promise<string | null> {
+  const runtimeStatusUrl = `${baseUrl}/v1/school/runtime-status`;
+  try {
+    const runtimeRes = await fetch(runtimeStatusUrl, { method: 'GET' });
+    if (runtimeRes.ok) {
+      const runtime = (await runtimeRes.json()) as {
+        checks?: { popSignerPubkey?: string | null };
+      };
+      const runtimePubkey = normalizePubkeyString(runtime?.checks?.popSignerPubkey);
+      if (runtimePubkey) return runtimePubkey;
+    }
+  } catch {
+    // no-op: fallback to pop-status
+  }
+
+  const popStatusUrl = `${baseUrl}/v1/school/pop-status`;
+  try {
+    const popRes = await fetch(popStatusUrl, { method: 'GET' });
+    if (!popRes.ok) return null;
+    const pop = (await popRes.json()) as { signerPubkey?: string | null };
+    return normalizePubkeyString(pop?.signerPubkey);
+  } catch {
+    return null;
+  }
+}
+
+async function resolvePopSignerPubkey(): Promise<PublicKey> {
+  const envRaw = normalizePubkeyString(process.env.EXPO_PUBLIC_POP_SIGNER_PUBKEY);
+  const runtimeRaw = envRaw ? null : await fetchPopSignerPubkeyFromRuntime(resolveMetadataBaseUrl());
+  const raw = envRaw ?? runtimeRaw;
   if (!raw) {
-    throw new Error('PoP署名者公開鍵が未設定です。EXPO_PUBLIC_POP_SIGNER_PUBKEY を設定してください');
+    throw new Error(
+      'PoP署名者公開鍵が未設定です。EXPO_PUBLIC_POP_SIGNER_PUBKEY を設定するか、runtime-status で popSignerPubkey を返してください'
+    );
   }
   try {
     return new PublicKey(raw);
   } catch {
-    throw new Error('EXPO_PUBLIC_POP_SIGNER_PUBKEY の形式が不正です');
+    throw new Error(
+      `PoP署名者公開鍵の形式が不正です: ${raw}. EXPO_PUBLIC_POP_SIGNER_PUBKEY または runtime-status の値を確認してください`
+    );
   }
 }
 
@@ -221,7 +259,7 @@ export async function issueEventTicketToken(
   const periodSeconds = toU64(BigInt(claimIntervalDays * 24 * 60 * 60), 'periodSeconds');
 
   const authority = new PublicKey(params.phantom.walletPubkey);
-  const popSignerPubkey = resolvePopSignerPubkey();
+  const popSignerPubkey = await resolvePopSignerPubkey();
   const mintKeypair = Keypair.generate();
   const mint = mintKeypair.publicKey;
   const grantId = BigInt(Date.now() * 1000 + Math.floor(Math.random() * 1000));
