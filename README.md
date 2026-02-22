@@ -6,7 +6,7 @@ Public prototype for auditable school/public participation and grant operations 
 
 **Live URLs (We-ne)**
 - User: `https://instant-grant-core.pages.dev/`
-- Admin: `https://instant-grant-core.pages.dev/admin/login` (Demo login code: `ebf366f9b3c44204a4a399a1c37fcc69`)
+- Admin: `https://instant-grant-core.pages.dev/admin/login` (Demo login code: `83284ab4d9874e54b301dcf7ea6a6056`)
 
 ## Top Summary
 - What it is: a 3-layer system that binds operational process logs to verifiable receipts, and optionally to Solana settlement.
