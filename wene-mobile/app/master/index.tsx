@@ -1,61 +1,209 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, FlatList, TextInput, Alert, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText, Button, Card } from '../../src/ui/components';
 import { masterTheme } from '../../src/ui/masterTheme';
-import { createInviteCode, revokeInviteCode, fetchMasterAuditLogs, MasterAuditLog, fetchInviteCodes } from '../../src/api/adminApi';
+import {
+    createInviteCode,
+    revokeInviteCode,
+    renameInviteCode,
+    fetchMasterAuditLogs,
+    fetchMasterTransferLogs,
+    fetchMasterAdminDisclosures,
+    fetchMasterSearchResults,
+    InviteCodeRecord,
+    MasterAdminDisclosure,
+    MasterSearchResultItem,
+    MasterAuditLog,
+    TransferLogEntry,
+    fetchInviteCodes,
+} from '../../src/api/adminApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MASTER_AUTH_KEY } from './_layout';
 import { useRouter } from 'expo-router';
 
 export default function MasterDashboard() {
     const router = useRouter();
-    const [activeTab, setActiveTab] = useState<'invites' | 'logging'>('invites');
+    const [activeTab, setActiveTab] = useState<'invites' | 'logging' | 'disclosure' | 'search'>('invites');
 
     // Invite Codes State
-    const [invites, setInvites] = useState<{ name: string; code: string; createdAt: string }[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [newOrgName, setNewOrgName] = useState('');
+    const [invites, setInvites] = useState<InviteCodeRecord[]>([]);
+    const [invitesLoading, setInvitesLoading] = useState(false);
+    const [inviteActionLoading, setInviteActionLoading] = useState(false);
+    const [newAdminName, setNewAdminName] = useState('');
     const [generatedCode, setGeneratedCode] = useState<string | null>(null);
+    const [renameCode, setRenameCode] = useState('');
+    const [renameAdminId, setRenameAdminId] = useState('');
+    const [renameName, setRenameName] = useState('');
 
     // Audit Logs State
     const [auditLogs, setAuditLogs] = useState<MasterAuditLog[]>([]);
     const [loadingLogs, setLoadingLogs] = useState(false);
+    const [transferLogs, setTransferLogs] = useState<TransferLogEntry[]>([]);
+    const [transferError, setTransferError] = useState<string | null>(null);
+    const [showPii, setShowPii] = useState(false);
+
+    // Master Disclosure State
+    const [adminDisclosures, setAdminDisclosures] = useState<MasterAdminDisclosure[]>([]);
+    const [loadingDisclosures, setLoadingDisclosures] = useState(false);
+    const [disclosureError, setDisclosureError] = useState<string | null>(null);
+
+    // Search State
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<MasterSearchResultItem[]>([]);
+    const [searchLoading, setSearchLoading] = useState(false);
+    const [searchError, setSearchError] = useState<string | null>(null);
+    const [searchTotal, setSearchTotal] = useState(0);
+    const searchRequestSeq = useRef(0);
 
     useEffect(() => {
         if (activeTab === 'logging') {
             loadAuditLogs();
+        } else if (activeTab === 'disclosure') {
+            loadAdminDisclosures();
         } else if (activeTab === 'invites') {
             loadInvites();
         }
     }, [activeTab]);
 
     const loadInvites = async () => {
-        setLoading(true);
+        setInvitesLoading(true);
         try {
             const password = await AsyncStorage.getItem(MASTER_AUTH_KEY);
-            if (!password) return;
-            const codes = await fetchInviteCodes(password);
+            if (!password) {
+                setInvites([]);
+                return;
+            }
+            const codes = await fetchInviteCodes(password, true);
             setInvites(codes);
         } catch (e) {
             console.error(e);
+            setInvites([]);
+        } finally {
+            setInvitesLoading(false);
         }
-        setLoading(false);
     };
 
     const loadAuditLogs = async () => {
         setLoadingLogs(true);
+        setTransferError(null);
         try {
             const password = await AsyncStorage.getItem(MASTER_AUTH_KEY);
-            if (!password) return;
-            const logs = await fetchMasterAuditLogs(password);
-            setAuditLogs(logs);
+            if (!password) {
+                setAuditLogs([]);
+                setTransferLogs([]);
+                return;
+            }
+
+            const [logsResult, transfersResult] = await Promise.allSettled([
+                fetchMasterAuditLogs(password),
+                fetchMasterTransferLogs(password, { limit: 50 }),
+            ]);
+            if (logsResult.status === 'fulfilled') {
+                setAuditLogs(logsResult.value);
+            } else {
+                setAuditLogs([]);
+            }
+
+            if (transfersResult.status === 'fulfilled') {
+                setTransferLogs(transfersResult.value.items || []);
+            } else {
+                setTransferLogs([]);
+                setTransferError(transfersResult.reason instanceof Error ? transfersResult.reason.message : 'transfer logs fetch failed');
+            }
         } catch (e) {
             console.error(e);
+        } finally {
+            setLoadingLogs(false);
         }
-        setLoadingLogs(false);
     };
+
+    const loadAdminDisclosures = async () => {
+        setLoadingDisclosures(true);
+        setDisclosureError(null);
+        try {
+            const password = await AsyncStorage.getItem(MASTER_AUTH_KEY);
+            if (!password) {
+                setAdminDisclosures([]);
+                return;
+            }
+            const disclosure = await fetchMasterAdminDisclosures(password, {
+                includeRevoked: true,
+                transferLimit: 1000,
+            });
+            setAdminDisclosures(disclosure.admins || []);
+        } catch (e) {
+            console.error(e);
+            setDisclosureError(e instanceof Error ? e.message : 'failed to load disclosure');
+            setAdminDisclosures([]);
+        } finally {
+            setLoadingDisclosures(false);
+        }
+    };
+
+    const shorten = (value?: string | null, start = 8, end = 8) => {
+        if (!value) return '-';
+        if (value.length <= start + end + 3) return value;
+        return `${value.slice(0, start)}...${value.slice(-end)}`;
+    };
+
+    const loadSearchResults = async (queryOverride?: string) => {
+        const query = (queryOverride ?? searchQuery).trim();
+        const requestId = searchRequestSeq.current + 1;
+        searchRequestSeq.current = requestId;
+        if (!query) {
+            setSearchLoading(false);
+            setSearchError(null);
+            setSearchResults([]);
+            setSearchTotal(0);
+            return;
+        }
+        setSearchLoading(true);
+        setSearchError(null);
+        try {
+            const password = await AsyncStorage.getItem(MASTER_AUTH_KEY);
+            if (!password) throw new Error('No session');
+            const result = await fetchMasterSearchResults(password, {
+                query,
+                limit: 300,
+                includeRevoked: true,
+                transferLimit: 1000,
+            });
+            if (searchRequestSeq.current !== requestId) return;
+            setSearchResults(result.items || []);
+            setSearchTotal(result.total || 0);
+        } catch (e) {
+            if (searchRequestSeq.current !== requestId) return;
+            console.error(e);
+            setSearchError(e instanceof Error ? e.message : 'failed to search');
+            setSearchResults([]);
+            setSearchTotal(0);
+        }
+        if (searchRequestSeq.current === requestId) {
+            setSearchLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (activeTab !== 'search') {
+            searchRequestSeq.current += 1;
+            setSearchLoading(false);
+            return;
+        }
+        const query = searchQuery.trim();
+        if (!query) {
+            setSearchError(null);
+            setSearchResults([]);
+            setSearchTotal(0);
+            setSearchLoading(false);
+            return;
+        }
+        const timer = setTimeout(() => {
+            void loadSearchResults(query);
+        }, 250);
+        return () => clearTimeout(timer);
+    }, [activeTab, searchQuery]);
 
     const handleLogout = async () => {
         await AsyncStorage.removeItem(MASTER_AUTH_KEY);
@@ -63,60 +211,122 @@ export default function MasterDashboard() {
     };
 
     const handleCreateCode = async () => {
-        if (!newOrgName.trim()) {
-            Alert.alert('Error', 'Please enter organization name');
+        if (!newAdminName.trim()) {
+            Alert.alert('Error', 'Please enter admin name');
             return;
         }
-        setLoading(true);
+        setInviteActionLoading(true);
         try {
             const password = await AsyncStorage.getItem(MASTER_AUTH_KEY);
-            if (!password) throw new Error('No session');
+            if (!password) {
+                Alert.alert('Session expired', 'Please login again.');
+                router.replace('/master/login');
+                return;
+            }
 
-            const res = await createInviteCode(password, newOrgName);
+            const res = await createInviteCode(password, newAdminName);
             setGeneratedCode(res.code);
             // Refresh the list after generating
-            loadInvites();
-            setNewOrgName('');
+            await loadInvites();
+            if (activeTab === 'disclosure') {
+                await loadAdminDisclosures();
+            }
+            setNewAdminName('');
             Alert.alert('Success', `Code created: ${res.code}`);
         } catch (e) {
-            Alert.alert('Error', 'Failed to create code');
+            const message = e instanceof Error ? e.message : 'Failed to create code';
+            Alert.alert('Error', message);
+        } finally {
+            setInviteActionLoading(false);
         }
-        setLoading(false);
     };
 
     const handleRevoke = async (code: string) => {
-        setLoading(true);
+        setInviteActionLoading(true);
         try {
             const password = await AsyncStorage.getItem(MASTER_AUTH_KEY);
-            if (!password) throw new Error('No session');
+            if (!password) {
+                Alert.alert('Session expired', 'Please login again.');
+                router.replace('/master/login');
+                return;
+            }
 
             const success = await revokeInviteCode(password, code);
             if (success) {
-                setInvites(prev => prev.filter(i => i.code !== code));
-                Alert.alert('Success', 'Code revoked');
+                await loadInvites();
+                if (activeTab === 'disclosure') {
+                    await loadAdminDisclosures();
+                }
+                Alert.alert('Success', 'Code revoked (status updated)');
             } else {
                 Alert.alert('Error', 'Failed to revoke code');
             }
         } catch (e) {
-            Alert.alert('Error', 'Failed to revoke');
+            const message = e instanceof Error ? e.message : 'Failed to revoke';
+            Alert.alert('Error', message);
+        } finally {
+            setInviteActionLoading(false);
         }
-        setLoading(false);
     };
 
-    const renderInviteItem = ({ item }: { item: { name: string; code: string; createdAt: string } }) => (
+    const handleRename = async () => {
+        const name = renameName.trim();
+        const code = renameCode.trim();
+        const adminId = renameAdminId.trim();
+        if (!name) {
+            Alert.alert('Error', 'Please enter new admin name');
+            return;
+        }
+        if (!code && !adminId) {
+            Alert.alert('Error', 'Please enter code or adminId');
+            return;
+        }
+        setInviteActionLoading(true);
+        try {
+            const password = await AsyncStorage.getItem(MASTER_AUTH_KEY);
+            if (!password) {
+                Alert.alert('Session expired', 'Please login again.');
+                router.replace('/master/login');
+                return;
+            }
+            const renamed = await renameInviteCode(password, {
+                name,
+                ...(code ? { code } : {}),
+                ...(adminId ? { adminId } : {}),
+            });
+            await loadInvites();
+            await loadAdminDisclosures();
+            setRenameCode('');
+            setRenameAdminId('');
+            setRenameName('');
+            Alert.alert('Success', `Renamed: ${renamed.name}`);
+        } catch (e) {
+            const message = e instanceof Error ? e.message : 'Failed to rename admin';
+            Alert.alert('Error', message);
+        } finally {
+            setInviteActionLoading(false);
+        }
+    };
+
+    const renderInviteItem = ({ item }: { item: InviteCodeRecord }) => (
         <Card style={styles.listItem}>
             <View style={styles.itemInfo}>
-                <AppText style={styles.itemName}>{item.name}</AppText>
+                <AppText style={styles.itemName}>{item.name} ({item.status})</AppText>
                 <AppText style={styles.itemCode} selectable>{item.code}</AppText>
+                <AppText style={styles.itemDate}>adminId: {item.adminId}</AppText>
                 <AppText style={styles.itemDate}>{new Date(item.createdAt).toLocaleString()}</AppText>
+                {item.revokedAt && (
+                    <AppText style={styles.itemDate}>revoked: {new Date(item.revokedAt).toLocaleString()}</AppText>
+                )}
             </View>
             <Button
-                title="Revoke"
+                title={item.status === 'revoked' ? 'Revoked' : 'Revoke'}
                 onPress={() => handleRevoke(item.code)}
                 style={styles.revokeButton}
                 variant='secondary'
                 dark // Use dark mode for secondary button to match master theme
                 size='medium'
+                disabled={item.status === 'revoked' || inviteActionLoading}
             />
         </Card>
     );
@@ -143,6 +353,82 @@ export default function MasterDashboard() {
         </View>
     );
 
+    const renderDisclosureAdmin = ({ item }: { item: MasterAdminDisclosure }) => (
+        <Card style={styles.disclosureCard}>
+            <View style={styles.disclosureHeader}>
+                <AppText style={styles.disclosureAdminName}>{item.name}</AppText>
+                <AppText style={styles.disclosureAdminMeta}>{item.status}</AppText>
+            </View>
+            <AppText style={styles.disclosureAdminMeta}>adminId: {item.adminId}</AppText>
+            <AppText style={styles.disclosureAdminMeta}>code: {item.code}</AppText>
+            <AppText style={styles.disclosureAdminMeta}>created: {new Date(item.createdAt).toLocaleString()}</AppText>
+            {item.revokedAt && (
+                <AppText style={styles.disclosureAdminMeta}>revoked: {new Date(item.revokedAt).toLocaleString()}</AppText>
+            )}
+            <AppText style={styles.disclosureSectionTitle}>
+                Related Events ({item.events.length}) / Transfers ({item.relatedTransferCount})
+            </AppText>
+            {item.events.length === 0 ? (
+                <AppText style={styles.disclosureEmpty}>No linked events</AppText>
+            ) : (
+                item.events.map((event) => (
+                    <View key={event.id} style={styles.disclosureRow}>
+                        <AppText style={styles.disclosureRowText}>
+                            {event.id} / {event.title} / {event.state} / claims:{event.claimedCount} / owner:{event.ownerSource}
+                        </AppText>
+                    </View>
+                ))
+            )}
+            <AppText style={styles.disclosureSectionTitle}>
+                Related Users ({item.relatedUsers.length})
+            </AppText>
+            {item.relatedUsers.length === 0 ? (
+                <AppText style={styles.disclosureEmpty}>No related users</AppText>
+            ) : (
+                item.relatedUsers.map((user) => (
+                    <View key={user.key} style={styles.disclosureUserBlock}>
+                        <AppText style={styles.disclosureUserTitle}>
+                            {user.displayName ?? '-'} / userId:{user.userId ?? '-'}
+                        </AppText>
+                        <AppText style={styles.disclosureUserMeta}>
+                            wallet:{user.walletAddress ?? '-'} / joinToken:{user.joinToken ?? '-'}
+                        </AppText>
+                        <AppText style={styles.disclosureUserMeta}>
+                            recipient:{user.recipientType}:{user.recipientId}
+                        </AppText>
+                        <AppText style={styles.disclosureUserMeta}>
+                            eventIds: {user.eventIds.join(', ') || '-'}
+                        </AppText>
+                        {user.claims.map((claim, idx) => (
+                            <View key={`${user.key}-${claim.eventId}-${idx}`} style={styles.disclosureClaimRow}>
+                                <AppText style={styles.disclosureClaimText}>
+                                    {new Date(claim.ts).toLocaleString()} / {claim.eventId} ({claim.eventTitle ?? '-'})
+                                </AppText>
+                                <AppText style={styles.disclosureClaimText}>
+                                    transfer: {claim.transfer.sender.type}:{claim.transfer.sender.id} → {claim.transfer.recipient.type}:{claim.transfer.recipient.id}
+                                </AppText>
+                                <AppText style={styles.disclosureClaimText}>
+                                    amount:{claim.transfer.amount ?? '-'} / mint:{shorten(claim.transfer.mint)}
+                                </AppText>
+                            </View>
+                        ))}
+                    </View>
+                ))
+            )}
+        </Card>
+    );
+
+    const renderSearchItem = ({ item }: { item: MasterSearchResultItem }) => (
+        <Card style={styles.searchResultCard}>
+            <View style={styles.searchResultHeader}>
+                <AppText style={styles.searchResultKind}>{item.kind.toUpperCase()}</AppText>
+                <AppText style={styles.searchResultTitle}>{item.title}</AppText>
+            </View>
+            <AppText style={styles.searchResultSubtitle}>{item.subtitle}</AppText>
+            <AppText style={styles.searchResultDetail}>{item.detail}</AppText>
+        </Card>
+    );
+
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             <View style={styles.header}>
@@ -165,51 +451,157 @@ export default function MasterDashboard() {
                 >
                     <AppText style={[styles.tabText, activeTab === 'logging' && styles.activeTabText]}>Audit Logs</AppText>
                 </TouchableOpacity>
+                <TouchableOpacity
+                    style={[styles.tab, activeTab === 'disclosure' && styles.activeTab]}
+                    onPress={() => setActiveTab('disclosure')}
+                >
+                    <AppText style={[styles.tabText, activeTab === 'disclosure' && styles.activeTabText]}>Admin Disclosure</AppText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={[styles.tab, activeTab === 'search' && styles.activeTab]}
+                    onPress={() => setActiveTab('search')}
+                >
+                    <AppText style={[styles.tabText, activeTab === 'search' && styles.activeTabText]}>Search</AppText>
+                </TouchableOpacity>
             </View>
 
             <View style={styles.content}>
                 {activeTab === 'invites' ? (
                     <View style={{ flex: 1 }}>
                         <Card style={styles.createForm}>
-                            <AppText style={styles.sectionTitle}>Issue New Code</AppText>
+                            <AppText style={styles.sectionTitle}>Issue Admin Code</AppText>
                             <TextInput
                                 style={styles.input}
-                                placeholder="Organization Name (e.g. School A)"
+                                placeholder="Admin Name (e.g. Tokyo High Admin)"
                                 placeholderTextColor={masterTheme.colors.textSecondary}
-                                value={newOrgName}
-                                onChangeText={setNewOrgName}
+                                value={newAdminName}
+                                onChangeText={setNewAdminName}
                             />
                             <Button
-                                title={loading ? 'Generating...' : 'Generate Code'}
+                                title={inviteActionLoading ? 'Generating...' : 'Generate Code'}
                                 onPress={handleCreateCode}
                                 style={styles.generateButton}
                                 variant='primary'
-                                disabled={loading}
+                                disabled={inviteActionLoading}
                             />
                             {generatedCode && (
                                 <View style={styles.resultBox}>
                                     <AppText style={styles.resultLabel}>Generated Code:</AppText>
                                     <AppText style={styles.resultCode} selectable>{generatedCode}</AppText>
-                                    <AppText style={styles.resultNote}>Copy this code and send it to the administrator.</AppText>
+                                    <AppText style={styles.resultNote}>Copy this code and send it to this named administrator.</AppText>
                                 </View>
                             )}
                         </Card>
 
-                        <AppText style={styles.listTitle}>Active Codes</AppText>
+                        <Card style={styles.renameForm}>
+                            <AppText style={styles.sectionTitle}>Rename Admin</AppText>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="Code (optional if adminId is set)"
+                                placeholderTextColor={masterTheme.colors.textSecondary}
+                                value={renameCode}
+                                onChangeText={setRenameCode}
+                            />
+                            <TextInput
+                                style={styles.input}
+                                placeholder="Admin ID (optional if code is set)"
+                                placeholderTextColor={masterTheme.colors.textSecondary}
+                                value={renameAdminId}
+                                onChangeText={setRenameAdminId}
+                            />
+                            <TextInput
+                                style={styles.input}
+                                placeholder="New admin name"
+                                placeholderTextColor={masterTheme.colors.textSecondary}
+                                value={renameName}
+                                onChangeText={setRenameName}
+                            />
+                            <Button
+                                title={inviteActionLoading ? 'Updating...' : 'Update Name'}
+                                onPress={handleRename}
+                                variant="secondary"
+                                dark
+                                size="medium"
+                                disabled={inviteActionLoading}
+                            />
+                        </Card>
+
+                        <AppText style={styles.listTitle}>Admin Codes (Active + Revoked)</AppText>
+                        {invitesLoading && (
+                            <AppText style={styles.emptyText}>Loading codes...</AppText>
+                        )}
                         <FlatList
                             data={invites}
                             renderItem={renderInviteItem}
                             keyExtractor={item => item.code}
                             contentContainerStyle={{ paddingBottom: 100 }}
-                            ListEmptyComponent={<AppText style={styles.emptyText}>No codes issued in this session.</AppText>}
+                            ListEmptyComponent={
+                                invitesLoading
+                                    ? null
+                                    : <AppText style={styles.emptyText}>No codes issued in this session.</AppText>
+                            }
                         />
                     </View>
-                ) : (
+                ) : activeTab === 'logging' ? (
                     <View style={styles.logContainer}>
                         <View style={styles.logHeader}>
                             <AppText style={styles.logTitle}>System Audit Trail</AppText>
                             <Button title="Refresh" onPress={loadAuditLogs} size="medium" variant="secondary" dark style={{ height: 32, minHeight: 0, paddingVertical: 4 }} />
                         </View>
+                        <Card style={styles.transferCard}>
+                            <View style={styles.transferTitleRow}>
+                                <AppText style={styles.transferTitle}>Transfer Logs (Master Full Access)</AppText>
+                                <Button
+                                    title={showPii ? 'Hide PII' : 'Show PII'}
+                                    onPress={() => setShowPii(prev => !prev)}
+                                    size="medium"
+                                    variant="secondary"
+                                    dark
+                                    style={styles.piiToggleButton}
+                                />
+                            </View>
+                            {transferError && (
+                                <AppText style={styles.transferErrorText}>Transfer log error: {transferError}</AppText>
+                            )}
+                            {loadingLogs ? (
+                                <AppText style={styles.emptyText}>Loading transfer logs...</AppText>
+                            ) : transferLogs.length === 0 ? (
+                                <AppText style={styles.emptyText}>No transfer logs found.</AppText>
+                            ) : (
+                                transferLogs.slice(0, 20).map((item) => (
+                                    <View key={item.entryHash} style={styles.transferRow}>
+                                        <AppText style={styles.transferEvent}>
+                                            {item.event} / {new Date(item.ts).toLocaleString()}
+                                        </AppText>
+                                        <AppText style={styles.transferLine}>
+                                            Sender: {item.transfer.sender.type}:{item.transfer.sender.id}
+                                        </AppText>
+                                        <AppText style={styles.transferLine}>
+                                            Recipient: {item.transfer.recipient.type}:{item.transfer.recipient.id}
+                                        </AppText>
+                                        <AppText style={styles.transferLine}>
+                                            Amount: {item.transfer.amount ?? '-'} / Mint: {shorten(item.transfer.mint)}
+                                        </AppText>
+                                        <AppText style={styles.transferHash}>
+                                            tx={shorten(item.transfer.txSignature)} / receipt={shorten(item.transfer.receiptPubkey)}
+                                        </AppText>
+                                        <AppText style={styles.transferHash}>
+                                            hash={shorten(item.prevHash)} → {shorten(item.entryHash)}
+                                        </AppText>
+                                        {item.pii && showPii && (
+                                            <AppText style={styles.transferPii}>
+                                                pii: {Object.entries(item.pii).map(([k, v]) => `${k}=${v}`).join(', ')}
+                                            </AppText>
+                                        )}
+                                        {item.pii && !showPii && (
+                                            <AppText style={styles.transferPiiHidden}>
+                                                pii: hidden
+                                            </AppText>
+                                        )}
+                                    </View>
+                                ))
+                            )}
+                        </Card>
                         <FlatList
                             data={auditLogs}
                             renderItem={renderAuditItem}
@@ -219,6 +611,65 @@ export default function MasterDashboard() {
                                 loadingLogs ?
                                     <AppText style={styles.emptyText}>Loading logs from centralized ledger...</AppText> :
                                     <AppText style={styles.emptyText}>No audit logs found.</AppText>
+                            }
+                        />
+                    </View>
+                ) : activeTab === 'disclosure' ? (
+                    <View style={styles.logContainer}>
+                        <View style={styles.logHeader}>
+                            <AppText style={styles.logTitle}>Admin/User Full Disclosure</AppText>
+                            <Button title="Refresh" onPress={loadAdminDisclosures} size="medium" variant="secondary" dark style={{ height: 32, minHeight: 0, paddingVertical: 4 }} />
+                        </View>
+                        {disclosureError && (
+                            <AppText style={styles.transferErrorText}>Disclosure error: {disclosureError}</AppText>
+                        )}
+                        <FlatList
+                            data={adminDisclosures}
+                            renderItem={renderDisclosureAdmin}
+                            keyExtractor={(item) => item.adminId}
+                            contentContainerStyle={{ paddingBottom: 100 }}
+                            ListEmptyComponent={
+                                loadingDisclosures
+                                    ? <AppText style={styles.emptyText}>Loading disclosure data...</AppText>
+                                    : <AppText style={styles.emptyText}>No disclosure data found.</AppText>
+                            }
+                        />
+                    </View>
+                ) : (
+                    <View style={styles.logContainer}>
+                        <View style={styles.logHeader}>
+                            <AppText style={styles.logTitle}>Search (Admin / User / Event / Claim)</AppText>
+                            <Button title="Refresh Source" onPress={() => loadSearchResults(searchQuery.trim())} size="medium" variant="secondary" dark style={{ height: 32, minHeight: 0, paddingVertical: 4 }} />
+                        </View>
+                        <Card style={styles.searchCard}>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="Search by admin name, adminId, code, userId, displayName, wallet, eventId..."
+                                placeholderTextColor={masterTheme.colors.textSecondary}
+                                value={searchQuery}
+                                onChangeText={setSearchQuery}
+                            />
+                            <AppText style={styles.searchMeta}>
+                                query="{searchQuery.trim() || '-'}" / results={searchResults.length}/{searchTotal}
+                            </AppText>
+                            {searchError && (
+                                <AppText style={styles.transferErrorText}>Search error: {searchError}</AppText>
+                            )}
+                            {searchLoading && (
+                                <AppText style={styles.emptyText}>Searching indexed source...</AppText>
+                            )}
+                        </Card>
+                        <FlatList
+                            data={searchResults}
+                            renderItem={renderSearchItem}
+                            keyExtractor={(item) => item.id}
+                            contentContainerStyle={{ paddingBottom: 100 }}
+                            ListEmptyComponent={
+                                searchLoading
+                                    ? <AppText style={styles.emptyText}>Searching...</AppText>
+                                    : searchQuery.trim()
+                                    ? <AppText style={styles.emptyText}>No matches found.</AppText>
+                                    : <AppText style={styles.emptyText}>Enter a search query.</AppText>
                             }
                         />
                     </View>
@@ -277,6 +728,11 @@ const styles = StyleSheet.create({
         padding: masterTheme.spacing.md,
     },
     createForm: {
+        backgroundColor: '#111',
+        borderColor: masterTheme.colors.border,
+        marginBottom: masterTheme.spacing.lg,
+    },
+    renameForm: {
         backgroundColor: '#111',
         borderColor: masterTheme.colors.border,
         marginBottom: masterTheme.spacing.lg,
@@ -442,5 +898,168 @@ const styles = StyleSheet.create({
         color: '#555',
         marginHorizontal: 6,
         fontSize: 10,
+    },
+    transferCard: {
+        backgroundColor: '#111',
+        borderColor: masterTheme.colors.border,
+        marginBottom: masterTheme.spacing.md,
+    },
+    transferTitle: {
+        color: masterTheme.colors.primary,
+        fontWeight: 'bold',
+    },
+    transferTitleRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: masterTheme.spacing.sm,
+    },
+    piiToggleButton: {
+        minHeight: 0,
+        height: 30,
+        paddingVertical: 4,
+    },
+    transferRow: {
+        borderBottomWidth: 1,
+        borderBottomColor: '#222',
+        paddingVertical: 8,
+    },
+    transferEvent: {
+        color: '#fff',
+        fontSize: 12,
+        marginBottom: 2,
+    },
+    transferLine: {
+        color: masterTheme.colors.textSecondary,
+        fontSize: 11,
+    },
+    transferHash: {
+        color: '#888',
+        fontFamily: 'monospace',
+        fontSize: 10,
+    },
+    transferPii: {
+        color: '#ffb3b3',
+        fontSize: 11,
+        marginTop: 2,
+    },
+    transferPiiHidden: {
+        color: '#666',
+        fontSize: 11,
+        marginTop: 2,
+    },
+    transferErrorText: {
+        color: '#ff8a80',
+        fontSize: 12,
+        marginBottom: 8,
+    },
+    disclosureCard: {
+        backgroundColor: '#111',
+        borderColor: masterTheme.colors.border,
+        marginBottom: masterTheme.spacing.md,
+    },
+    disclosureHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    disclosureAdminName: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 16,
+    },
+    disclosureAdminMeta: {
+        color: masterTheme.colors.textSecondary,
+        fontSize: 12,
+        marginTop: 2,
+    },
+    disclosureSectionTitle: {
+        color: masterTheme.colors.primary,
+        fontSize: 12,
+        marginTop: 10,
+        marginBottom: 4,
+    },
+    disclosureEmpty: {
+        color: '#666',
+        fontSize: 12,
+    },
+    disclosureRow: {
+        borderBottomWidth: 1,
+        borderBottomColor: '#222',
+        paddingVertical: 4,
+    },
+    disclosureRowText: {
+        color: '#aaa',
+        fontSize: 11,
+    },
+    disclosureUserBlock: {
+        borderWidth: 1,
+        borderColor: '#222',
+        borderRadius: 6,
+        padding: 8,
+        marginBottom: 8,
+    },
+    disclosureUserTitle: {
+        color: '#fff',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    disclosureUserMeta: {
+        color: '#999',
+        fontSize: 11,
+        marginTop: 2,
+    },
+    disclosureClaimRow: {
+        marginTop: 6,
+        paddingTop: 6,
+        borderTopWidth: 1,
+        borderTopColor: '#222',
+    },
+    disclosureClaimText: {
+        color: '#bbb',
+        fontSize: 10,
+        fontFamily: 'monospace',
+    },
+    searchCard: {
+        backgroundColor: '#111',
+        borderColor: masterTheme.colors.border,
+        marginBottom: masterTheme.spacing.md,
+    },
+    searchMeta: {
+        color: '#888',
+        fontSize: 11,
+        marginTop: -4,
+    },
+    searchResultCard: {
+        backgroundColor: '#111',
+        borderColor: masterTheme.colors.border,
+        marginBottom: masterTheme.spacing.sm,
+    },
+    searchResultHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 4,
+    },
+    searchResultKind: {
+        color: masterTheme.colors.primary,
+        fontSize: 10,
+        fontWeight: '700',
+        marginRight: 8,
+    },
+    searchResultTitle: {
+        color: '#fff',
+        fontSize: 13,
+        fontWeight: '600',
+        flexShrink: 1,
+    },
+    searchResultSubtitle: {
+        color: '#aaa',
+        fontSize: 11,
+    },
+    searchResultDetail: {
+        color: '#777',
+        fontSize: 10,
+        marginTop: 2,
+        fontFamily: 'monospace',
     },
 });
