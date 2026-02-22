@@ -12,6 +12,13 @@
 - 利用者アプリ: https://instant-grant-core.pages.dev/
 - 管理者アプリ: https://instant-grant-core.pages.dev/admin/login
 
+## We-ne
+We-ne はこのコア基盤上で動作するリファレンス実装で、学校/公共向けの参加・給付運用フローに焦点を当てています。
+
+プロダクト説明の詳細は以下を参照:
+- `wene-mobile/README.md`
+- `wene-mobile/docs/STATIC_VERIFICATION_REPORT.md`
+
 ## 審査員向け要約（2026年2月22日時点）
 このリポジトリは、次の問いに対する実装です。
 「オンチェーンの結果だけでなく、行政オペレーションの過程そのものをどう検証可能にするか」

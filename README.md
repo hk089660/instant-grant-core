@@ -12,6 +12,13 @@
 - User app: https://instant-grant-core.pages.dev/
 - Admin app: https://instant-grant-core.pages.dev/admin/login
 
+## We-ne
+We-ne is the reference application built on this core protocol, focused on school/public participation and grant operation flows.
+
+For product-level details, see:
+- `wene-mobile/README.md`
+- `wene-mobile/docs/STATIC_VERIFICATION_REPORT.md`
+
 ## Reviewer Summary (as of February 22, 2026)
 This repository proposes and implements a practical answer to one question:
 How can public systems prove not only what happened on-chain, but also how decisions and operations happened before settlement?
