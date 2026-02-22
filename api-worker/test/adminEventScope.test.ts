@@ -99,6 +99,24 @@ describe('GET /v1/school/events scope=mine', () => {
     return body.id as string;
   }
 
+  async function claimEvent(eventId: string, walletAddress: string): Promise<void> {
+    const res = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          eventId,
+          walletAddress,
+        }),
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { success?: boolean };
+    expect(body.success).toBe(true);
+  }
+
   it('returns only owner-issued events for each admin token', async () => {
     const adminACode = await inviteAdmin('Admin A');
     const adminBCode = await inviteAdmin('Admin B');
@@ -166,5 +184,44 @@ describe('GET /v1/school/events scope=mine', () => {
       })
     );
     expect(res.status).toBe(401);
+  });
+
+  it('allows claimants lookup only for owner admin (master can access all)', async () => {
+    const adminACode = await inviteAdmin('Admin A');
+    const adminBCode = await inviteAdmin('Admin B');
+
+    const eventAId = await createEvent(adminACode, 'event-admin-a');
+    const eventBId = await createEvent(adminBCode, 'event-admin-b');
+
+    await claimEvent(eventAId, '11111111111111111111111111111111');
+    await claimEvent(eventBId, '22222222222222222222222222222222');
+
+    const ownClaimantsRes = await store.fetch(
+      new Request(`https://example.com/v1/school/events/${encodeURIComponent(eventAId)}/claimants`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${adminACode}` },
+      })
+    );
+    expect(ownClaimantsRes.status).toBe(200);
+    const ownClaimantsBody = (await ownClaimantsRes.json()) as { items?: Array<{ subject: string }> };
+    expect((ownClaimantsBody.items ?? []).length).toBe(1);
+
+    const otherClaimantsRes = await store.fetch(
+      new Request(`https://example.com/v1/school/events/${encodeURIComponent(eventBId)}/claimants`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${adminACode}` },
+      })
+    );
+    expect(otherClaimantsRes.status).toBe(403);
+
+    const masterClaimantsRes = await store.fetch(
+      new Request(`https://example.com/v1/school/events/${encodeURIComponent(eventBId)}/claimants`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${masterToken}` },
+      })
+    );
+    expect(masterClaimantsRes.status).toBe(200);
+    const masterClaimantsBody = (await masterClaimantsRes.json()) as { items?: Array<{ subject: string }> };
+    expect((masterClaimantsBody.items ?? []).length).toBe(1);
   });
 });

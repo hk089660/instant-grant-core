@@ -821,6 +821,17 @@ export class SchoolStore implements DurableObject {
     };
   }
 
+  private async ensureOperatorCanAccessEvent(operator: OperatorIdentity, eventId: string): Promise<Response | null> {
+    if (operator.role === 'master') {
+      return null;
+    }
+    const owner = await this.getEventOwnerRecord(eventId);
+    if (!owner || owner.adminId !== operator.adminId) {
+      return Response.json({ error: 'forbidden' }, { status: 403 });
+    }
+    return null;
+  }
+
   private getConfiguredMasterPassword(): string | null {
     const password = this.env.ADMIN_PASSWORD?.trim() ?? '';
     if (!password || password === DEFAULT_ADMIN_PASSWORD) return null;
@@ -3594,6 +3605,14 @@ export class SchoolStore implements DurableObject {
       const event = await this.store.getEvent(eventId);
       if (!event) {
         return Response.json({ error: 'event not found' }, { status: 404 });
+      }
+      const operator = await this.authenticateOperator(request);
+      if (!operator) {
+        return this.unauthorizedResponse();
+      }
+      const forbidden = await this.ensureOperatorCanAccessEvent(operator, eventId);
+      if (forbidden) {
+        return forbidden;
       }
       const claimants = await this.store.getClaimants(eventId);
       // subject が user ID の場合 displayName を引く
