@@ -8,9 +8,12 @@ Public prototype for auditable school/public participation and grant operations 
 - User: `https://instant-grant-core.pages.dev/`
 - Admin: `https://instant-grant-core.pages.dev/admin/login` (Demo login code: `83284ab4d9874e54b301dcf7ea6a6056`)
 
+**Status as of 2026-02-22**
+
 ## Quick Navigation
 - [Top Summary](#top-summary)
 - [Visual Overview](#visual-overview)
+- [Verification Evidence (UI)](#verification-evidence-ui)
 - [What’s Implemented Now](#whats-implemented-now)
 - [Architecture](#architecture)
 - [Reviewer Quickstart (10 Minutes)](#reviewer-quickstart-10-minutes)
@@ -20,8 +23,8 @@ Public prototype for auditable school/public participation and grant operations 
 ## Top Summary
 - What it is: a 3-layer system that binds operational process logs to verifiable receipts, and optionally to Solana settlement.
 - Who it is for: students/users who join events, and operators (admin/master) who run and audit distribution.
-- [Implemented] Minimal-friction participation: walletless `Participation Ticket (off-chain Attend)` can issue `confirmationCode + ticketReceipt` on supported paths.
-- [Optional] `On-chain Redeem` runs only when wallet + on-chain event config path is used; tx/receipt/Explorer evidence appears only in that path.
+- [Implemented] Student/user participation can be completed walletless via off-chain participation ticket issuance (`confirmationCode` + `ticketReceipt`) on supported paths.
+- [Optional] On-chain settlement evidence is an optional devnet path; tx/receipt/Explorer outputs appear only when the on-chain claim route is actually used.
 - [Implemented] Accountable operator workflow: admin/master flows expose PoP/runtime status, transfer audit logs, and role-based disclosure/search.
 - [Implemented] UI-level PoP confirmation is available: admin events screen shows `PoP Runtime Proof` with `enforceOnchainPop` + `signerConfigured`, linked to `/v1/school/pop-status`.
 - [Implemented] Hash-chain operation UI is available: admin event detail shows `Transfer Audit (Hash Chain)` with `prevHash -> entryHash` links for both on-chain and off-chain records.
@@ -58,6 +61,22 @@ flowchart LR
 
 ## Why This Matters
 Public grants and school participation often expose only final outcomes, leaving process decisions opaque; this project addresses that by making operator actions, audit-chain integrity, and settlement-linked evidence independently verifiable.
+
+## Verification Evidence (UI)
+- [Implemented] PoP runtime proof:
+  - Admin UI route: `/admin` (Events list) -> open `PoP Runtime Proof` / `PoP稼働証明` panel.
+  - UI fields: `enforceOnchainPop`, `signerConfigured`, `signerPubkey`, and `verification endpoint: /v1/school/pop-status`.
+  - Backing endpoint: `GET /v1/school/pop-status` (see `api-worker/src/storeDO.ts`).
+  - PoP "ready" for operation is interpreted as `enforceOnchainPop=true` and `signerConfigured=true` in this panel.
+- [Implemented] Transfer Audit (Hash Chain):
+  - Admin UI route: `/admin/events/:eventId` -> `Transfer Audit (Hash Chain)` section.
+  - Chain proof in UI: `hash: <prev> -> <current>` and `chain: <prev> -> <current>` for on-chain/off-chain records.
+  - CSV export: `CSVダウンロード` button on the same event detail screen.
+- [Restricted] Master Dashboard audit/disclosure:
+  - High-privilege surface (invite codes, audit logs, admin disclosure, indexed search) in `wene-mobile/app/master/index.tsx`.
+  - Public URL is intentionally not listed.
+  - Local-only access: run local web app and open the master route on localhost (`/master/login`), or check route list/local run output.
+  - PII handling: hidden by default (`pii: hidden`) and reveal is restricted via explicit toggle (`Show PII`) on the master screen; admin-level transfer APIs are no-PII (`strictLevel: admin_transfer_visible_no_pii` in `api-worker/src/storeDO.ts`).
 
 ## What’s Implemented Now
 
@@ -170,7 +189,8 @@ Dev-only optional path:
 ### A) Live URLs (recommended)
 - User app: `https://instant-grant-core.pages.dev/`
 - Admin login: `https://instant-grant-core.pages.dev/admin/login`
-- Master login: `https://instant-grant-core.pages.dev/master/login`
+- [Restricted] Master dashboard URL is intentionally not listed publicly in this README.
+- Local-only reviewer access: use localhost route `/master/login` after running local web app (`cd wene-mobile && npm run web`).
 
 ### B) 2-minute runtime checks
 ```bash

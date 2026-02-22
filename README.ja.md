@@ -8,9 +8,12 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 - 利用者: `https://instant-grant-core.pages.dev/`
 - 管理者: `https://instant-grant-core.pages.dev/admin/login`（デモログインコード: `83284ab4d9874e54b301dcf7ea6a6056`）
 
+**Status as of 2026-02-22**
+
 ## クイックナビ
 - [Top Summary](#top-summary)
 - [可視化サマリー](#可視化サマリー)
+- [Verification Evidence (UI)](#verification-evidence-ui)
 - [現在実装されていること](#現在実装されていること)
 - [アーキテクチャ](#アーキテクチャ)
 - [Reviewer Quickstart（10分）](#reviewer-quickstart10分)
@@ -20,8 +23,8 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 ## Top Summary
 - これは何か: 運用プロセスのログを検証可能レシートに結合し、必要時のみSolana決済へ結合する3層システムです。
 - 誰のためか: イベント参加者（学生/利用者）と、運用する管理者・運営者のための実装です。
-- [Implemented] 低摩擦の参加導線: 対応経路では wallet 不要の `Participation Ticket (off-chain Attend)` を `confirmationCode + ticketReceipt` として発行できます。
-- [Optional] `On-chain Redeem` は wallet + on-chain 設定付きイベント導線でのみ実行され、tx/receipt/Explorer 証跡もその場合のみ出力されます。
+- [Implemented] 学生/利用者の参加は、対応経路では wallet なしで完了できます（off-chain 参加券として `confirmationCode` + `ticketReceipt` を発行）。
+- [Optional] オンチェーン決済証跡は devnet の任意経路です。tx/receipt/Explorer は on-chain claim 経路を実行した場合のみ表示されます。
 - [Implemented] 説明責任ある運用: admin/master 導線で PoP/runtime 状態、送金監査ログ、権限別開示/検索を確認できます。
 - [Implemented] PoPのUI確認: 管理者イベント一覧に `PoP稼働証明` を表示し、`enforceOnchainPop` / `signerConfigured` を `/v1/school/pop-status` と紐付けて確認できます。
 - [Implemented] Hash Chain稼働UI: イベント詳細で `送金監査 (Hash Chain)` を表示し、on/off-chain の各記録で `prevHash -> entryHash` を確認できます。
@@ -58,6 +61,22 @@ flowchart LR
 
 ## なぜ重要か（課題）
 給付や学校参加の運用は最終結果だけが公開されやすく、処理過程の透明性が不足しがちなため、誰が何を実行したか・監査チェーンが整合しているか・決済証跡とどう結び付くかを第三者が検証できる形で示すことが重要です。
+
+## Verification Evidence (UI)
+- [Implemented] PoP稼働証明:
+  - 管理者UI導線: `/admin`（イベント一覧）で `PoP Runtime Proof` / `PoP稼働証明` パネルを確認。
+  - UI表示項目: `enforceOnchainPop`、`signerConfigured`、`signerPubkey`、`verification endpoint: /v1/school/pop-status`。
+  - バックエンド根拠: `GET /v1/school/pop-status`（`api-worker/src/storeDO.ts`）。
+  - 本READMEでの PoP「ready」判定は `enforceOnchainPop=true` かつ `signerConfigured=true`。
+- [Implemented] Transfer Audit (Hash Chain):
+  - 管理者UI導線: `/admin/events/:eventId` の `送金監査 (Hash Chain)` セクション。
+  - 連鎖証跡: `hash: <prev> -> <current>` / `chain: <prev> -> <current>` を on/off-chain それぞれで確認可能。
+  - CSV出力: 同じイベント詳細画面の `CSVダウンロード` ボタン。
+- [Restricted] Master Dashboard の監査/開示:
+  - 高権限機能（招待コード、監査ログ、管理者開示、検索）は `wene-mobile/app/master/index.tsx`。
+  - 公開URLは意図的に本READMEへ掲載しません。
+  - ローカル限定アクセス: ローカルWeb起動後に localhost の master ルート（`/master/login`）へアクセス、またはローカル実行出力/route list を参照。
+  - PII制御: 初期表示は `pii: hidden`、明示トグル（`Show PII`）でのみ表示。admin向け transfer API は no-PII（`api-worker/src/storeDO.ts` の `strictLevel: admin_transfer_visible_no_pii`）。
 
 ## 現在実装されていること
 
@@ -170,7 +189,8 @@ L1: Settlement（Implemented、イベント方針で任意/必須切替）
 ### A) Live URL（推奨）
 - 利用者アプリ: `https://instant-grant-core.pages.dev/`
 - 管理者ログイン: `https://instant-grant-core.pages.dev/admin/login`
-- 運営者ログイン: `https://instant-grant-core.pages.dev/master/login`
+- [Restricted] Master Dashboard の公開URLは意図的に本READMEへ掲載しません。
+- ローカル限定レビュー手順: `cd wene-mobile && npm run web` 実行後、localhost の `/master/login` を使用。
 
 ### B) 2分の稼働チェック
 ```bash
