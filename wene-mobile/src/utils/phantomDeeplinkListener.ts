@@ -82,7 +82,26 @@ export async function processPhantomUrl(url: string, source: 'event' | 'initial'
       }
     } else if (url.includes('/phantom/sign')) {
       console.log('[PhantomDeeplink] sign callback');
-      const phantomPk = usePhantomStore.getState().phantomEncryptionPublicKey;
+      let phantomPk = usePhantomStore.getState().phantomEncryptionPublicKey;
+      if (!phantomPk) {
+        try {
+          const saved = await phantomStore.loadPhantomConnectResult();
+          const restoredPk = saved?.phantomPublicKey ?? null;
+          if (restoredPk) {
+            phantomStore.setPhantomEncryptionPublicKey(restoredPk);
+            if (!useRecipientStore.getState().walletPubkey && saved?.publicKey) {
+              recipientStore.setWalletPubkey(saved.publicKey);
+            }
+            if (!useRecipientStore.getState().phantomSession && saved?.session) {
+              recipientStore.setPhantomSession(saved.session);
+            }
+            phantomPk = restoredPk;
+            console.log('[PhantomDeeplink] restored phantom public key from persisted connect result');
+          }
+        } catch (restoreErr) {
+          console.warn('[PhantomDeeplink] failed to restore persisted connect result:', restoreErr);
+        }
+      }
       const result = handleRedirect(url, dappSecretKey, phantomPk ?? undefined);
       if (result.ok) {
         console.log('[PhantomDeeplink] sign resolvePendingSignTx done');

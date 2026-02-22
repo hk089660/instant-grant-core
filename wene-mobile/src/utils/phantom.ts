@@ -523,8 +523,9 @@ export const handleRedirect = (
   }
 
   if (!phantomPublicKey) {
-    rejectPendingSignTx(new Error('Phantom public key not found'));
-    return { ok: false, error: 'Phantom public key not found' };
+    const msg = 'Phantom public key not found (再接続してから再試行してください)';
+    rejectPendingSignTx(new Error(msg));
+    return { ok: false, error: msg };
   }
 
   let nonceBytes: Uint8Array;
