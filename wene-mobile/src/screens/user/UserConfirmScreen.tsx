@@ -22,7 +22,7 @@ import { fetchSplBalance } from '../../solana/wallet';
 import { signTransaction } from '../../utils/phantom';
 import { rejectPendingSignTx } from '../../utils/phantomSignTxPending';
 import { setPhantomWebReturnPath } from '../../utils/phantomWebReturnPath';
-import { preparePhantomWebPopup } from '../../utils/phantomWebPopup';
+import { isLikelyMobileWebBrowser, preparePhantomWebPopup } from '../../utils/phantomWebPopup';
 import type { SchoolEvent } from '../../types/school';
 
 const SIGN_TIMEOUT_MS = 120_000;
@@ -289,7 +289,13 @@ export const UserConfirmScreen: React.FC = () => {
       return;
     }
 
-    if (Platform.OS === 'web' && walletReady && walletPubkey && eventHasOnchainConfig) {
+    if (
+      Platform.OS === 'web' &&
+      walletReady &&
+      walletPubkey &&
+      eventHasOnchainConfig &&
+      !isLikelyMobileWebBrowser()
+    ) {
       const prepared = preparePhantomWebPopup();
       if (!prepared) {
         setError('Phantom署名ポップアップを開けません。ブラウザでポップアップを許可して再試行してください。');

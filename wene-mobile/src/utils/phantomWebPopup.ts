@@ -4,6 +4,8 @@ let popupRef: Window | null = null;
 const canUseWindow = (): boolean =>
   typeof window !== 'undefined' && typeof window.open === 'function';
 
+const MOBILE_WEB_UA_RE = /android|iphone|ipad|ipod|mobile/i;
+
 function isPopupAlive(popup: Window | null): popup is Window {
   return Boolean(popup && !popup.closed);
 }
@@ -15,6 +17,12 @@ function openPopup(url: string): Window | null {
   } catch {
     return null;
   }
+}
+
+export function isLikelyMobileWebBrowser(): boolean {
+  if (!canUseWindow()) return false;
+  if (typeof navigator === 'undefined') return false;
+  return MOBILE_WEB_UA_RE.test(navigator.userAgent || '');
 }
 
 export function preparePhantomWebPopup(): boolean {

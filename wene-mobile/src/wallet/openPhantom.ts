@@ -1,6 +1,6 @@
 import { Linking, Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
-import { openPhantomWebPopup } from '../utils/phantomWebPopup';
+import { isLikelyMobileWebBrowser, openPhantomWebPopup } from '../utils/phantomWebPopup';
 
 export interface OpenPhantomOptions {
   /**
@@ -43,6 +43,16 @@ export async function openPhantomConnect(url: string, options: OpenPhantomOption
     typeof window !== 'undefined' &&
     typeof window.open === 'function'
   ) {
+    if (isLikelyMobileWebBrowser()) {
+      // モバイルWebはまず同一タブの universal link を優先（OSがPhantomアプリへ遷移しやすい）
+      try {
+        await Linking.openURL(url);
+        console.log('[openPhantomConnect] mobile-web direct deeplink succeeded');
+        return;
+      } catch (e) {
+        console.warn('[openPhantomConnect] mobile-web direct deeplink failed, fallback popup:', e);
+      }
+    }
     const opened = openPhantomWebPopup(url);
     if (opened) {
       console.log('[openPhantomConnect] web popup open/reuse succeeded');
