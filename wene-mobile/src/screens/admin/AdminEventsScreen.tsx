@@ -1,38 +1,56 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AppText, Button, CountBadge, EventRow, AdminShell, StatusBadge, Loading } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
-import { fetchAdminEvents } from '../../api/adminApi';
+import { fetchAdminEvents, fetchPopStatus, type PopStatusResponse } from '../../api/adminApi';
 import type { SchoolEvent } from '../../types/school';
+import { copyTextWithFeedback } from '../../utils/copyText';
 
 export const AdminEventsScreen: React.FC = () => {
   const router = useRouter();
   const [events, setEvents] = useState<SchoolEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [popStatus, setPopStatus] = useState<PopStatusResponse | null>(null);
+  const [popStatusLoading, setPopStatusLoading] = useState(true);
+  const [popStatusError, setPopStatusError] = useState<string | null>(null);
+  const [popStatusCheckedAt, setPopStatusCheckedAt] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     setLoading(true);
     setError(null);
+    setPopStatusLoading(true);
+    setPopStatusError(null);
 
-    fetchAdminEvents()
-      .then((items) => {
-        if (!cancelled) {
-          setEvents(items);
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : '読み込みに失敗しました。再読み込みしてください。');
+    Promise.allSettled([
+      fetchAdminEvents(),
+      fetchPopStatus(),
+    ])
+      .then(([eventsResult, popResult]) => {
+        if (cancelled) return;
+
+        if (eventsResult.status === 'fulfilled') {
+          setEvents(eventsResult.value);
+        } else {
+          setError(eventsResult.reason instanceof Error ? eventsResult.reason.message : '読み込みに失敗しました。再読み込みしてください。');
           setEvents([]);
+        }
+
+        if (popResult.status === 'fulfilled') {
+          setPopStatus(popResult.value);
+          setPopStatusCheckedAt(new Date().toISOString());
+        } else {
+          setPopStatus(null);
+          setPopStatusError(popResult.reason instanceof Error ? popResult.reason.message : 'PoP状態の取得に失敗しました。');
         }
       })
       .finally(() => {
         if (!cancelled) {
           setLoading(false);
+          setPopStatusLoading(false);
         }
       });
 
@@ -44,19 +62,51 @@ export const AdminEventsScreen: React.FC = () => {
   const handleRetry = () => {
     setLoading(true);
     setError(null);
+    setPopStatusLoading(true);
+    setPopStatusError(null);
 
-    fetchAdminEvents()
-      .then((items) => {
-        setEvents(items);
-      })
-      .catch((e) => {
-        setError(e instanceof Error ? e.message : '読み込みに失敗しました。再読み込みしてください。');
-        setEvents([]);
+    Promise.allSettled([
+      fetchAdminEvents(),
+      fetchPopStatus(),
+    ])
+      .then(([eventsResult, popResult]) => {
+        if (eventsResult.status === 'fulfilled') {
+          setEvents(eventsResult.value);
+        } else {
+          setError(eventsResult.reason instanceof Error ? eventsResult.reason.message : '読み込みに失敗しました。再読み込みしてください。');
+          setEvents([]);
+        }
+
+        if (popResult.status === 'fulfilled') {
+          setPopStatus(popResult.value);
+          setPopStatusCheckedAt(new Date().toISOString());
+        } else {
+          setPopStatus(null);
+          setPopStatusError(popResult.reason instanceof Error ? popResult.reason.message : 'PoP状態の取得に失敗しました。');
+        }
       })
       .finally(() => {
         setLoading(false);
+        setPopStatusLoading(false);
       });
   };
+
+  const handleCopyPopStatus = useCallback(async () => {
+    if (!popStatus) return;
+    const payload = [
+      'PoP Runtime Proof',
+      `checkedAt: ${popStatusCheckedAt ?? '-'}`,
+      `enforceOnchainPop: ${String(popStatus.enforceOnchainPop)}`,
+      `signerConfigured: ${String(popStatus.signerConfigured)}`,
+      `signerPubkey: ${popStatus.signerPubkey ?? '-'}`,
+      `error: ${popStatus.error ?? '-'}`,
+      'endpoint: /v1/school/pop-status',
+    ].join('\n');
+
+    await copyTextWithFeedback(payload, {
+      successMessage: 'PoP稼働情報をコピーしました',
+    });
+  }, [popStatus, popStatusCheckedAt]);
 
   return (
     <AdminShell title="イベント一覧" role="admin">
@@ -76,6 +126,77 @@ export const AdminEventsScreen: React.FC = () => {
           <AppText variant="body" style={styles.teacherMessageText}>
             当日は Published のイベントを開いて『印刷用PDF』を出力 → 受付に掲示してください
           </AppText>
+        </View>
+
+        <View style={styles.popCard}>
+          <View style={styles.popHeader}>
+            <AppText variant="h3" style={styles.popTitle}>
+              PoP稼働証明
+            </AppText>
+            <Button
+              title={popStatusLoading ? '確認中…' : '再確認'}
+              variant="secondary"
+              dark
+              onPress={handleRetry}
+              disabled={popStatusLoading}
+              style={styles.popRefreshButton}
+            />
+          </View>
+
+          {popStatusLoading ? (
+            <AppText variant="small" style={styles.popMuted}>
+              PoP状態を確認中です...
+            </AppText>
+          ) : popStatusError ? (
+            <AppText variant="small" style={styles.errorText}>
+              {popStatusError}
+            </AppText>
+          ) : popStatus ? (
+            <>
+              <AppText
+                variant="body"
+                style={popStatus.enforceOnchainPop && popStatus.signerConfigured ? styles.popOkText : styles.popWarnText}
+              >
+                {popStatus.enforceOnchainPop && popStatus.signerConfigured
+                  ? 'PoPは稼働中です（on-chain強制 + 署名者設定済み）'
+                  : 'PoP設定が未完了です'}
+              </AppText>
+              <AppText variant="small" style={styles.popMuted}>
+                enforceOnchainPop: {String(popStatus.enforceOnchainPop)}
+              </AppText>
+              <AppText variant="small" style={styles.popMuted}>
+                signerConfigured: {String(popStatus.signerConfigured)}
+              </AppText>
+              {popStatus.signerPubkey ? (
+                <AppText variant="small" style={styles.popMono} selectable>
+                  signerPubkey: {popStatus.signerPubkey}
+                </AppText>
+              ) : null}
+              {popStatus.error ? (
+                <AppText variant="small" style={styles.errorText}>
+                  error: {popStatus.error}
+                </AppText>
+              ) : null}
+              <AppText variant="small" style={styles.popMuted}>
+                checkedAt: {popStatusCheckedAt ?? '-'}
+              </AppText>
+              <AppText variant="small" style={styles.popMuted}>
+                verification endpoint: /v1/school/pop-status
+              </AppText>
+              <Button
+                title="PoP情報をコピー"
+                variant="secondary"
+                dark
+                size="medium"
+                onPress={handleCopyPopStatus}
+                style={styles.popCopyButton}
+              />
+            </>
+          ) : (
+            <AppText variant="small" style={styles.popMuted}>
+              PoP状態を取得できませんでした
+            </AppText>
+          )}
         </View>
 
         <View style={styles.list}>
@@ -174,6 +295,48 @@ const styles = StyleSheet.create({
   },
   teacherMessageText: {
     color: adminTheme.colors.text,
+  },
+  popCard: {
+    backgroundColor: adminTheme.colors.surface,
+    borderRadius: adminTheme.radius.md,
+    padding: adminTheme.spacing.md,
+    marginBottom: adminTheme.spacing.lg,
+    borderWidth: 1,
+    borderColor: adminTheme.colors.border,
+  },
+  popHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: adminTheme.spacing.sm,
+  },
+  popTitle: {
+    color: adminTheme.colors.text,
+  },
+  popRefreshButton: {
+    minWidth: 100,
+  },
+  popOkText: {
+    color: '#00c853',
+    marginBottom: adminTheme.spacing.xs,
+  },
+  popWarnText: {
+    color: '#ffb300',
+    marginBottom: adminTheme.spacing.xs,
+  },
+  popMuted: {
+    color: adminTheme.colors.textSecondary,
+    marginTop: 2,
+  },
+  popMono: {
+    color: adminTheme.colors.text,
+    marginTop: adminTheme.spacing.xs,
+    fontFamily: 'monospace',
+  },
+  popCopyButton: {
+    marginTop: adminTheme.spacing.sm,
+    alignSelf: 'flex-start',
+    minWidth: 140,
   },
   list: {
     backgroundColor: adminTheme.colors.surface,

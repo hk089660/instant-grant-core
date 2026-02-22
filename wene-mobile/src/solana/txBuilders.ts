@@ -191,6 +191,7 @@ export interface BuildClaimTxResult {
     mint: PublicKey;
     popProofAuditHash: string;
     popProofEntryHash: string;
+    popProofSignerPubkey: string;
   };
 }
 
@@ -410,6 +411,7 @@ export async function buildClaimTx(
       mint,
       popProofAuditHash: popProof.auditHash,
       popProofEntryHash: popProof.entryHash,
+      popProofSignerPubkey: popProof.signerPubkey,
     },
   };
 }

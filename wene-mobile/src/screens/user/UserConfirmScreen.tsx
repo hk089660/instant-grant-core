@@ -112,7 +112,14 @@ export const UserConfirmScreen: React.FC = () => {
     }
   }, []);
 
-  const runOnchainClaim = useCallback(async (): Promise<{ txSignature: string; receiptPubkey: string; mint: string }> => {
+  const runOnchainClaim = useCallback(async (): Promise<{
+    txSignature: string;
+    receiptPubkey: string;
+    mint: string;
+    popEntryHash: string;
+    popAuditHash: string;
+    popSigner: string;
+  }> => {
     if (!targetEventId || !event) {
       throw new Error('イベント情報が不足しています');
     }
@@ -169,6 +176,9 @@ export const UserConfirmScreen: React.FC = () => {
           txSignature,
           receiptPubkey: built.meta.receiptPda.toBase58(),
           mint: built.meta.mint.toBase58(),
+          popEntryHash: built.meta.popProofEntryHash,
+          popAuditHash: built.meta.popProofAuditHash,
+          popSigner: built.meta.popProofSignerPubkey,
         };
       } catch (sendError) {
         const msg = sendError instanceof Error ? sendError.message : String(sendError);
@@ -251,6 +261,9 @@ export const UserConfirmScreen: React.FC = () => {
       let txSignature: string | undefined;
       let receiptPubkey: string | undefined;
       let distributedMint: string | undefined;
+      let popEntryHash: string | undefined;
+      let popAuditHash: string | undefined;
+      let popSigner: string | undefined;
       let tokenReflectedInWallet = false;
       let onchainBlockedByPeriod = false;
       let result: Awaited<ReturnType<typeof claimEventWithUser>> | null = null;
@@ -274,6 +287,9 @@ export const UserConfirmScreen: React.FC = () => {
           txSignature = onchain.txSignature;
           receiptPubkey = onchain.receiptPubkey;
           distributedMint = onchain.mint;
+          popEntryHash = onchain.popEntryHash;
+          popAuditHash = onchain.popAuditHash;
+          popSigner = onchain.popSigner;
           tokenReflectedInWallet = await waitForMintReflection(onchain.mint, ownerWallet);
         } catch (onchainError) {
           const storedTicket = getTicketByEventId(targetEventId);
@@ -291,6 +307,9 @@ export const UserConfirmScreen: React.FC = () => {
           if (storedTicket?.txSignature) {
             txSignature = storedTicket.txSignature;
             receiptPubkey = storedTicket.receiptPubkey;
+            popEntryHash = storedTicket.popEntryHash;
+            popAuditHash = storedTicket.popAuditHash;
+            popSigner = storedTicket.popSigner;
           }
           distributedMint = event.solanaMint ?? undefined;
           if (__DEV__) {
@@ -350,6 +369,9 @@ export const UserConfirmScreen: React.FC = () => {
           mint: distributedMint,
           reflected: tokenReflectedInWallet,
           onchainBlocked: onchainBlockedByPeriod,
+          popEntryHash,
+          popAuditHash,
+          popSigner,
         }) as any
       );
     } catch (e: unknown) {

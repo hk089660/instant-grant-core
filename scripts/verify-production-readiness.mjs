@@ -58,6 +58,17 @@ async function fetchJsonWithAuth(url, token, expectedStatus = 200) {
   return json;
 }
 
+async function fetchWithStatus(url, expectedStatus, options = {}) {
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    ...options,
+  });
+  if (res.status !== expectedStatus) {
+    throw new Error(`unexpected status ${res.status} (expected ${expectedStatus})`);
+  }
+  return res;
+}
+
 async function main() {
   console.log('=== Asuka/We-ne Production Readiness Check ===');
   console.log(`WORKER_BASE_URL=${WORKER_BASE_URL}`);
@@ -112,8 +123,61 @@ async function main() {
     } catch (err) {
       addResult(false, 'Audit integrity (master)', err instanceof Error ? err.message : String(err));
     }
+
+    try {
+      const adminTransfers = await fetchJsonWithAuth(`${WORKER_BASE_URL}/api/admin/transfers?limit=20`, MASTER_TOKEN);
+      const ok =
+        adminTransfers.roleView === 'admin' &&
+        adminTransfers.strictLevel === 'admin_transfer_visible_no_pii' &&
+        Array.isArray(adminTransfers.items);
+      addResult(ok, 'Admin transfers view (master token)', JSON.stringify({
+        roleView: adminTransfers.roleView,
+        strictLevel: adminTransfers.strictLevel,
+        count: Array.isArray(adminTransfers.items) ? adminTransfers.items.length : -1,
+      }));
+    } catch (err) {
+      addResult(false, 'Admin transfers view (master token)', err instanceof Error ? err.message : String(err));
+    }
+
+    try {
+      const masterTransfers = await fetchJsonWithAuth(`${WORKER_BASE_URL}/api/master/transfers?limit=20`, MASTER_TOKEN);
+      const ok =
+        masterTransfers.roleView === 'master' &&
+        masterTransfers.strictLevel === 'master_full' &&
+        Array.isArray(masterTransfers.items);
+      addResult(ok, 'Master transfers view', JSON.stringify({
+        roleView: masterTransfers.roleView,
+        strictLevel: masterTransfers.strictLevel,
+        count: Array.isArray(masterTransfers.items) ? masterTransfers.items.length : -1,
+      }));
+    } catch (err) {
+      addResult(false, 'Master transfers view', err instanceof Error ? err.message : String(err));
+    }
+
+    try {
+      const pagesAdminTransfers = await fetchJsonWithAuth(`${PAGES_BASE_URL}/api/admin/transfers?limit=20`, MASTER_TOKEN);
+      const ok = pagesAdminTransfers.roleView === 'admin' && Array.isArray(pagesAdminTransfers.items);
+      addResult(ok, 'Pages proxy admin transfers', JSON.stringify({
+        roleView: pagesAdminTransfers.roleView,
+        count: Array.isArray(pagesAdminTransfers.items) ? pagesAdminTransfers.items.length : -1,
+      }));
+    } catch (err) {
+      addResult(false, 'Pages proxy admin transfers', err instanceof Error ? err.message : String(err));
+    }
   } else {
     addResult(true, 'Audit integrity (master)', 'skipped (set MASTER_TOKEN to enable)');
+    addResult(true, 'Admin transfers view (master token)', 'skipped (set MASTER_TOKEN to enable)');
+    addResult(true, 'Master transfers view', 'skipped (set MASTER_TOKEN to enable)');
+    addResult(true, 'Pages proxy admin transfers', 'skipped (set MASTER_TOKEN to enable)');
+  }
+
+  try {
+    await fetchWithStatus(`${WORKER_BASE_URL}/api/master/transfers?limit=1`, 401, {
+      headers: { Accept: 'application/json' },
+    });
+    addResult(true, 'Master transfers unauthorized check', '401 without token');
+  } catch (err) {
+    addResult(false, 'Master transfers unauthorized check', err instanceof Error ? err.message : String(err));
   }
 
   const failed = results.some((r) => !r.ok);

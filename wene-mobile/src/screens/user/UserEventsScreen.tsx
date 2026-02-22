@@ -57,6 +57,9 @@ export const UserEventsScreen: React.FC = () => {
         schoolRoutes.success(event.id, {
           tx: joinedTicket?.txSignature,
           receipt: joinedTicket?.receiptPubkey,
+          popEntryHash: joinedTicket?.popEntryHash,
+          popAuditHash: joinedTicket?.popAuditHash,
+          popSigner: joinedTicket?.popSigner,
         }) as any
       );
     },

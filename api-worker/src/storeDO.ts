@@ -15,13 +15,19 @@ import { canonicalize, sha256Hex } from './audit/hash';
 import { parseAuditImmutableMode, persistImmutableAuditEntry } from './audit/immutable';
 
 const USER_PREFIX = 'user:';
+const ADMIN_CODE_PREFIX = 'admin_code:';
+const EVENT_OWNER_PREFIX = 'event_owner:';
 
 function userKey(userId: string): string {
   return USER_PREFIX + userId;
 }
 
 function adminCodeKey(code: string): string {
-  return 'admin_code:' + code;
+  return ADMIN_CODE_PREFIX + code;
+}
+
+function eventOwnerKey(eventId: string): string {
+  return EVENT_OWNER_PREFIX + eventId;
 }
 
 async function hashPin(pin: string): Promise<string> {
@@ -72,6 +78,10 @@ const AUDIT_INTEGRITY_DEFAULT_LIMIT = 50;
 const AUDIT_INTEGRITY_MAX_LIMIT = 200;
 const IMMUTABLE_AUDIT_SOURCE = 'school-store';
 const TOKEN_IMAGE_URL = 'https://instant-grant-core.pages.dev/ticket-token.png';
+const MASTER_SEARCH_INDEX_TTL_MS = 30_000;
+const MASTER_SEARCH_SQL_KEEP_KEYS = 5;
+const MASTER_SEARCH_SQL_TERM_DOC_LIMIT = 4000;
+const MASTER_SEARCH_SQL_DOC_CHUNK_SIZE = 250;
 
 type AuditIntegrityIssue = {
   code: string;
@@ -110,6 +120,151 @@ type RuntimeStatusReport = {
   };
   blockingIssues: string[];
   warnings: string[];
+};
+
+type TransferParty = {
+  type: string;
+  id: string;
+};
+
+type TransferAuditPayload = {
+  mode: 'onchain' | 'offchain';
+  asset: 'ticket_token';
+  amount: number | null;
+  mint: string | null;
+  txSignature: string | null;
+  receiptPubkey: string | null;
+  sender: TransferParty;
+  recipient: TransferParty;
+};
+
+type TransferLogView = {
+  ts: string;
+  event: string;
+  eventId: string;
+  entryHash: string;
+  prevHash: string;
+  streamPrevHash: string;
+  transfer: TransferAuditPayload;
+  pii?: Record<string, string>;
+};
+
+type TransferLogRoleView = 'admin' | 'master';
+
+type AdminCodeRecord = {
+  adminId: string;
+  name: string;
+  createdAt: string;
+  source: 'invite';
+  revokedAt: string | null;
+  revokedBy: string | null;
+};
+
+type OperatorIdentity = {
+  role: 'master' | 'admin';
+  source: 'master' | 'invite' | 'demo';
+  token: string;
+  adminId: string;
+  name: string;
+  actorId: string;
+  code?: string;
+};
+
+type EventOwnerRecord = {
+  adminId: string;
+  name: string;
+  source: 'master' | 'invite' | 'demo';
+  linkedAt: string;
+};
+
+type MasterAdminDisclosureEvent = {
+  id: string;
+  title: string;
+  datetime: string;
+  host: string;
+  state: string;
+  claimedCount: number;
+  ownerSource: 'master' | 'invite' | 'demo' | 'inferred';
+};
+
+type MasterAdminDisclosureUserClaim = {
+  ts: string;
+  eventId: string;
+  eventTitle: string | null;
+  transfer: TransferAuditPayload;
+  pii?: Record<string, string>;
+};
+
+type MasterAdminDisclosureUser = {
+  key: string;
+  userId: string | null;
+  displayName: string | null;
+  walletAddress: string | null;
+  joinToken: string | null;
+  recipientType: string;
+  recipientId: string;
+  eventIds: string[];
+  claims: MasterAdminDisclosureUserClaim[];
+};
+
+type MasterAdminDisclosure = {
+  adminId: string;
+  code: string;
+  name: string;
+  createdAt: string;
+  status: 'active' | 'revoked';
+  revokedAt: string | null;
+  events: MasterAdminDisclosureEvent[];
+  relatedTransferCount: number;
+  relatedUsers: MasterAdminDisclosureUser[];
+};
+
+type MasterAdminDisclosuresResponse = {
+  checkedAt: string;
+  strictLevel: 'master_full';
+  includeRevoked: boolean;
+  transferLimit: number;
+  admins: MasterAdminDisclosure[];
+};
+
+type MasterSearchKind = 'admin' | 'event' | 'user' | 'claim';
+
+type MasterSearchResultItem = {
+  id: string;
+  kind: MasterSearchKind;
+  title: string;
+  subtitle: string;
+  detail: string;
+};
+
+type MasterSearchIndexDocument = MasterSearchResultItem & {
+  searchText: string;
+};
+
+type MasterSearchIndexCache = {
+  key: string;
+  builtAtMs: number;
+  builtAt: string;
+  docs: MasterSearchIndexDocument[];
+  tokenToDocIds: Map<string, number[]>;
+};
+
+type MasterSearchSqlIndexMeta = {
+  key: string;
+  builtAtMs: number;
+  builtAt: string;
+};
+
+type MasterSearchResponse = {
+  checkedAt: string;
+  strictLevel: 'master_full';
+  query: string;
+  includeRevoked: boolean;
+  transferLimit: number;
+  limit: number;
+  total: number;
+  indexBuiltAt: string | null;
+  items: MasterSearchResultItem[];
 };
 
 function buildTokenSymbol(title: string): string {
@@ -233,6 +388,9 @@ export class SchoolStore implements DurableObject {
     | { secretKey: Uint8Array; signerPubkey: string }
     | null
     | undefined;
+  private masterSearchIndexCache: MasterSearchIndexCache | null = null;
+  private masterSearchSqlMetaCache: MasterSearchSqlIndexMeta | null = null;
+  private masterSearchSqlTablesReady = false;
 
   private getPopSigner(): { secretKey: Uint8Array; signerPubkey: string } | null {
     if (this.popSignerCache !== undefined) return this.popSignerCache;
@@ -523,6 +681,66 @@ export class SchoolStore implements DurableObject {
     return token || null;
   }
 
+  private parseAdminCodeRecord(code: string, raw: unknown): (AdminCodeRecord & { code: string }) | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const nameRaw = typeof obj.name === 'string' ? obj.name.trim() : '';
+    const createdAtRaw = typeof obj.createdAt === 'string' ? obj.createdAt.trim() : '';
+    const adminIdRaw = typeof obj.adminId === 'string' ? obj.adminId.trim() : '';
+    const revokedAtRaw = typeof obj.revokedAt === 'string' ? obj.revokedAt.trim() : '';
+    const revokedByRaw = typeof obj.revokedBy === 'string' ? obj.revokedBy.trim() : '';
+    return {
+      code,
+      adminId: adminIdRaw || `legacy-${code.slice(0, 12)}`,
+      name: nameRaw || 'Unknown Admin',
+      createdAt: createdAtRaw || new Date(0).toISOString(),
+      source: 'invite',
+      revokedAt: revokedAtRaw || null,
+      revokedBy: revokedByRaw || null,
+    };
+  }
+
+  private async findAdminCodeByAdminId(adminId: string): Promise<string | null> {
+    const needle = adminId.trim();
+    if (!needle) return null;
+    const rows = await this.ctx.storage.list({ prefix: ADMIN_CODE_PREFIX });
+    for (const [key, value] of rows.entries()) {
+      const code = key.slice(ADMIN_CODE_PREFIX.length);
+      const parsed = this.parseAdminCodeRecord(code, value);
+      if (!parsed) continue;
+      if (parsed.adminId === needle) return code;
+    }
+    return null;
+  }
+
+  private operatorToEventOwner(operator: OperatorIdentity): EventOwnerRecord {
+    return {
+      adminId: operator.adminId,
+      name: operator.name,
+      source: operator.source,
+      linkedAt: new Date().toISOString(),
+    };
+  }
+
+  private async getEventOwnerRecord(eventId: string): Promise<EventOwnerRecord | null> {
+    const raw = await this.ctx.storage.get(eventOwnerKey(eventId));
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const adminId = typeof obj.adminId === 'string' ? obj.adminId.trim() : '';
+    if (!adminId) return null;
+    const sourceRaw = typeof obj.source === 'string' ? obj.source.trim() : '';
+    const source: EventOwnerRecord['source'] =
+      sourceRaw === 'master' || sourceRaw === 'demo' || sourceRaw === 'invite'
+        ? sourceRaw
+        : 'invite';
+    return {
+      adminId,
+      name: typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim() : 'Unknown Admin',
+      source,
+      linkedAt: typeof obj.linkedAt === 'string' && obj.linkedAt.trim() ? obj.linkedAt.trim() : new Date(0).toISOString(),
+    };
+  }
+
   private getConfiguredMasterPassword(): string | null {
     const password = this.env.ADMIN_PASSWORD?.trim() ?? '';
     if (!password || password === DEFAULT_ADMIN_PASSWORD) return null;
@@ -544,23 +762,46 @@ export class SchoolStore implements DurableObject {
 
   private async authenticateOperator(
     request: Request
-  ): Promise<{ role: 'master' | 'admin'; source: 'master' | 'invite' | 'demo' } | null> {
+  ): Promise<OperatorIdentity | null> {
     const token = this.extractBearerToken(request);
     if (!token) return null;
 
     const masterPassword = this.getConfiguredMasterPassword();
     if (masterPassword && token === masterPassword) {
-      return { role: 'master', source: 'master' };
+      return {
+        role: 'master',
+        source: 'master',
+        token,
+        adminId: 'master',
+        name: 'Master Operator',
+        actorId: 'master',
+      };
     }
 
     const demoPassword = this.getConfiguredDemoPassword();
     if (demoPassword && token === demoPassword) {
-      return { role: 'admin', source: 'demo' };
+      return {
+        role: 'admin',
+        source: 'demo',
+        token,
+        adminId: 'demo-admin',
+        name: 'Demo Admin',
+        actorId: 'admin:demo-admin',
+      };
     }
 
-    const adminData = await this.ctx.storage.get(adminCodeKey(token));
-    if (adminData) {
-      return { role: 'admin', source: 'invite' };
+    const adminDataRaw = await this.ctx.storage.get(adminCodeKey(token));
+    const adminData = this.parseAdminCodeRecord(token, adminDataRaw);
+    if (adminData && !adminData.revokedAt) {
+      return {
+        role: 'admin',
+        source: 'invite',
+        token,
+        adminId: adminData.adminId,
+        name: adminData.name,
+        actorId: `admin:${adminData.adminId}`,
+        code: token,
+      };
     }
 
     return null;
@@ -1106,6 +1347,984 @@ export class SchoolStore implements DurableObject {
     return `${trimmed.slice(0, 4)}...${trimmed.slice(-4)}`;
   }
 
+  private normalizeStringField(raw: unknown): string | null {
+    if (typeof raw !== 'string') return null;
+    const normalized = raw.trim();
+    return normalized || null;
+  }
+
+  private normalizeNumberField(raw: unknown): number | null {
+    if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+    if (typeof raw === 'string' && raw.trim() && /^-?\d+(\.\d+)?$/.test(raw.trim())) {
+      const parsed = Number(raw.trim());
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  }
+
+  private normalizeTransferParty(raw: unknown): TransferParty | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const type = this.normalizeStringField(obj.type);
+    const id = this.normalizeStringField(obj.id);
+    if (!type || !id) return null;
+    return { type, id };
+  }
+
+  private buildClaimTransferPayload(params: {
+    eventId: string;
+    event: {
+      solanaAuthority?: unknown;
+      solanaMint?: unknown;
+      ticketTokenAmount?: unknown;
+    };
+    recipient: TransferParty;
+    txSignature?: unknown;
+    receiptPubkey?: unknown;
+  }): TransferAuditPayload {
+    const senderId = this.normalizeStringField(params.event.solanaAuthority) ?? `grant:${params.eventId}`;
+    const txSignature = this.normalizeStringField(params.txSignature);
+    return {
+      mode: txSignature ? 'onchain' : 'offchain',
+      asset: 'ticket_token',
+      amount: this.normalizeNumberField(params.event.ticketTokenAmount),
+      mint: this.normalizeStringField(params.event.solanaMint),
+      txSignature,
+      receiptPubkey: this.normalizeStringField(params.receiptPubkey),
+      sender: { type: 'grant_authority', id: senderId },
+      recipient: params.recipient,
+    };
+  }
+
+  private parseStructuredTransferPayload(data: Record<string, unknown>): TransferAuditPayload | null {
+    const transferRaw = data.transfer;
+    if (!transferRaw || typeof transferRaw !== 'object') return null;
+    const transferObj = transferRaw as Record<string, unknown>;
+
+    const sender = this.normalizeTransferParty(transferObj.sender);
+    const recipient = this.normalizeTransferParty(transferObj.recipient);
+    if (!sender || !recipient) return null;
+
+    const modeRaw = this.normalizeStringField(transferObj.mode);
+    const mode = modeRaw === 'onchain' ? 'onchain' : 'offchain';
+    const assetRaw = this.normalizeStringField(transferObj.asset);
+    const asset = assetRaw === 'ticket_token' ? 'ticket_token' : 'ticket_token';
+    const amount = this.normalizeNumberField(transferObj.amount);
+
+    return {
+      mode,
+      asset,
+      amount,
+      mint: this.normalizeStringField(transferObj.mint),
+      txSignature: this.normalizeStringField(transferObj.txSignature),
+      receiptPubkey: this.normalizeStringField(transferObj.receiptPubkey),
+      sender,
+      recipient,
+    };
+  }
+
+  private parseLegacyTransferPayload(entry: AuditEvent): TransferAuditPayload | null {
+    const data = (entry.data ?? {}) as Record<string, unknown>;
+    const senderId =
+      this.normalizeStringField(data.solanaAuthority) ??
+      this.normalizeStringField(data.authority) ??
+      `grant:${entry.eventId}`;
+    const mint = this.normalizeStringField(data.solanaMint);
+    const amount = this.normalizeNumberField(data.ticketTokenAmount);
+    const txSignature = this.normalizeStringField(data.txSignature);
+    const receiptPubkey = this.normalizeStringField(data.receiptPubkey);
+    const mode: 'onchain' | 'offchain' = txSignature ? 'onchain' : 'offchain';
+
+    if (entry.event === 'WALLET_CLAIM') {
+      const walletAddress = this.normalizeStringField(data.walletAddress);
+      const joinToken = this.normalizeStringField(data.joinToken);
+      const recipientId = walletAddress ?? joinToken;
+      if (!recipientId) return null;
+      return {
+        mode,
+        asset: 'ticket_token',
+        amount,
+        mint,
+        txSignature,
+        receiptPubkey,
+        sender: { type: 'grant_authority', id: senderId },
+        recipient: { type: walletAddress ? 'wallet' : 'join_token', id: recipientId },
+      };
+    }
+
+    if (entry.event === 'USER_CLAIM') {
+      const walletAddress = this.normalizeStringField(data.walletAddress);
+      const userId =
+        this.normalizeStringField(data.userId) ??
+        this.normalizeStringField(entry.actor?.id) ??
+        'unknown';
+      return {
+        mode,
+        asset: 'ticket_token',
+        amount,
+        mint,
+        txSignature,
+        receiptPubkey,
+        sender: { type: 'grant_authority', id: senderId },
+        recipient: { type: walletAddress ? 'wallet' : 'user', id: walletAddress ?? userId },
+      };
+    }
+
+    return null;
+  }
+
+  private extractTransferPii(data: Record<string, unknown>): Record<string, string> | undefined {
+    const out: Record<string, string> = {};
+    const piiRaw = data.pii;
+    if (piiRaw && typeof piiRaw === 'object') {
+      for (const [key, value] of Object.entries(piiRaw as Record<string, unknown>)) {
+        const normalized = this.normalizeStringField(value);
+        if (normalized) out[key] = normalized;
+      }
+    }
+
+    const legacyKeys = ['walletAddress', 'joinToken', 'userId', 'displayName'];
+    for (const key of legacyKeys) {
+      const normalized = this.normalizeStringField(data[key]);
+      if (normalized) out[key] = normalized;
+    }
+
+    return Object.keys(out).length > 0 ? out : undefined;
+  }
+
+  private toTransferLogView(entry: AuditEvent): TransferLogView | null {
+    const data = (entry.data ?? {}) as Record<string, unknown>;
+    const transfer =
+      this.parseStructuredTransferPayload(data) ??
+      this.parseLegacyTransferPayload(entry);
+    if (!transfer) return null;
+
+    return {
+      ts: entry.ts,
+      event: entry.event,
+      eventId: entry.eventId,
+      entryHash: entry.entry_hash,
+      prevHash: entry.prev_hash,
+      streamPrevHash: entry.stream_prev_hash ?? 'GENESIS',
+      transfer,
+      pii: this.extractTransferPii(data),
+    };
+  }
+
+  private applyTransferRoleView(view: TransferLogView, role: TransferLogRoleView): TransferLogView {
+    if (role === 'master') {
+      return view;
+    }
+
+    return {
+      ...view,
+      pii: undefined,
+    };
+  }
+
+  private async getTransferLogs(role: TransferLogRoleView, options: {
+    limit: number;
+    eventId?: string | null;
+  }): Promise<TransferLogView[]> {
+    const eventIdFilter = options.eventId?.trim() || null;
+    const scanLimit = Math.min(1000, Math.max(options.limit * 6, options.limit));
+    const rows = await this.ctx.storage.list({
+      prefix: AUDIT_HISTORY_PREFIX,
+      limit: scanLimit,
+      reverse: true,
+    });
+
+    const items: TransferLogView[] = [];
+    for (const value of rows.values()) {
+      if (!value || typeof value !== 'object') continue;
+      const entry = value as AuditEvent;
+      const view = this.toTransferLogView(entry);
+      if (!view) continue;
+      if (eventIdFilter && view.eventId !== eventIdFilter) continue;
+      items.push(this.applyTransferRoleView(view, role));
+      if (items.length >= options.limit) break;
+    }
+    return items;
+  }
+
+  private async getMasterAdminDisclosures(options: {
+    includeRevoked: boolean;
+    transferLimit: number;
+  }): Promise<MasterAdminDisclosuresResponse> {
+    const adminRows = await this.ctx.storage.list({ prefix: ADMIN_CODE_PREFIX });
+    const parsedAdmins: Array<AdminCodeRecord & { code: string }> = [];
+    for (const [key, value] of adminRows.entries()) {
+      const code = key.slice(ADMIN_CODE_PREFIX.length);
+      const parsed = this.parseAdminCodeRecord(code, value);
+      if (!parsed) continue;
+      if (!options.includeRevoked && parsed.revokedAt) continue;
+      parsedAdmins.push(parsed);
+    }
+    parsedAdmins.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+    type RelatedUserAccumulator = {
+      key: string;
+      userId: string | null;
+      displayName: string | null;
+      walletAddress: string | null;
+      joinToken: string | null;
+      recipientType: string;
+      recipientId: string;
+      claims: MasterAdminDisclosureUserClaim[];
+    };
+
+    type AdminAccumulator = {
+      profile: Omit<MasterAdminDisclosure, 'relatedUsers'>;
+      relatedUsers: Map<string, RelatedUserAccumulator>;
+    };
+
+    const admins = new Map<string, AdminAccumulator>();
+    const adminNameIndex = new Map<string, string[]>();
+    for (const admin of parsedAdmins) {
+      const normalizedName = admin.name.trim().toLowerCase();
+      if (normalizedName) {
+        const bucket = adminNameIndex.get(normalizedName);
+        if (bucket) bucket.push(admin.adminId);
+        else adminNameIndex.set(normalizedName, [admin.adminId]);
+      }
+      admins.set(admin.adminId, {
+        profile: {
+          adminId: admin.adminId,
+          code: admin.code,
+          name: admin.name,
+          createdAt: admin.createdAt,
+          status: admin.revokedAt ? 'revoked' : 'active',
+          revokedAt: admin.revokedAt,
+          events: [],
+          relatedTransferCount: 0,
+        },
+        relatedUsers: new Map<string, RelatedUserAccumulator>(),
+      });
+    }
+
+    const events = await this.store.getEvents();
+    const eventOwnerById = new Map<string, string>();
+    const eventTitleById = new Map<string, string>();
+
+    for (const event of events) {
+      eventTitleById.set(event.id, event.title);
+      const explicitOwner = await this.getEventOwnerRecord(event.id);
+      let ownerAdminId: string | null = explicitOwner?.adminId ?? null;
+      let ownerSource: MasterAdminDisclosureEvent['ownerSource'] = explicitOwner
+        ? explicitOwner.source
+        : 'inferred';
+
+      if (!ownerAdminId) {
+        const normalizedHost = event.host.trim().toLowerCase();
+        const matchedAdminIds = adminNameIndex.get(normalizedHost) ?? [];
+        if (matchedAdminIds.length === 1) {
+          ownerAdminId = matchedAdminIds[0];
+          ownerSource = 'inferred';
+        }
+      }
+
+      if (!ownerAdminId) continue;
+      const adminBucket = admins.get(ownerAdminId);
+      if (!adminBucket) continue;
+
+      eventOwnerById.set(event.id, ownerAdminId);
+      adminBucket.profile.events.push({
+        id: event.id,
+        title: event.title,
+        datetime: event.datetime,
+        host: event.host,
+        state: event.state ?? 'published',
+        claimedCount: event.claimedCount ?? 0,
+        ownerSource,
+      });
+    }
+
+    const transfers = await this.getTransferLogs('master', { limit: options.transferLimit });
+    for (const entry of transfers) {
+      const ownerAdminId = eventOwnerById.get(entry.eventId);
+      if (!ownerAdminId) continue;
+      const adminBucket = admins.get(ownerAdminId);
+      if (!adminBucket) continue;
+
+      adminBucket.profile.relatedTransferCount += 1;
+
+      const pii = entry.pii ?? {};
+      const userId = this.normalizeStringField(pii.userId);
+      const displayName = this.normalizeStringField(pii.displayName);
+      const walletAddress =
+        this.normalizeStringField(pii.walletAddress) ??
+        (entry.transfer.recipient.type === 'wallet' ? entry.transfer.recipient.id : null);
+      const joinToken =
+        this.normalizeStringField(pii.joinToken) ??
+        (entry.transfer.recipient.type === 'join_token' ? entry.transfer.recipient.id : null);
+      const key =
+        userId ? `user:${userId}` :
+          walletAddress ? `wallet:${walletAddress}` :
+            joinToken ? `join:${joinToken}` :
+              `recipient:${entry.transfer.recipient.type}:${entry.transfer.recipient.id}`;
+
+      const existing = adminBucket.relatedUsers.get(key);
+      const row: RelatedUserAccumulator = existing ?? {
+        key,
+        userId: userId ?? null,
+        displayName: displayName ?? null,
+        walletAddress: walletAddress ?? null,
+        joinToken: joinToken ?? null,
+        recipientType: entry.transfer.recipient.type,
+        recipientId: entry.transfer.recipient.id,
+        claims: [],
+      };
+      if (!row.userId && userId) row.userId = userId;
+      if (!row.displayName && displayName) row.displayName = displayName;
+      if (!row.walletAddress && walletAddress) row.walletAddress = walletAddress;
+      if (!row.joinToken && joinToken) row.joinToken = joinToken;
+      row.claims.push({
+        ts: entry.ts,
+        eventId: entry.eventId,
+        eventTitle: eventTitleById.get(entry.eventId) ?? null,
+        transfer: entry.transfer,
+        pii: entry.pii,
+      });
+      adminBucket.relatedUsers.set(key, row);
+    }
+
+    const disclosureList: MasterAdminDisclosure[] = Array.from(admins.values()).map((bucket) => {
+      const relatedUsers: MasterAdminDisclosureUser[] = Array.from(bucket.relatedUsers.values())
+        .map((user) => {
+          const eventIds = Array.from(new Set(user.claims.map((claim) => claim.eventId)));
+          return {
+            key: user.key,
+            userId: user.userId,
+            displayName: user.displayName,
+            walletAddress: user.walletAddress,
+            joinToken: user.joinToken,
+            recipientType: user.recipientType,
+            recipientId: user.recipientId,
+            eventIds,
+            claims: user.claims,
+          };
+        })
+        .sort((a, b) => {
+          const left = a.claims[0]?.ts ?? '';
+          const right = b.claims[0]?.ts ?? '';
+          return right.localeCompare(left);
+        });
+      const eventsSorted = [...bucket.profile.events].sort((a, b) => a.id.localeCompare(b.id));
+      return {
+        ...bucket.profile,
+        events: eventsSorted,
+        relatedUsers,
+      };
+    });
+
+    disclosureList.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return {
+      checkedAt: new Date().toISOString(),
+      strictLevel: 'master_full',
+      includeRevoked: options.includeRevoked,
+      transferLimit: options.transferLimit,
+      admins: disclosureList,
+    };
+  }
+
+  private normalizeSearchText(value: string): string {
+    return value.toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+
+  private tokenizeSearchTerms(value: string): string[] {
+    const normalized = this.normalizeSearchText(value);
+    if (!normalized) return [];
+    const terms = normalized
+      .split(/[\s,.;:/\\|()[\]{}<>!"'`~@#$%^&*+=?\-]+/g)
+      .map((part) => part.trim().slice(0, 64))
+      .filter((part) => part.length > 0);
+    return Array.from(new Set(terms));
+  }
+
+  private addDocIndexToken(index: Map<string, number[]>, token: string, docIndex: number): void {
+    if (!token) return;
+    const bucket = index.get(token);
+    if (!bucket) {
+      index.set(token, [docIndex]);
+      return;
+    }
+    if (bucket[bucket.length - 1] !== docIndex) {
+      bucket.push(docIndex);
+    }
+  }
+
+  private buildMasterSearchDocuments(admins: MasterAdminDisclosure[]): MasterSearchIndexDocument[] {
+    const docs: MasterSearchIndexDocument[] = [];
+    const shorten = (value?: string | null, start = 8, end = 8) => {
+      if (!value) return '-';
+      if (value.length <= start + end + 3) return value;
+      return `${value.slice(0, start)}...${value.slice(-end)}`;
+    };
+
+    for (const admin of admins) {
+      const adminDoc: MasterSearchIndexDocument = {
+        id: `admin:${admin.adminId}`,
+        kind: 'admin',
+        title: `${admin.name} (${admin.status})`,
+        subtitle: `adminId=${admin.adminId} code=${admin.code}`,
+        detail: `events=${admin.events.length} relatedUsers=${admin.relatedUsers.length} transfers=${admin.relatedTransferCount}`,
+        searchText: this.normalizeSearchText([
+          admin.adminId,
+          admin.code,
+          admin.name,
+          admin.status,
+          admin.createdAt,
+          admin.revokedAt ?? '',
+          String(admin.events.length),
+          String(admin.relatedUsers.length),
+          String(admin.relatedTransferCount),
+        ].join(' ')),
+      };
+      docs.push(adminDoc);
+
+      for (const event of admin.events) {
+        docs.push({
+          id: `event:${admin.adminId}:${event.id}`,
+          kind: 'event',
+          title: `${event.title} (${event.id})`,
+          subtitle: `admin=${admin.name} owner=${event.ownerSource}`,
+          detail: `state=${event.state} claims=${event.claimedCount} host=${event.host}`,
+          searchText: this.normalizeSearchText([
+            admin.name,
+            admin.adminId,
+            event.id,
+            event.title,
+            event.host,
+            event.state,
+            event.ownerSource,
+            event.datetime,
+            String(event.claimedCount),
+          ].join(' ')),
+        });
+      }
+
+      for (const user of admin.relatedUsers) {
+        docs.push({
+          id: `user:${admin.adminId}:${user.key}`,
+          kind: 'user',
+          title: `${user.displayName ?? '-'} / userId=${user.userId ?? '-'}`,
+          subtitle: `admin=${admin.name} wallet=${user.walletAddress ?? '-'} joinToken=${user.joinToken ?? '-'}`,
+          detail: `recipient=${user.recipientType}:${user.recipientId} events=${user.eventIds.join(', ') || '-'}`,
+          searchText: this.normalizeSearchText([
+            admin.name,
+            admin.adminId,
+            user.key,
+            user.userId ?? '',
+            user.displayName ?? '',
+            user.walletAddress ?? '',
+            user.joinToken ?? '',
+            user.recipientType,
+            user.recipientId,
+            user.eventIds.join(' '),
+          ].join(' ')),
+        });
+
+        for (let i = 0; i < user.claims.length; i += 1) {
+          const claim = user.claims[i];
+          docs.push({
+            id: `claim:${admin.adminId}:${user.key}:${claim.eventId}:${i}`,
+            kind: 'claim',
+            title: `${claim.eventId} (${claim.eventTitle ?? '-'})`,
+            subtitle: `admin=${admin.name} user=${user.displayName ?? user.userId ?? user.recipientId}`,
+            detail: `transfer=${claim.transfer.sender.id} -> ${claim.transfer.recipient.id} tx=${shorten(claim.transfer.txSignature)}`,
+            searchText: this.normalizeSearchText([
+              admin.name,
+              admin.adminId,
+              user.userId ?? '',
+              user.displayName ?? '',
+              user.walletAddress ?? '',
+              user.joinToken ?? '',
+              claim.eventId,
+              claim.eventTitle ?? '',
+              claim.ts,
+              claim.transfer.sender.type,
+              claim.transfer.sender.id,
+              claim.transfer.recipient.type,
+              claim.transfer.recipient.id,
+              claim.transfer.txSignature ?? '',
+              claim.transfer.receiptPubkey ?? '',
+              claim.transfer.mint ?? '',
+              ...(claim.pii ? Object.values(claim.pii) : []),
+            ].join(' ')),
+          });
+        }
+      }
+    }
+    return docs;
+  }
+
+  private buildMasterSearchTokenIndex(docs: MasterSearchIndexDocument[]): Map<string, number[]> {
+    const tokenToDocIds = new Map<string, number[]>();
+    for (let docIndex = 0; docIndex < docs.length; docIndex += 1) {
+      const doc = docs[docIndex];
+      const terms = this.tokenizeSearchTerms(`${doc.title} ${doc.subtitle} ${doc.detail} ${doc.searchText}`);
+      const prefixedTokens = new Set<string>();
+      for (const term of terms) {
+        if (!term) continue;
+        prefixedTokens.add(term);
+        if (term.length <= 1) continue;
+        const maxPrefix = Math.min(24, term.length);
+        for (let len = 2; len <= maxPrefix; len += 1) {
+          prefixedTokens.add(term.slice(0, len));
+        }
+      }
+      for (const token of prefixedTokens) {
+        this.addDocIndexToken(tokenToDocIds, token, docIndex);
+      }
+    }
+    return tokenToDocIds;
+  }
+
+  private getSqlStorageOrNull(): SqlStorage | null {
+    const candidate = (this.ctx.storage as { sql?: unknown }).sql;
+    if (!candidate || typeof (candidate as { exec?: unknown }).exec !== 'function') {
+      return null;
+    }
+    return candidate as SqlStorage;
+  }
+
+  private ensureMasterSearchSqlTables(sql: SqlStorage): void {
+    if (this.masterSearchSqlTablesReady) return;
+    sql.exec(`
+      CREATE TABLE IF NOT EXISTS master_search_index_meta (
+        index_key TEXT PRIMARY KEY,
+        built_at TEXT NOT NULL,
+        built_at_ms INTEGER NOT NULL,
+        doc_count INTEGER NOT NULL,
+        token_count INTEGER NOT NULL
+      )
+    `);
+    sql.exec(`
+      CREATE TABLE IF NOT EXISTS master_search_docs (
+        index_key TEXT NOT NULL,
+        doc_id INTEGER NOT NULL,
+        result_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        title TEXT NOT NULL,
+        subtitle TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        search_text TEXT NOT NULL,
+        PRIMARY KEY (index_key, doc_id)
+      )
+    `);
+    sql.exec(`
+      CREATE TABLE IF NOT EXISTS master_search_tokens (
+        index_key TEXT NOT NULL,
+        token TEXT NOT NULL,
+        doc_id INTEGER NOT NULL,
+        PRIMARY KEY (index_key, token, doc_id)
+      )
+    `);
+    sql.exec('CREATE INDEX IF NOT EXISTS idx_master_search_tokens_lookup ON master_search_tokens(index_key, token, doc_id)');
+    sql.exec('CREATE INDEX IF NOT EXISTS idx_master_search_docs_lookup ON master_search_docs(index_key, doc_id)');
+    this.masterSearchSqlTablesReady = true;
+  }
+
+  private readMasterSearchSqlMeta(sql: SqlStorage, key: string): MasterSearchSqlIndexMeta | null {
+    const row = sql
+      .exec<{ built_at: string | null; built_at_ms: number | null }>(
+        'SELECT built_at, built_at_ms FROM master_search_index_meta WHERE index_key = ? LIMIT 1',
+        key
+      )
+      .toArray()[0];
+    if (!row) return null;
+
+    const builtAtMsCandidate =
+      typeof row.built_at_ms === 'number'
+        ? row.built_at_ms
+        : Number.parseInt(String(row.built_at_ms ?? ''), 10);
+    const builtAtMs = Number.isFinite(builtAtMsCandidate)
+      ? Math.max(0, Math.trunc(builtAtMsCandidate))
+      : Date.now();
+    const builtAt =
+      typeof row.built_at === 'string' && row.built_at.trim()
+        ? row.built_at.trim()
+        : new Date(builtAtMs).toISOString();
+    return { key, builtAtMs, builtAt };
+  }
+
+  private pruneMasterSearchSqlIndexes(sql: SqlStorage): void {
+    const staleRows = sql
+      .exec<{ index_key: string }>(
+        'SELECT index_key FROM master_search_index_meta ORDER BY built_at_ms DESC LIMIT 100 OFFSET ?',
+        MASTER_SEARCH_SQL_KEEP_KEYS
+      )
+      .toArray();
+
+    for (const row of staleRows) {
+      const staleKey = typeof row.index_key === 'string' ? row.index_key.trim() : '';
+      if (!staleKey) continue;
+      sql.exec('DELETE FROM master_search_tokens WHERE index_key = ?', staleKey);
+      sql.exec('DELETE FROM master_search_docs WHERE index_key = ?', staleKey);
+      sql.exec('DELETE FROM master_search_index_meta WHERE index_key = ?', staleKey);
+    }
+  }
+
+  private persistMasterSearchSqlIndex(sql: SqlStorage, params: {
+    key: string;
+    builtAt: string;
+    builtAtMs: number;
+    docs: MasterSearchIndexDocument[];
+    tokenToDocIds: Map<string, number[]>;
+  }): void {
+    sql.exec('DELETE FROM master_search_tokens WHERE index_key = ?', params.key);
+    sql.exec('DELETE FROM master_search_docs WHERE index_key = ?', params.key);
+    sql.exec('DELETE FROM master_search_index_meta WHERE index_key = ?', params.key);
+
+    for (let docId = 0; docId < params.docs.length; docId += 1) {
+      const doc = params.docs[docId];
+      sql.exec(
+        'INSERT INTO master_search_docs(index_key, doc_id, result_id, kind, title, subtitle, detail, search_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        params.key,
+        docId,
+        doc.id,
+        doc.kind,
+        doc.title,
+        doc.subtitle,
+        doc.detail,
+        doc.searchText
+      );
+    }
+
+    let tokenCount = 0;
+    for (const [token, docIds] of params.tokenToDocIds.entries()) {
+      if (!token) continue;
+      for (const docId of docIds) {
+        sql.exec(
+          'INSERT INTO master_search_tokens(index_key, token, doc_id) VALUES (?, ?, ?)',
+          params.key,
+          token,
+          docId
+        );
+        tokenCount += 1;
+      }
+    }
+
+    sql.exec(
+      'INSERT INTO master_search_index_meta(index_key, built_at, built_at_ms, doc_count, token_count) VALUES (?, ?, ?, ?, ?)',
+      params.key,
+      params.builtAt,
+      params.builtAtMs,
+      params.docs.length,
+      tokenCount
+    );
+    this.pruneMasterSearchSqlIndexes(sql);
+  }
+
+  private parseMasterSearchSqlDocId(raw: unknown): number | null {
+    const numeric =
+      typeof raw === 'number' && Number.isFinite(raw)
+        ? raw
+        : Number.parseInt(String(raw ?? ''), 10);
+    if (!Number.isFinite(numeric)) return null;
+    const asInt = Math.trunc(numeric);
+    return asInt >= 0 ? asInt : null;
+  }
+
+  private getMasterSearchSqlTermDocIds(sql: SqlStorage, indexKey: string, term: string): number[] {
+    const exactRows = sql
+      .exec<{ doc_id: number }>(
+        'SELECT doc_id FROM master_search_tokens WHERE index_key = ? AND token = ? ORDER BY doc_id LIMIT ?',
+        indexKey,
+        term,
+        MASTER_SEARCH_SQL_TERM_DOC_LIMIT
+      )
+      .toArray();
+    const exact = exactRows
+      .map((row) => this.parseMasterSearchSqlDocId(row.doc_id))
+      .filter((value): value is number => value !== null);
+    if (exact.length > 0) return exact;
+
+    const likeRows = sql
+      .exec<{ doc_id: number }>(
+        'SELECT doc_id FROM master_search_docs WHERE index_key = ? AND search_text LIKE ? ORDER BY doc_id LIMIT ?',
+        indexKey,
+        `%${term}%`,
+        MASTER_SEARCH_SQL_TERM_DOC_LIMIT
+      )
+      .toArray();
+    return likeRows
+      .map((row) => this.parseMasterSearchSqlDocId(row.doc_id))
+      .filter((value): value is number => value !== null);
+  }
+
+  private fetchMasterSearchSqlDocuments(sql: SqlStorage, indexKey: string, docIds: number[]): Array<{
+    docId: number;
+    doc: MasterSearchIndexDocument;
+  }> {
+    if (docIds.length === 0) return [];
+    const out: Array<{ docId: number; doc: MasterSearchIndexDocument }> = [];
+    for (let i = 0; i < docIds.length; i += MASTER_SEARCH_SQL_DOC_CHUNK_SIZE) {
+      const chunk = docIds.slice(i, i + MASTER_SEARCH_SQL_DOC_CHUNK_SIZE);
+      if (chunk.length === 0) continue;
+      const placeholders = chunk.map(() => '?').join(', ');
+      const rows = sql
+        .exec<{
+          doc_id: number;
+          result_id: string;
+          kind: string;
+          title: string;
+          subtitle: string;
+          detail: string;
+          search_text: string;
+        }>(
+          `SELECT doc_id, result_id, kind, title, subtitle, detail, search_text FROM master_search_docs WHERE index_key = ? AND doc_id IN (${placeholders})`,
+          indexKey,
+          ...chunk
+        )
+        .toArray();
+      for (const row of rows) {
+        const docId = this.parseMasterSearchSqlDocId(row.doc_id);
+        if (docId === null) continue;
+        const kindRaw = typeof row.kind === 'string' ? row.kind : '';
+        const kind: MasterSearchKind =
+          kindRaw === 'admin' || kindRaw === 'event' || kindRaw === 'user' || kindRaw === 'claim'
+            ? kindRaw
+            : 'admin';
+        const resultId = typeof row.result_id === 'string' ? row.result_id : '';
+        if (!resultId) continue;
+        out.push({
+          docId,
+          doc: {
+            id: resultId,
+            kind,
+            title: typeof row.title === 'string' ? row.title : '',
+            subtitle: typeof row.subtitle === 'string' ? row.subtitle : '',
+            detail: typeof row.detail === 'string' ? row.detail : '',
+            searchText: typeof row.search_text === 'string' ? row.search_text : '',
+          },
+        });
+      }
+    }
+    out.sort((a, b) => a.docId - b.docId);
+    return out;
+  }
+
+  private searchMasterIndexSql(sql: SqlStorage, indexKey: string, query: string, limit: number): {
+    total: number;
+    items: MasterSearchResultItem[];
+  } {
+    const normalizedQuery = this.normalizeSearchText(query);
+    if (!normalizedQuery) {
+      return { total: 0, items: [] };
+    }
+    const terms = this.tokenizeSearchTerms(normalizedQuery);
+    const targetTerms = terms.length > 0 ? terms : [normalizedQuery];
+
+    let candidateIds: Set<number> | null = null;
+    for (const term of targetTerms) {
+      const ids = this.getMasterSearchSqlTermDocIds(sql, indexKey, term);
+      const termSet = new Set(ids);
+      if (candidateIds === null) {
+        candidateIds = termSet;
+      } else {
+        for (const docId of Array.from(candidateIds)) {
+          if (!termSet.has(docId)) candidateIds.delete(docId);
+        }
+      }
+      if (candidateIds.size === 0) break;
+      if (candidateIds.size > MASTER_SEARCH_SQL_TERM_DOC_LIMIT) {
+        candidateIds = new Set(Array.from(candidateIds).slice(0, MASTER_SEARCH_SQL_TERM_DOC_LIMIT));
+      }
+    }
+    if (!candidateIds || candidateIds.size === 0) {
+      return { total: 0, items: [] };
+    }
+
+    const docs = this.fetchMasterSearchSqlDocuments(sql, indexKey, Array.from(candidateIds));
+    if (docs.length === 0) {
+      return { total: 0, items: [] };
+    }
+
+    const ranked = docs.map(({ docId, doc }) => {
+      const title = doc.title.toLowerCase();
+      const subtitle = doc.subtitle.toLowerCase();
+      const detail = doc.detail.toLowerCase();
+      let score = 0;
+      if (doc.searchText.includes(normalizedQuery)) score += 12;
+      if (title.includes(normalizedQuery)) score += 8;
+      if (subtitle.includes(normalizedQuery)) score += 4;
+      if (detail.includes(normalizedQuery)) score += 2;
+      for (const term of targetTerms) {
+        if (title.includes(term)) score += 3;
+        if (subtitle.includes(term)) score += 2;
+        if (doc.searchText.includes(term)) score += 1;
+      }
+      return { docId, score, doc };
+    });
+
+    ranked.sort((a, b) => b.score - a.score || a.docId - b.docId);
+    const items = ranked.slice(0, limit).map(({ doc }) => ({
+      id: doc.id,
+      kind: doc.kind,
+      title: doc.title,
+      subtitle: doc.subtitle,
+      detail: doc.detail,
+    }));
+    return {
+      total: ranked.length,
+      items,
+    };
+  }
+
+  private async ensureMasterSearchSqlIndex(options: {
+    includeRevoked: boolean;
+    transferLimit: number;
+  }): Promise<MasterSearchSqlIndexMeta | null> {
+    const sql = this.getSqlStorageOrNull();
+    if (!sql) return null;
+    this.ensureMasterSearchSqlTables(sql);
+
+    const auditHead = readHashHex(await this.ctx.storage.get<string>(AUDIT_LAST_HASH_GLOBAL_KEY));
+    const key = `${auditHead}|${options.includeRevoked ? '1' : '0'}|${options.transferLimit}`;
+
+    if (this.masterSearchSqlMetaCache?.key === key) {
+      return this.masterSearchSqlMetaCache;
+    }
+
+    const existing = this.readMasterSearchSqlMeta(sql, key);
+    if (existing) {
+      this.masterSearchSqlMetaCache = existing;
+      return existing;
+    }
+
+    const disclosure = await this.getMasterAdminDisclosures(options);
+    const docs = this.buildMasterSearchDocuments(disclosure.admins);
+    const tokenToDocIds = this.buildMasterSearchTokenIndex(docs);
+    const builtAtMs = Date.now();
+    const builtAt = new Date(builtAtMs).toISOString();
+    this.persistMasterSearchSqlIndex(sql, {
+      key,
+      builtAt,
+      builtAtMs,
+      docs,
+      tokenToDocIds,
+    });
+
+    this.masterSearchIndexCache = {
+      key,
+      builtAtMs,
+      builtAt,
+      docs,
+      tokenToDocIds,
+    };
+    const meta = { key, builtAtMs, builtAt };
+    this.masterSearchSqlMetaCache = meta;
+    return meta;
+  }
+
+  private async getMasterSearchIndex(options: {
+    includeRevoked: boolean;
+    transferLimit: number;
+  }): Promise<MasterSearchIndexCache> {
+    const auditHead = readHashHex(await this.ctx.storage.get<string>(AUDIT_LAST_HASH_GLOBAL_KEY));
+    const cacheKey = `${auditHead}|${options.includeRevoked ? '1' : '0'}|${options.transferLimit}`;
+    const now = Date.now();
+
+    if (
+      this.masterSearchIndexCache &&
+      this.masterSearchIndexCache.key === cacheKey &&
+      now - this.masterSearchIndexCache.builtAtMs <= MASTER_SEARCH_INDEX_TTL_MS
+    ) {
+      return this.masterSearchIndexCache;
+    }
+
+    const disclosure = await this.getMasterAdminDisclosures(options);
+    const docs = this.buildMasterSearchDocuments(disclosure.admins);
+    const tokenToDocIds = this.buildMasterSearchTokenIndex(docs);
+    const nextCache: MasterSearchIndexCache = {
+      key: cacheKey,
+      builtAtMs: now,
+      builtAt: new Date(now).toISOString(),
+      docs,
+      tokenToDocIds,
+    };
+    this.masterSearchIndexCache = nextCache;
+    return nextCache;
+  }
+
+  private searchMasterIndex(index: MasterSearchIndexCache, query: string, limit: number): {
+    total: number;
+    items: MasterSearchResultItem[];
+  } {
+    const normalizedQuery = this.normalizeSearchText(query);
+    if (!normalizedQuery) {
+      return { total: 0, items: [] };
+    }
+    const terms = this.tokenizeSearchTerms(normalizedQuery);
+    const targetTerms = terms.length > 0 ? terms : [normalizedQuery];
+
+    let candidateIds: Set<number> | null = null;
+    for (const term of targetTerms) {
+      const indexed = index.tokenToDocIds.get(term) ?? [];
+      let matches = indexed;
+      if (matches.length === 0) {
+        const scanned: number[] = [];
+        for (let i = 0; i < index.docs.length; i += 1) {
+          if (index.docs[i].searchText.includes(term)) {
+            scanned.push(i);
+          }
+        }
+        matches = scanned;
+      }
+
+      const matchSet = new Set(matches);
+      if (candidateIds === null) {
+        candidateIds = matchSet;
+      } else {
+        for (const docId of Array.from(candidateIds)) {
+          if (!matchSet.has(docId)) candidateIds.delete(docId);
+        }
+      }
+      if (candidateIds.size === 0) {
+        break;
+      }
+    }
+
+    if (!candidateIds || candidateIds.size === 0) {
+      return { total: 0, items: [] };
+    }
+
+    const ranked = Array.from(candidateIds).map((docIndex) => {
+      const doc = index.docs[docIndex];
+      const title = doc.title.toLowerCase();
+      const subtitle = doc.subtitle.toLowerCase();
+      const detail = doc.detail.toLowerCase();
+      let score = 0;
+      if (doc.searchText.includes(normalizedQuery)) score += 12;
+      if (title.includes(normalizedQuery)) score += 8;
+      if (subtitle.includes(normalizedQuery)) score += 4;
+      if (detail.includes(normalizedQuery)) score += 2;
+      for (const term of targetTerms) {
+        if (title.includes(term)) score += 3;
+        if (subtitle.includes(term)) score += 2;
+        if (doc.searchText.includes(term)) score += 1;
+      }
+      return { docIndex, score };
+    });
+
+    ranked.sort((a, b) => b.score - a.score || a.docIndex - b.docIndex);
+    const items = ranked.slice(0, limit).map(({ docIndex }) => {
+      const doc = index.docs[docIndex];
+      return {
+        id: doc.id,
+        kind: doc.kind,
+        title: doc.title,
+        subtitle: doc.subtitle,
+        detail: doc.detail,
+      };
+    });
+    return {
+      total: ranked.length,
+      items,
+    };
+  }
+
   private actorForAudit(path: string, request: Request, body: unknown): AuditActor {
     if (path.startsWith('/api/admin/') || path.startsWith('/api/master/')) {
       const hasAuth = Boolean(this.extractBearerToken(request));
@@ -1327,6 +2546,138 @@ export class SchoolStore implements DurableObject {
       return Response.json(report, { status });
     }
 
+    // GET /api/admin/transfers (Admin or Master, transfer identifiers visible / PII hidden)
+    if (path === '/api/admin/transfers' && request.method === 'GET') {
+      const operator = await this.authenticateOperator(request);
+      if (!operator) {
+        return this.unauthorizedResponse();
+      }
+      const url = new URL(request.url);
+      const limit = parseBoundedInt(
+        url.searchParams.get('limit'),
+        AUDIT_INTEGRITY_DEFAULT_LIMIT,
+        1,
+        AUDIT_INTEGRITY_MAX_LIMIT
+      );
+      const eventIdRaw = url.searchParams.get('eventId');
+      const eventId = eventIdRaw && eventIdRaw.trim() ? eventIdRaw.trim() : null;
+      const items = await this.getTransferLogs('admin', { limit, eventId });
+      return Response.json({
+        roleView: 'admin',
+        strictLevel: 'admin_transfer_visible_no_pii',
+        checkedAt: new Date().toISOString(),
+        limit,
+        eventId,
+        items,
+      });
+    }
+
+    // GET /api/master/transfers (Master only, full identifiers)
+    if (path === '/api/master/transfers' && request.method === 'GET') {
+      const authError = this.requireMasterAuthorization(request);
+      if (authError) {
+        return authError;
+      }
+      const url = new URL(request.url);
+      const limit = parseBoundedInt(
+        url.searchParams.get('limit'),
+        AUDIT_INTEGRITY_DEFAULT_LIMIT,
+        1,
+        AUDIT_INTEGRITY_MAX_LIMIT
+      );
+      const eventIdRaw = url.searchParams.get('eventId');
+      const eventId = eventIdRaw && eventIdRaw.trim() ? eventIdRaw.trim() : null;
+      const items = await this.getTransferLogs('master', { limit, eventId });
+      return Response.json({
+        roleView: 'master',
+        strictLevel: 'master_full',
+        checkedAt: new Date().toISOString(),
+        limit,
+        eventId,
+        items,
+      });
+    }
+
+    // GET /api/master/admin-disclosures (Master only, full admin-user disclosure)
+    if (path === '/api/master/admin-disclosures' && request.method === 'GET') {
+      const authError = this.requireMasterAuthorization(request);
+      if (authError) {
+        return authError;
+      }
+      const url = new URL(request.url);
+      const includeRevoked = parseBooleanQuery(url.searchParams.get('includeRevoked'), true);
+      const transferLimit = parseBoundedInt(url.searchParams.get('transferLimit'), 500, 1, 1000);
+      const report = await this.getMasterAdminDisclosures({ includeRevoked, transferLimit });
+      return Response.json(report);
+    }
+
+    // GET /api/master/search (Master only, server-side indexed search)
+    if (path === '/api/master/search' && request.method === 'GET') {
+      const authError = this.requireMasterAuthorization(request);
+      if (authError) {
+        return authError;
+      }
+      const url = new URL(request.url);
+      const query = (url.searchParams.get('q') ?? '').trim();
+      const includeRevoked = parseBooleanQuery(url.searchParams.get('includeRevoked'), true);
+      const transferLimit = parseBoundedInt(url.searchParams.get('transferLimit'), 500, 1, 1000);
+      const limit = parseBoundedInt(url.searchParams.get('limit'), 100, 1, 300);
+      if (!query) {
+        const empty: MasterSearchResponse = {
+          checkedAt: new Date().toISOString(),
+          strictLevel: 'master_full',
+          query,
+          includeRevoked,
+          transferLimit,
+          limit,
+          total: 0,
+          indexBuiltAt: null,
+          items: [],
+        };
+        return Response.json(empty);
+      }
+
+      let total = 0;
+      let items: MasterSearchResultItem[] = [];
+      let indexBuiltAt: string | null = null;
+      const sql = this.getSqlStorageOrNull();
+
+      if (sql) {
+        try {
+          const sqlMeta = await this.ensureMasterSearchSqlIndex({ includeRevoked, transferLimit });
+          if (sqlMeta) {
+            const sqlSearch = this.searchMasterIndexSql(sql, sqlMeta.key, query, limit);
+            total = sqlSearch.total;
+            items = sqlSearch.items;
+            indexBuiltAt = sqlMeta.builtAt;
+          }
+        } catch (err) {
+          console.error('[master-search] sqlite index path failed', err);
+        }
+      }
+
+      if (!indexBuiltAt) {
+        const index = await this.getMasterSearchIndex({ includeRevoked, transferLimit });
+        const memorySearch = this.searchMasterIndex(index, query, limit);
+        total = memorySearch.total;
+        items = memorySearch.items;
+        indexBuiltAt = index.builtAt;
+      }
+
+      const response: MasterSearchResponse = {
+        checkedAt: new Date().toISOString(),
+        strictLevel: 'master_full',
+        query,
+        includeRevoked,
+        transferLimit,
+        limit,
+        total,
+        indexBuiltAt,
+        items,
+      };
+      return Response.json(response);
+    }
+
     // POST /api/admin/invite (Master Password required)
     if (path === '/api/admin/invite' && request.method === 'POST') {
       const authError = this.requireMasterAuthorization(request);
@@ -1341,15 +2692,24 @@ export class SchoolStore implements DurableObject {
         return Response.json({ error: 'invalid body' }, { status: 400 });
       }
       const name = typeof body?.name === 'string' ? body.name.trim() : 'Unknown Admin';
+      if (!name) {
+        return Response.json({ error: 'name required' }, { status: 400 });
+      }
 
       // Generate secure random code
       const code = crypto.randomUUID().replace(/-/g, '');
+      const adminId = crypto.randomUUID();
+      const createdAt = new Date().toISOString();
       await this.ctx.storage.put(adminCodeKey(code), {
+        adminId,
         name,
-        createdAt: new Date().toISOString(),
+        source: 'invite',
+        createdAt,
+        revokedAt: null,
+        revokedBy: null,
       });
 
-      return Response.json({ code, name });
+      return Response.json({ code, adminId, name, status: 'active', createdAt });
     }
 
     // GET /api/admin/invites (Master Password required)
@@ -1358,15 +2718,86 @@ export class SchoolStore implements DurableObject {
       if (authError) {
         return authError;
       }
-
-      const result = await this.ctx.storage.list({ prefix: 'admin_code:' });
-      const invites = Array.from(result.entries()).map(([k, v]) => {
-        const code = k.replace('admin_code:', '');
-        return { code, ...(v as any) };
-      });
-      invites.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      const url = new URL(request.url);
+      const includeRevoked = parseBooleanQuery(url.searchParams.get('includeRevoked'), true);
+      const result = await this.ctx.storage.list({ prefix: ADMIN_CODE_PREFIX });
+      const invites = Array.from(result.entries())
+        .map(([key, value]) => {
+          const code = key.slice(ADMIN_CODE_PREFIX.length);
+          const record = this.parseAdminCodeRecord(code, value);
+          if (!record) return null;
+          if (!includeRevoked && record.revokedAt) return null;
+          return {
+            code: record.code,
+            adminId: record.adminId,
+            name: record.name,
+            source: record.source,
+            status: record.revokedAt ? 'revoked' : 'active',
+            createdAt: record.createdAt,
+            revokedAt: record.revokedAt,
+            revokedBy: record.revokedBy,
+          };
+        })
+        .filter((item): item is {
+          code: string;
+          adminId: string;
+          name: string;
+          source: 'invite';
+          status: 'active' | 'revoked';
+          createdAt: string;
+          revokedAt: string | null;
+          revokedBy: string | null;
+        } => item !== null);
+      invites.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
       return Response.json({ invites });
+    }
+
+    // POST /api/admin/rename (Master Password required)
+    if (path === '/api/admin/rename' && request.method === 'POST') {
+      const authError = this.requireMasterAuthorization(request);
+      if (authError) {
+        return authError;
+      }
+      let body: { code?: string; adminId?: string; name?: string };
+      try {
+        body = (await request.json()) as any;
+      } catch {
+        return Response.json({ error: 'invalid body' }, { status: 400 });
+      }
+      const name = typeof body?.name === 'string' ? body.name.trim() : '';
+      if (!name || name.length > 64) {
+        return Response.json({ error: 'name must be 1-64 chars' }, { status: 400 });
+      }
+      const codeFromBody = typeof body?.code === 'string' ? body.code.trim() : '';
+      const adminIdFromBody = typeof body?.adminId === 'string' ? body.adminId.trim() : '';
+      const code = codeFromBody || (await this.findAdminCodeByAdminId(adminIdFromBody)) || '';
+      if (!code) {
+        return Response.json({ error: 'code or adminId required' }, { status: 400 });
+      }
+      const key = adminCodeKey(code);
+      const current = this.parseAdminCodeRecord(code, await this.ctx.storage.get(key));
+      if (!current) {
+        return Response.json({ error: 'admin code not found' }, { status: 404 });
+      }
+      const updated = {
+        ...current,
+        name,
+      };
+      await this.ctx.storage.put(key, updated);
+      return Response.json({
+        success: true,
+        invite: {
+          code: updated.code,
+          adminId: updated.adminId,
+          name: updated.name,
+          source: updated.source,
+          status: updated.revokedAt ? 'revoked' : 'active',
+          createdAt: updated.createdAt,
+          revokedAt: updated.revokedAt,
+          revokedBy: updated.revokedBy,
+        },
+      });
     }
 
     // POST /api/admin/revoke (Master Password required)
@@ -1384,8 +2815,25 @@ export class SchoolStore implements DurableObject {
       if (typeof body?.code !== 'string') {
         return Response.json({ error: 'code required' }, { status: 400 });
       }
-      const deleted = await this.ctx.storage.delete(adminCodeKey(body.code));
-      return Response.json({ success: deleted });
+      const code = body.code.trim();
+      if (!code) {
+        return Response.json({ error: 'code required' }, { status: 400 });
+      }
+      const key = adminCodeKey(code);
+      const current = this.parseAdminCodeRecord(code, await this.ctx.storage.get(key));
+      if (!current) {
+        return Response.json({ success: false });
+      }
+      if (current.revokedAt) {
+        return Response.json({ success: true, revokedAt: current.revokedAt });
+      }
+      const revokedAt = new Date().toISOString();
+      await this.ctx.storage.put(key, {
+        ...current,
+        revokedAt,
+        revokedBy: 'master',
+      });
+      return Response.json({ success: true, revokedAt });
     }
 
     // POST /api/admin/login
@@ -1414,9 +2862,22 @@ export class SchoolStore implements DurableObject {
       }
 
       // Check Issued Admin Codes
-      const adminData = await this.ctx.storage.get(adminCodeKey(password));
+      const adminData = this.parseAdminCodeRecord(password, await this.ctx.storage.get(adminCodeKey(password)));
       if (adminData) {
-        return Response.json({ ok: true, role: 'admin', info: adminData });
+        if (adminData.revokedAt) {
+          return Response.json({ error: 'invite revoked' }, { status: 401 });
+        }
+        return Response.json({
+          ok: true,
+          role: 'admin',
+          info: {
+            adminId: adminData.adminId,
+            name: adminData.name,
+            source: 'invite',
+            createdAt: adminData.createdAt,
+            status: 'active',
+          },
+        });
       }
 
       return Response.json({ error: 'invalid password' }, { status: 401 });
@@ -1432,6 +2893,10 @@ export class SchoolStore implements DurableObject {
       const authError = await this.requireAdminAuthorization(request);
       if (authError) {
         return authError;
+      }
+      const operator = await this.authenticateOperator(request);
+      if (!operator) {
+        return this.unauthorizedResponse();
       }
 
       let body: {
@@ -1499,15 +2964,19 @@ export class SchoolStore implements DurableObject {
         claimIntervalDays,
         maxClaimsPerInterval,
       });
+      await this.ctx.storage.put(eventOwnerKey(event.id), this.operatorToEventOwner(operator));
       // Audit Log
       await this.appendAuditLog(
         'EVENT_CREATE',
-        { type: 'admin', id: 'admin' },
+        { type: operator.role === 'master' ? 'master' : 'admin', id: operator.actorId },
         {
           title,
           datetime,
           host,
           eventId: event.id,
+          createdByAdminId: operator.adminId,
+          createdByAdminName: operator.name,
+          createdBySource: operator.source,
           solanaMint: body.solanaMint,
           ticketTokenAmount,
           claimIntervalDays,
@@ -1658,7 +3127,45 @@ export class SchoolStore implements DurableObject {
 
       // Audit Log
       if (result.success && !result.alreadyJoined) {
-        await this.appendAuditLog('WALLET_CLAIM', { type: 'wallet', id: body.walletAddress || body.joinToken || 'unknown' }, body, body.eventId || 'unknown');
+        const walletAddress = this.normalizeStringField(body.walletAddress);
+        const joinToken = this.normalizeStringField(body.joinToken);
+        const txSignature = this.normalizeStringField(body.txSignature);
+        const receiptPubkey = this.normalizeStringField(body.receiptPubkey);
+        const recipient: TransferParty | null = walletAddress
+          ? { type: 'wallet', id: walletAddress }
+          : joinToken
+            ? { type: 'join_token', id: joinToken }
+            : null;
+        const pii: Record<string, string> = {};
+        if (walletAddress) pii.walletAddress = walletAddress;
+        if (joinToken) pii.joinToken = joinToken;
+
+        if (recipient) {
+          await this.appendAuditLog(
+            'WALLET_CLAIM',
+            { type: 'wallet', id: recipient.id },
+            {
+              eventId,
+              status: 'created',
+              transfer: this.buildClaimTransferPayload({
+                eventId,
+                event,
+                recipient,
+                txSignature,
+                receiptPubkey,
+              }),
+              ...(Object.keys(pii).length > 0 ? { pii } : {}),
+            },
+            eventId
+          );
+        } else {
+          await this.appendAuditLog(
+            'WALLET_CLAIM',
+            { type: 'wallet', id: 'unknown' },
+            { eventId, status: 'created' },
+            eventId
+          );
+        }
       }
       return Response.json(result);
     }
@@ -1770,7 +3277,33 @@ export class SchoolStore implements DurableObject {
       await this.store.addClaim(eventId, userId, confirmationCode);
 
       // Audit Log
-      await this.appendAuditLog('USER_CLAIM', { type: 'user', id: userId }, { eventId, status: 'created', confirmationCode }, eventId);
+      const displayName = this.normalizeStringField((userRaw as { displayName?: unknown }).displayName);
+      const walletAddress = this.normalizeStringField(body.walletAddress);
+      const recipient: TransferParty = walletAddress
+        ? { type: 'wallet', id: walletAddress }
+        : { type: 'user', id: userId };
+      const pii: Record<string, string> = { userId };
+      if (displayName) pii.displayName = displayName;
+      if (walletAddress) pii.walletAddress = walletAddress;
+
+      await this.appendAuditLog(
+        'USER_CLAIM',
+        { type: 'user', id: userId },
+        {
+          eventId,
+          status: 'created',
+          confirmationCode,
+          transfer: this.buildClaimTransferPayload({
+            eventId,
+            event,
+            recipient,
+            txSignature: body.txSignature,
+            receiptPubkey: body.receiptPubkey,
+          }),
+          pii,
+        },
+        eventId
+      );
 
       return Response.json({ status: 'created', confirmationCode } as UserClaimResponse);
     }

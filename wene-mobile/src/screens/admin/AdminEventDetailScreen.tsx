@@ -4,7 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as QRCode from 'qrcode';
 import { AppText, Button, Card, AdminShell, Loading } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
-import { fetchAdminEvent, fetchClaimants, type Claimant } from '../../api/adminApi';
+import { fetchAdminEvent, fetchAdminTransferLogs, fetchClaimants, type Claimant, type TransferLogEntry } from '../../api/adminApi';
 import type { SchoolEvent } from '../../types/school';
 
 export const AdminEventDetailScreen: React.FC = () => {
@@ -12,6 +12,11 @@ export const AdminEventDetailScreen: React.FC = () => {
   const { eventId } = useLocalSearchParams<{ eventId: string }>();
   const [event, setEvent] = useState<(SchoolEvent & { claimedCount: number }) | null>(null);
   const [claimants, setClaimants] = useState<Claimant[]>([]);
+  const [transfers, setTransfers] = useState<TransferLogEntry[]>([]);
+  const [transferCheckedAt, setTransferCheckedAt] = useState<string | null>(null);
+  const [transferStrictLevel, setTransferStrictLevel] = useState<string | null>(null);
+  const [transferLoading, setTransferLoading] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -21,11 +26,10 @@ export const AdminEventDetailScreen: React.FC = () => {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setTransferLoading(true);
+    setTransferError(null);
 
-    Promise.all([
-      fetchAdminEvent(eventId),
-      fetchClaimants(eventId),
-    ])
+    Promise.all([fetchAdminEvent(eventId), fetchClaimants(eventId)])
       .then(([ev, cl]) => {
         if (!cancelled) {
           setEvent(ev);
@@ -37,6 +41,25 @@ export const AdminEventDetailScreen: React.FC = () => {
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
+      });
+
+    fetchAdminTransferLogs({ eventId, limit: 50 })
+      .then((transferRes) => {
+        if (!cancelled) {
+          setTransfers(transferRes.items ?? []);
+          setTransferCheckedAt(transferRes.checkedAt ?? null);
+          setTransferStrictLevel(transferRes.strictLevel ?? null);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setTransferError(e instanceof Error ? e.message : '送金監査ログの取得に失敗しました');
+          setTransferCheckedAt(null);
+          setTransferStrictLevel(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setTransferLoading(false);
       });
 
     return () => { cancelled = true; };
@@ -60,10 +83,29 @@ export const AdminEventDetailScreen: React.FC = () => {
     if (!eventId) return;
     setLoading(true);
     setError(null);
+    setTransferLoading(true);
+    setTransferError(null);
+
     Promise.all([fetchAdminEvent(eventId), fetchClaimants(eventId)])
-      .then(([ev, cl]) => { setEvent(ev); setClaimants(cl.items); })
+      .then(([ev, cl]) => {
+        setEvent(ev);
+        setClaimants(cl.items);
+      })
       .catch((e) => setError(e instanceof Error ? e.message : '読み込みに失敗しました'))
       .finally(() => setLoading(false));
+
+    fetchAdminTransferLogs({ eventId, limit: 50 })
+      .then((transferRes) => {
+        setTransfers(transferRes.items ?? []);
+        setTransferCheckedAt(transferRes.checkedAt ?? null);
+        setTransferStrictLevel(transferRes.strictLevel ?? null);
+      })
+      .catch((e) => {
+        setTransferError(e instanceof Error ? e.message : '送金監査ログの取得に失敗しました');
+        setTransferCheckedAt(null);
+        setTransferStrictLevel(null);
+      })
+      .finally(() => setTransferLoading(false));
   };
 
   const formatTime = (iso?: string) => {
@@ -72,6 +114,12 @@ export const AdminEventDetailScreen: React.FC = () => {
       const d = new Date(iso);
       return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
     } catch { return iso; }
+  };
+
+  const shorten = (value?: string | null, start = 6, end = 6): string => {
+    if (!value) return '-';
+    if (value.length <= start + end + 3) return value;
+    return `${value.slice(0, start)}...${value.slice(-end)}`;
   };
 
   if (loading) {
@@ -204,6 +252,69 @@ export const AdminEventDetailScreen: React.FC = () => {
           )}
         </Card>
 
+        {/* 送金監査ログ */}
+        <View style={styles.sectionHeader}>
+          <AppText variant="h3" style={styles.title}>送金監査 (Hash Chain)</AppText>
+          <AppText variant="small" style={styles.muted}>
+            {transfers.length} 件 / レベル: {transferStrictLevel ?? '-'}
+          </AppText>
+          <AppText variant="small" style={styles.muted}>
+            最終取得: {formatTime(transferCheckedAt ?? undefined)}
+          </AppText>
+        </View>
+
+        {transferError && (
+          <AppText variant="small" style={styles.transferError}>
+            送金監査ログ取得エラー: {transferError}
+          </AppText>
+        )}
+
+        <Card style={styles.card}>
+          {transferLoading ? (
+            <View style={styles.center}>
+              <AppText variant="caption" style={styles.cardMuted}>
+                送金監査ログを読み込み中です...
+              </AppText>
+            </View>
+          ) : transfers.length === 0 ? (
+            <View style={styles.center}>
+              <AppText variant="caption" style={styles.cardMuted}>
+                このイベントの送金監査ログはまだありません
+              </AppText>
+            </View>
+          ) : (
+            <>
+              {transfers.map((item) => (
+                <View key={item.entryHash} style={styles.transferRow}>
+                  <View style={styles.transferHeader}>
+                    <AppText variant="small" style={styles.cardText}>
+                      {item.event} / {formatTime(item.ts)}
+                    </AppText>
+                    <AppText variant="small" style={styles.cardDim}>
+                      {item.transfer.mode}
+                    </AppText>
+                  </View>
+                  <AppText variant="small" style={styles.cardMuted}>
+                    送金主: {item.transfer.sender.type}:{item.transfer.sender.id}
+                  </AppText>
+                  <AppText variant="small" style={styles.cardMuted}>
+                    送金先: {item.transfer.recipient.type}:{item.transfer.recipient.id}
+                  </AppText>
+                  <AppText variant="small" style={styles.cardMuted}>
+                    配布量: {item.transfer.amount ?? '-'} / Mint: {shorten(item.transfer.mint)}
+                  </AppText>
+                  <AppText variant="small" style={styles.hashMono}>
+                    tx: {shorten(item.transfer.txSignature)} / receipt: {shorten(item.transfer.receiptPubkey)}
+                  </AppText>
+                  <AppText variant="small" style={styles.hashMono}>
+                    hash: {shorten(item.prevHash, 8, 8)} → {shorten(item.entryHash, 8, 8)}
+                  </AppText>
+                </View>
+              ))}
+            </>
+          )}
+        </Card>
+
         {/* CSV ダウンロード */}
         <Button
           title="CSVダウンロード"
@@ -306,5 +417,24 @@ const styles = StyleSheet.create({
     paddingVertical: adminTheme.spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: adminTheme.colors.border,
+  },
+  transferRow: {
+    paddingVertical: adminTheme.spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: adminTheme.colors.border,
+  },
+  transferHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  hashMono: {
+    color: adminTheme.colors.textTertiary,
+    marginTop: 2,
+    fontFamily: 'monospace',
+  },
+  transferError: {
+    color: '#ff8a80',
+    marginBottom: adminTheme.spacing.sm,
   },
 });

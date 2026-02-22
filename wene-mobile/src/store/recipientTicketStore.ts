@@ -9,6 +9,9 @@ export interface RecipientTicket {
   joinedAt: number;
   txSignature?: string;
   receiptPubkey?: string;
+  popEntryHash?: string;
+  popAuditHash?: string;
+  popSigner?: string;
 }
 
 interface RecipientTicketStore {
@@ -40,6 +43,9 @@ const loadFromStorage = async (): Promise<RecipientTicket[]> => {
           joinedAt,
           txSignature: typeof raw.txSignature === 'string' ? raw.txSignature : undefined,
           receiptPubkey: typeof raw.receiptPubkey === 'string' ? raw.receiptPubkey : undefined,
+          popEntryHash: typeof raw.popEntryHash === 'string' ? raw.popEntryHash : undefined,
+          popAuditHash: typeof raw.popAuditHash === 'string' ? raw.popAuditHash : undefined,
+          popSigner: typeof raw.popSigner === 'string' ? raw.popSigner : undefined,
         } as RecipientTicket;
       })
       .filter((ticket): ticket is RecipientTicket => ticket !== null);
@@ -59,6 +65,9 @@ function mergeTicket(existing: RecipientTicket, incoming: RecipientTicket): Reci
     joinedAt: existing.joinedAt || incoming.joinedAt,
     txSignature: incoming.txSignature ?? existing.txSignature,
     receiptPubkey: incoming.receiptPubkey ?? existing.receiptPubkey,
+    popEntryHash: incoming.popEntryHash ?? existing.popEntryHash,
+    popAuditHash: incoming.popAuditHash ?? existing.popAuditHash,
+    popSigner: incoming.popSigner ?? existing.popSigner,
   };
 }
 

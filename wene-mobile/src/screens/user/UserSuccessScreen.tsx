@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { View, StyleSheet, Linking, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -11,11 +11,24 @@ import { useEventIdFromParams } from '../../hooks/useEventIdFromParams';
 import { useRecipientTicketStore } from '../../store/recipientTicketStore';
 import { getSchoolDeps } from '../../api/createSchoolDeps';
 import type { SchoolEvent } from '../../types/school';
+import { copyTextWithFeedback } from '../../utils/copyText';
 
 export const UserSuccessScreen: React.FC = () => {
   const router = useRouter();
   const { eventId: targetEventId, isValid } = useEventIdFromParams({ redirectOnInvalid: true });
-  const { tx, receipt, already, confirmationCode, status, mint, reflected, onchainBlocked } = useLocalSearchParams<{
+  const {
+    tx,
+    receipt,
+    already,
+    confirmationCode,
+    status,
+    mint,
+    reflected,
+    onchainBlocked,
+    popEntryHash: popEntryHashRaw,
+    popAuditHash: popAuditHashRaw,
+    popSigner: popSignerRaw,
+  } = useLocalSearchParams<{
     tx?: string;
     receipt?: string;
     already?: string;
@@ -24,6 +37,9 @@ export const UserSuccessScreen: React.FC = () => {
     mint?: string;
     reflected?: string;
     onchainBlocked?: string;
+    popEntryHash?: string;
+    popAuditHash?: string;
+    popSigner?: string;
   }>();
 
   const [event, setEvent] = useState<SchoolEvent | null>(null);
@@ -31,11 +47,17 @@ export const UserSuccessScreen: React.FC = () => {
   const txSignature = typeof tx === 'string' && tx.trim() ? tx.trim() : undefined;
   const receiptPubkey = typeof receipt === 'string' && receipt.trim() ? receipt.trim() : undefined;
   const mintAddress = typeof mint === 'string' && mint.trim() ? mint.trim() : undefined;
+  const popEntryHash = typeof popEntryHashRaw === 'string' && popEntryHashRaw.trim() ? popEntryHashRaw.trim() : undefined;
+  const popAuditHash = typeof popAuditHashRaw === 'string' && popAuditHashRaw.trim() ? popAuditHashRaw.trim() : undefined;
+  const popSigner = typeof popSignerRaw === 'string' && popSignerRaw.trim() ? popSignerRaw.trim() : undefined;
   const reflectedOnchain = reflected === '1';
   const onchainBlockedByPeriod = onchainBlocked === '1';
   const storedTicket = targetEventId ? getTicketByEventId(targetEventId) : undefined;
   const resolvedTx = txSignature ?? storedTicket?.txSignature;
   const resolvedReceipt = receiptPubkey ?? storedTicket?.receiptPubkey;
+  const resolvedPopEntryHash = popEntryHash ?? storedTicket?.popEntryHash;
+  const resolvedPopAuditHash = popAuditHash ?? storedTicket?.popAuditHash;
+  const resolvedPopSigner = popSigner ?? storedTicket?.popSigner;
 
   useEffect(() => {
     if (!targetEventId) return;
@@ -58,17 +80,34 @@ export const UserSuccessScreen: React.FC = () => {
             joinedAt: Date.now(),
             txSignature,
             receiptPubkey,
+            popEntryHash,
+            popAuditHash,
+            popSigner,
           });
         }
       })
       .catch(() => { if (!cancelled) setEvent(null); });
     return () => { cancelled = true; };
-  }, [targetEventId, addTicket, txSignature, receiptPubkey]);
+  }, [targetEventId, addTicket, txSignature, receiptPubkey, popEntryHash, popAuditHash, popSigner]);
 
   const isAlready = already === '1' || status === 'already';
   const explorerTxUrl = resolvedTx ? `https://explorer.solana.com/tx/${resolvedTx}?cluster=devnet` : null;
   const explorerReceiptUrl = resolvedReceipt ? `https://explorer.solana.com/address/${resolvedReceipt}?cluster=devnet` : null;
   const explorerMintUrl = mintAddress ? `https://explorer.solana.com/address/${mintAddress}?cluster=devnet` : null;
+
+  const handleCopyPopProof = useCallback(async () => {
+    const payload = [
+      'PoP Proof',
+      `eventId: ${targetEventId ?? '-'}`,
+      `signer: ${resolvedPopSigner ?? '-'}`,
+      `entry_hash: ${resolvedPopEntryHash ?? '-'}`,
+      `audit_hash: ${resolvedPopAuditHash ?? '-'}`,
+    ].join('\n');
+
+    await copyTextWithFeedback(payload, {
+      successMessage: 'PoP証跡をコピーしました',
+    });
+  }, [targetEventId, resolvedPopSigner, resolvedPopEntryHash, resolvedPopAuditHash]);
 
   if (!isValid) return null;
 
@@ -147,6 +186,39 @@ export const UserSuccessScreen: React.FC = () => {
           </Card>
         )}
 
+        {(resolvedPopEntryHash || resolvedPopAuditHash || resolvedPopSigner) && (
+          <Card style={styles.card}>
+            <AppText variant="caption" style={styles.label}>
+              PoP証跡（Proof of Process）
+            </AppText>
+            {resolvedPopSigner && (
+              <AppText variant="small" style={styles.value} selectable>
+                signer: {resolvedPopSigner}
+              </AppText>
+            )}
+            {resolvedPopEntryHash && (
+              <AppText variant="small" style={styles.value} selectable>
+                entry_hash: {resolvedPopEntryHash}
+              </AppText>
+            )}
+            {resolvedPopAuditHash && (
+              <AppText variant="small" style={styles.value} selectable>
+                audit_hash: {resolvedPopAuditHash}
+              </AppText>
+            )}
+            <AppText variant="small" style={styles.codeHint}>
+              この値はAPI監査連鎖とオンチェーン検証に使われたPoP証跡です。
+            </AppText>
+            <Button
+              title="PoP証跡をコピー"
+              variant="secondary"
+              size="medium"
+              onPress={handleCopyPopProof}
+              style={styles.copyButton}
+            />
+          </Card>
+        )}
+
         {mintAddress && (
           <Card style={styles.card}>
             <AppText variant="caption" style={styles.label}>
@@ -174,7 +246,7 @@ export const UserSuccessScreen: React.FC = () => {
         )}
 
         {/* confirmationCode もない、tx/receipt もない場合 */}
-        {!confirmationCode && !resolvedTx && !resolvedReceipt && !mintAddress && (
+        {!confirmationCode && !resolvedTx && !resolvedReceipt && !mintAddress && !resolvedPopEntryHash && !resolvedPopAuditHash && !resolvedPopSigner && (
           <Card style={styles.card}>
             <AppText variant="caption" style={styles.label}>参加記録</AppText>
             <AppText variant="small" style={styles.codeHint}>
@@ -279,5 +351,9 @@ const styles = StyleSheet.create({
   },
   explorerButton: {
     marginTop: theme.spacing.xs,
+  },
+  copyButton: {
+    marginTop: theme.spacing.sm,
+    minWidth: 160,
   },
 });

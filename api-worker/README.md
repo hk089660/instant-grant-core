@@ -32,6 +32,28 @@ Hono による最小構成の API。`wene-mobile`（Cloudflare Pages）から固
 - `GET /api/master/audit-integrity`（Master Password 必須）
   - クエリ: `limit`（既定 50, 最大 200）, `verifyImmutable`（既定 true）
   - レスポンス: `ok`, `issues[]`, `warnings[]` を含む整合性レポート（`ok=false` の場合 HTTP 409）
+- `GET /api/admin/transfers`（Admin / Master）
+  - クエリ: `eventId`（任意）, `limit`（既定 50, 最大 200）
+  - レスポンス: `roleView: "admin"`, `strictLevel: "admin_transfer_visible_no_pii"`, `items[]`
+  - `items[].transfer` に送金主/送金先ID・mint・amount・txSignature・receiptPubkey を含む
+  - `items[].pii` は返却しない（運用者PIIはマスク）
+- `GET /api/master/transfers`（Master Password 必須）
+  - クエリ: `eventId`（任意）, `limit`（既定 50, 最大 200）
+  - レスポンス: `roleView: "master"`, `strictLevel: "master_full"`, `items[]`
+  - `items[].pii` を含む完全監査ビュー（`運営 > 管理者` レベル）
+- `GET /api/master/admin-disclosures`（Master Password 必須）
+  - クエリ: `includeRevoked`（既定 true）, `transferLimit`（既定 500, 最大 1000）
+  - レスポンス: `strictLevel: "master_full"`, `admins[]`
+  - `admins[]` に adminId/code/name/status + 関連イベント + 関連ユーザー/claim（transfer + pii）を返却
+- `GET /api/master/search`（Master Password 必須）
+  - クエリ: `q`（必須）, `limit`（既定 100, 最大 300）, `includeRevoked`（既定 true）, `transferLimit`（既定 500, 最大 1000）
+  - レスポンス: `strictLevel: "master_full"`, `total`, `items[]`
+  - `items[]` は `admin/event/user/claim` の横断検索結果。サーバー側で転置インデックス化して返却
+  - Durable Object の SQLite (`ctx.storage.sql`) にインデックスを永続化し、コールドスタート時も再計算コストを抑制
+- `POST /api/admin/rename`（Master Password 必須）
+  - リクエスト: `{ name: string; code?: string; adminId?: string }`
+  - `code` か `adminId` のどちらか必須
+  - 既存の管理者レコード名を更新して返却（status/revoked情報は維持）
 - `POST /v1/audit/log`（監査ログ強制書き込み用）
   - Authorization 必須（`Bearer <AUDIT_LOG_WRITE_TOKEN>`。未設定時は `ADMIN_PASSWORD`）
   - `AUDIT_LOG_WRITE_TOKEN` / `ADMIN_PASSWORD` が無効な設定の場合は 503
@@ -75,6 +97,8 @@ L1 で PoP 検証を行うため、以下の Worker 変数を設定する:
 - `GET /v1/school/pop-status` で `signerConfigured: true`
 - `GET /v1/school/audit-status` で `operationalReady: true`
 - `GET /api/master/audit-integrity?limit=50` が `ok: true`
+- `GET /api/admin/transfers?limit=20`（AdminまたはMaster）で `roleView: "admin"` が返る
+- `GET /api/master/transfers?limit=20`（Master）で `roleView: "master"` が返る
 
 ## CORS
 
