@@ -14,13 +14,29 @@ Enable instant, transparent, and low-cost benefit distribution for public suppor
 - Phantom wallet integration
 - Deep link support (custom scheme + Universal Links)
 - Basic claim flow with double-claim prevention
+- Merkle-based allowlist claim path (`claim_grant_with_proof`)
+- PoP signature verification on Solana (`verify_and_record_pop_proof`)
+- Admin/master audit visibility APIs and receipt verification endpoint
+
+## Status Snapshot (as of 2026-02-22)
+
+Implemented now:
+- On/off-chain claim policy toggle (`optional/required`) per event
+- Runtime/PoP/audit readiness endpoints for operator verification
+- Hash-chain based transfer and participation receipt audit traces
+
+Planned next:
+- External audit execution and remediation
+- CI/CD and test coverage hardening
+- Federation/adapter design generalization
 
 ## Short Term (2 Weeks)
 
 ### Smart Contract
-- [ ] Merkle-based allowlist verification
+- [x] Merkle-based allowlist verification
 - [ ] Event emission for better indexing
 - [ ] Instruction to update grant parameters
+- [ ] Additional negative-path tests for PoP message validation
 
 ### Mobile App
 - [ ] Improved error handling and user feedback
@@ -50,8 +66,9 @@ Enable instant, transparent, and low-cost benefit distribution for public suppor
 - [ ] Bulk allowlist management
 
 ### Security
-- [ ] Smart contract audit (external)
-- [ ] Mobile app security review
+- [ ] Smart contract audit (external) - vendor selection target: 2026-03-15
+- [ ] Smart contract audit kickoff target: 2026-04-01
+- [ ] Mobile app security review target: 2026-04-15
 - [ ] Bug bounty program launch
 
 ## Long Term (3 Months)
@@ -81,9 +98,9 @@ Enable instant, transparent, and low-cost benefit distribution for public suppor
 | Milestone | Deliverable | Timeline |
 |-----------|-------------|----------|
 | M1 | Devnet MVP with docs | Complete |
-| M2 | Allowlist + audit prep | +2 weeks |
-| M3 | Admin dashboard + audit | +1 month |
-| M4 | Mainnet beta + partners | +3 months |
+| M2 | Allowlist + audit prep | Target: 2026-03-08 |
+| M3 | Admin dashboard + audit | Target: 2026-03-31 |
+| M4 | Mainnet beta + partners | Target: 2026-05-31 |
 
 ## How to Contribute
 

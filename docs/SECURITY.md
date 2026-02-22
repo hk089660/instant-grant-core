@@ -112,9 +112,15 @@ we-ne is designed with a **non-custodial** security model. The mobile app never 
 
 | Component | Audited | Notes |
 |-----------|---------|-------|
-| grant_program | ❌ No | Use at own risk |
-| wene-mobile | ❌ No | Use at own risk |
+| grant_program | ❌ No | External audit kickoff target: 2026-04-01 |
+| wene-mobile | ❌ No | Mobile app security review target: 2026-04-15 |
 | Dependencies | Partial | Major deps are audited |
+
+## External Assurance Plan (as of 2026-02-22)
+
+1. 2026-03-15: Audit scope freeze for `grant_program` and API trust boundaries.
+2. 2026-04-01: External smart contract audit kickoff.
+3. 2026-04-30: Publish remediation status summary in repository docs.
 
 ## Recommendations for Production
 

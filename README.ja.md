@@ -13,6 +13,7 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 ## クイックナビ
 - [Top Summary](#top-summary)
 - [可視化サマリー](#可視化サマリー)
+- [審査向け補足（減点リスク対策）](#審査向け補足減点リスク対策)
 - [Verification Evidence (UI)](#verification-evidence-ui)
 - [現在実装されていること](#現在実装されていること)
 - [アーキテクチャ](#アーキテクチャ)
@@ -21,10 +22,10 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 - [Milestones / 助成金で実施する範囲](#milestones--助成金で実施する範囲)
 
 ## Top Summary
-- これは何か: 運用プロセスのログを検証可能レシートに結合し、必要時のみSolana決済へ結合する3層システムです。
+- これは何か: 運用プロセスのログを検証可能レシートに結合し、Solana上の PoP 検証付き claim を方針で optional/required 切替できる3層システムです。
 - 誰のためか: イベント参加者（学生/利用者）と、運用する管理者・運営者のための実装です。
 - [Implemented] 学生/利用者の参加は、対応経路では wallet なしで完了できます（off-chain 参加券として `confirmationCode` + `ticketReceipt` を発行）。
-- [Optional] オンチェーン決済証跡は devnet の任意経路です。tx/receipt/Explorer は on-chain claim 経路を実行した場合のみ表示されます。
+- [Implemented] オンチェーン決済証跡（devnet）は実装済みで、イベント方針で optional/required を切替できます。required の場合は on-chain claim と PoP 証跡（tx/receipt/Explorer）が必須です。
 - [Implemented] 説明責任ある運用: admin/master 導線で PoP/runtime 状態、送金監査ログ、権限別開示/検索を確認できます。
 - [Implemented] 管理者の参加券検索は所有者スコープです。admin は自分が発行したイベント分のみ検索対象で、master は全体対象です。
 - [Implemented] PoPのUI確認: 管理者イベント一覧に `PoP稼働証明` を表示し、`enforceOnchainPop` / `signerConfigured` を `/v1/school/pop-status` と紐付けて確認できます。
@@ -35,6 +36,11 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 - 現在の公開先（We-ne）: 利用者 `https://instant-grant-core.pages.dev/` / 管理者 `https://instant-grant-core.pages.dev/admin/login`。
 - 成熟度: 本番完成形ではなく、再現性と第三者検証性を重視したプロトタイプです。
 - リポジトリ内の事実ソース: `api-worker/src/storeDO.ts`、`wene-mobile/src/screens/user/*`、`wene-mobile/src/screens/admin/*`、`grant_program/programs/grant_program/src/lib.rs`。
+
+## 審査向け補足（減点リスク対策）
+- Solana依存性: settlement と PoP 検証の実体は `grant_program` にあり、off-chain Attend は入口導線です。
+- 審査モード: Solana系レビューでは `enforceOnchainPop=true` + オンチェーン設定済みイベントで実行すると、tx/receipt/PoP 連鎖を必須確認できます。
+- 文書整合性: 実装状況の正本は本READMEと `docs/ROADMAP.md`（Status snapshot as of `2026-02-22`）です。
 
 ## 可視化サマリー
 ```mermaid
@@ -56,7 +62,7 @@ flowchart LR
 
 ## Stage Clarity
 > - [Implemented] Off-chain Attend は、方針が許すイベントで wallet なしでも参加券（`confirmationCode` + `ticketReceipt`）を発行します。
-> - [Optional] On-chain redeem / PoP は on-chain 導線でのみ実行され、tx signature / receipt pubkey / Explorer 証跡は条件付きで表示されます。
+> - [Implemented] On-chain redeem / PoP は実装済みで、イベント方針に応じて optional/required を切替できます（required では証跡表示が必須）。
 > - [Implemented] PoP/runtime/audit の運用確認は公開 endpoint と管理者UIで確認できます。
 > - [Planned] 高度なSybil耐性、連合運用向け設計、chain-agnostic adapter 設計はロードマップ項目です。
 
@@ -211,6 +217,7 @@ curl -s "$BASE/v1/school/audit-status"
 ```
 期待値:
 - `/health` は `{"ok":true}`
+- `pop-status.enforceOnchainPop=true`（on-chain必須設定で検証する場合）
 - `pop-status.signerConfigured=true`
 - `runtime-status.ready=true`
 - `audit-status.operationalReady=true`
@@ -272,7 +279,7 @@ curl -s -X POST "https://instant-grant-core.pages.dev/api/audit/receipts/verify-
 ```
 期待値: `ok=true` と `verification.checks`（連鎖/ハッシュ検証）が返る。
 
-### 2) On-chain証跡 `[Optional]`
+### 2) On-chain証跡 `[Implemented: 方針でrequired可]`
 `wene-mobile/src/screens/user/UserConfirmScreen.tsx` の on-chain 導線を実行した場合のみ:
 - 成功画面に `txSignature`、`receiptPubkey`、（任意で）`mint`、PoP値が表示
 - 値があるときだけ Explorer リンクが表示
@@ -325,7 +332,7 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
 > **このリポジトリ/本助成の評価対象（In scope）**
 > - 学校参加導線の再現可能性
 > - `Participation Ticket (off-chain Attend)` と不変監査レシート
-> - 方針切替付き `On-chain Redeem (optional)`
+> - 方針切替付き `On-chain Redeem`（optional/required）と PoP 検証
 > - admin/master の監査性、開示分離、検証API
 >
 > **評価対象外（Out of scope, planned）**
