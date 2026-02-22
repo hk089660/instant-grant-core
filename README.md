@@ -24,7 +24,7 @@ This repository proposes and implements a practical answer to one question:
 How can public systems prove not only what happened on-chain, but also how decisions and operations happened before settlement?
 
 Core answer:
-- PoP (Proof of Process): bind API-side process logs to on-chain settlement.
+- PoP (Proof of Process): bind API-side process logs to immutable receipts first, and optionally to on-chain settlement.
 - Three-layer architecture:
 1. Layer 1 (Solana, Anchor): settlement finality and anti-double-claim controls.
 2. Layer 2 (Cloudflare Workers + Durable Objects): append-only process hash chain and operator APIs.
@@ -43,7 +43,7 @@ Why this goes beyond classic P2P:
 
 What PoP adds:
 1. Process proof layer: append all critical API-side operations into an immutable hash chain.
-2. Settlement binding: require process proof verification in on-chain claim settlement.
+2. Settlement binding: when redeem policy is enabled, require process proof verification in on-chain claim settlement.
 3. Role-strict disclosure: separate visibility controls (`master > admin`) for transfer and personal data handling.
 
 Administrative value:
@@ -52,6 +52,7 @@ Administrative value:
 - Practical deployment path for domestic infrastructure and future independent-chain operation.
 
 ## What Works Today
+- Wallet-free participation ticket issuance as immutable audit receipt (`confirmationCode` + `ticketReceipt`).
 - On-chain PoP verification in claim flow (`claim_grant` / `claim_grant_with_proof`).
 - Global and per-event audit chain (`prev_hash`, `stream_prev_hash`).
 - Immutable audit persistence outside DO (R2 + optional ingest), with fail-closed mode.
@@ -62,6 +63,33 @@ Administrative value:
   - Invite issue/revoke/rename.
   - Full admin/user disclosure.
   - Server-side indexed search endpoint: `GET /api/master/search`.
+
+## Product Contract: Attend First, Redeem Optional
+To avoid blocking students who cannot or do not want to create wallets, the product is defined as:
+
+- Attend (primary): issue a participation ticket as immutable audit receipt.
+- Redeem (optional): perform on-chain settlement only when required by policy.
+
+This means the product value is complete at Attend stage (attendance proof, gate operation, and auditability), while Redeem is an extension path.
+
+## Wallet-Free Immutable Receipt Ticket (Current Primary Flow)
+The current school-facing primary flow is wallet-free participation ticket issuance on the audit hash chain.
+
+How it works:
+1. A participant joins with `userId + PIN` and receives `confirmationCode` and `ticketReceipt` (Attend).
+2. `ticketReceipt` includes `entryHash`, `prevHash`, `streamPrevHash`, immutable sink references, and `receiptHash`.
+3. Any third party can verify consistency via `POST /api/audit/receipts/verify` (receipt hash, chain links, immutable payload hash, sink refs).
+
+Why this design:
+- It expands school use cases to students and guardians who do not have crypto wallets.
+- It enables practical QR/paper-based gate operations while preserving later digital verification.
+- It keeps tamper-evident process auditability even when events are operated without wallet settlement.
+- In this project, school deployment is positioned as the first social verification pilot of this hash-chain process-proof model.
+
+Attend / Redeem boundary:
+- Attend (wallet-free): usable without wallet for ticket possession, verification, and school operation.
+- Redeem (optional on-chain): required only if organizer enables on-chain policy for that event.
+- In other words, on-chain is not the default requirement for students; it is a policy-driven extension path.
 
 ## 5-Minute Verification for Reviewers
 Run these from repository root:

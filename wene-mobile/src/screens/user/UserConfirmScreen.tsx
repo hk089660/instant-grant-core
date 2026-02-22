@@ -425,6 +425,8 @@ export const UserConfirmScreen: React.FC = () => {
           popEntryHash,
           popAuditHash,
           popSigner,
+          auditReceiptId: result?.ticketReceipt?.receiptId,
+          auditReceiptHash: result?.ticketReceipt?.receiptHash,
         }) as any
       );
     } catch (e: unknown) {

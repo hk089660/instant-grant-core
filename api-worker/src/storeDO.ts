@@ -4,6 +4,7 @@ import type {
   ClaimBody,
   PopProofBody,
   PopProofResponse,
+  ParticipationTicketReceipt,
   RegisterBody,
   SchoolClaimResult,
   UserClaimBody,
@@ -17,6 +18,9 @@ import { parseAuditImmutableMode, persistImmutableAuditEntry } from './audit/imm
 const USER_PREFIX = 'user:';
 const ADMIN_CODE_PREFIX = 'admin_code:';
 const EVENT_OWNER_PREFIX = 'event_owner:';
+const TICKET_RECEIPT_CODE_PREFIX = 'ticket_receipt:';
+const TICKET_RECEIPT_SUBJECT_PREFIX = 'ticket_receipt_subject:';
+const AUDIT_ENTRY_PREFIX = 'audit_entry:';
 
 function userKey(userId: string): string {
   return USER_PREFIX + userId;
@@ -28,6 +32,18 @@ function adminCodeKey(code: string): string {
 
 function eventOwnerKey(eventId: string): string {
   return EVENT_OWNER_PREFIX + eventId;
+}
+
+function ticketReceiptByCodeKey(eventId: string, confirmationCode: string): string {
+  return `${TICKET_RECEIPT_CODE_PREFIX}${eventId}:${confirmationCode}`;
+}
+
+function ticketReceiptBySubjectKey(eventId: string, subject: string): string {
+  return `${TICKET_RECEIPT_SUBJECT_PREFIX}${eventId}:${subject}`;
+}
+
+function auditEntryByHashKey(entryHash: string): string {
+  return `${AUDIT_ENTRY_PREFIX}${entryHash}`;
 }
 
 async function hashPin(pin: string): Promise<string> {
@@ -76,12 +92,16 @@ const POP_HASH_GENESIS_HEX = '0'.repeat(64);
 const AUDIT_HISTORY_PREFIX = 'audit_history:';
 const AUDIT_INTEGRITY_DEFAULT_LIMIT = 50;
 const AUDIT_INTEGRITY_MAX_LIMIT = 200;
+const AUDIT_ENTRY_SCAN_LIMIT = 5000;
 const IMMUTABLE_AUDIT_SOURCE = 'school-store';
 const TOKEN_IMAGE_URL = 'https://instant-grant-core.pages.dev/ticket-token.png';
 const MASTER_SEARCH_INDEX_TTL_MS = 30_000;
 const MASTER_SEARCH_SQL_KEEP_KEYS = 5;
 const MASTER_SEARCH_SQL_TERM_DOC_LIMIT = 4000;
 const MASTER_SEARCH_SQL_DOC_CHUNK_SIZE = 250;
+const PARTICIPATION_TICKET_RECEIPT_VERSION = 1;
+const PARTICIPATION_TICKET_RECEIPT_TYPE = 'participation_audit_receipt';
+const PARTICIPATION_TICKET_VERIFY_ENDPOINT = '/api/audit/receipts/verify';
 
 type AuditIntegrityIssue = {
   code: string;
@@ -267,6 +287,43 @@ type MasterSearchResponse = {
   items: MasterSearchResultItem[];
 };
 
+type ParticipationTicketReceiptValidationIssue = {
+  code: string;
+  message: string;
+  field?: string;
+};
+
+type ParticipationTicketReceiptVerification = {
+  ok: boolean;
+  checkedAt: string;
+  receiptId: string;
+  eventId: string;
+  confirmationCode: string;
+  checks: {
+    receiptHashValid: boolean;
+    entryExists: boolean;
+    entryHashValid: boolean;
+    confirmationCodeMatches: boolean;
+    eventIdMatches: boolean;
+    globalChainLinkValid: boolean;
+    streamChainLinkValid: boolean;
+    immutablePayloadHashMatches: boolean;
+    immutableSinksMatch: boolean;
+  };
+  issues: ParticipationTicketReceiptValidationIssue[];
+  proof: {
+    entryHash: string;
+    prevHash: string;
+    streamPrevHash: string;
+    immutablePayloadHash: string | null;
+    immutableSinks: Array<{
+      sink: string;
+      ref: string;
+      at: string;
+    }>;
+  };
+};
+
 function buildTokenSymbol(title: string): string {
   const cleaned = title.replace(/\s+/g, '').slice(0, 10).toUpperCase();
   return cleaned || 'TICKET';
@@ -316,6 +373,10 @@ function readHashHex(raw: string | undefined | null): string {
   const v = raw.trim().toLowerCase();
   if (/^[0-9a-f]{64}$/.test(v)) return v;
   throw new Error('invalid hash in storage');
+}
+
+function isHashHex(raw: string): boolean {
+  return /^[0-9a-f]{64}$/.test(raw.trim().toLowerCase());
 }
 
 function parsePeriodIndex(raw: unknown): bigint | null {
@@ -888,6 +949,7 @@ export class SchoolStore implements DurableObject {
       // Key format: audit_history:<timestamp>:<hash> to allow reverse chronological listing
       const historyKey = `audit_history:${ts}:${entry_hash}`;
       await this.ctx.storage.put(historyKey, fullEntry);
+      await this.ctx.storage.put(auditEntryByHashKey(entry_hash), fullEntry);
 
       return fullEntry;
     });
@@ -1009,6 +1071,427 @@ export class SchoolStore implements DurableObject {
       source: IMMUTABLE_AUDIT_SOURCE,
       entry: payloadEntry,
     });
+  }
+
+  private async computeParticipationTicketReceiptHash(
+    receipt: Omit<ParticipationTicketReceipt, 'receiptHash'>
+  ): Promise<string> {
+    return sha256Hex(canonicalize(receipt));
+  }
+
+  private async buildParticipationTicketReceipt(params: {
+    eventId: string;
+    subject: string;
+    confirmationCode: string;
+    auditEntry: AuditEvent;
+  }): Promise<ParticipationTicketReceipt> {
+    const { eventId, subject, confirmationCode, auditEntry } = params;
+    const immutableSinks = (auditEntry.immutable?.sinks ?? []).map((sink) => ({
+      sink: sink.sink,
+      ref: sink.ref,
+      at: sink.at,
+    }));
+    const receiptBase: Omit<ParticipationTicketReceipt, 'receiptHash'> = {
+      version: PARTICIPATION_TICKET_RECEIPT_VERSION,
+      type: PARTICIPATION_TICKET_RECEIPT_TYPE,
+      receiptId: auditEntry.entry_hash,
+      issuedAt: auditEntry.ts,
+      confirmationCode,
+      subjectCommitment: await sha256Hex(
+        canonicalize({
+          version: 1,
+          eventId,
+          subject,
+        })
+      ),
+      verifyEndpoint: PARTICIPATION_TICKET_VERIFY_ENDPOINT,
+      audit: {
+        event: auditEntry.event,
+        eventId: auditEntry.eventId,
+        entryHash: auditEntry.entry_hash,
+        prevHash: auditEntry.prev_hash,
+        streamPrevHash: auditEntry.stream_prev_hash ?? 'GENESIS',
+        immutableMode: auditEntry.immutable?.mode ?? 'off',
+        immutablePayloadHash: auditEntry.immutable?.payload_hash ?? null,
+        immutableSinks,
+      },
+    };
+
+    const receiptHash = await this.computeParticipationTicketReceiptHash(receiptBase);
+    return { ...receiptBase, receiptHash };
+  }
+
+  private parseParticipationTicketReceipt(raw: unknown): ParticipationTicketReceipt | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+
+    if (obj.version !== PARTICIPATION_TICKET_RECEIPT_VERSION) return null;
+    if (obj.type !== PARTICIPATION_TICKET_RECEIPT_TYPE) return null;
+
+    const receiptId = this.normalizeStringField(obj.receiptId);
+    const receiptHash = this.normalizeStringField(obj.receiptHash);
+    const issuedAt = this.normalizeStringField(obj.issuedAt);
+    const confirmationCode = this.normalizeStringField(obj.confirmationCode);
+    const subjectCommitment = this.normalizeStringField(obj.subjectCommitment);
+    const verifyEndpoint = this.normalizeStringField(obj.verifyEndpoint);
+    if (!receiptId || !receiptHash || !issuedAt || !confirmationCode || !subjectCommitment || !verifyEndpoint) {
+      return null;
+    }
+    if (!isHashHex(receiptId) || !isHashHex(receiptHash) || !isHashHex(subjectCommitment)) {
+      return null;
+    }
+
+    const auditRaw = obj.audit;
+    if (!auditRaw || typeof auditRaw !== 'object') return null;
+    const auditObj = auditRaw as Record<string, unknown>;
+
+    const event = this.normalizeStringField(auditObj.event);
+    const eventId = this.normalizeStringField(auditObj.eventId);
+    const entryHash = this.normalizeStringField(auditObj.entryHash);
+    const prevHash = this.normalizeStringField(auditObj.prevHash);
+    const streamPrevHash = this.normalizeStringField(auditObj.streamPrevHash);
+    const immutableModeRaw = this.normalizeStringField(auditObj.immutableMode)?.toLowerCase() ?? '';
+    if (immutableModeRaw !== 'off' && immutableModeRaw !== 'best_effort' && immutableModeRaw !== 'required') {
+      return null;
+    }
+    const immutableMode: ParticipationTicketReceipt['audit']['immutableMode'] = immutableModeRaw;
+    const immutablePayloadHashRaw = auditObj.immutablePayloadHash;
+    const immutablePayloadHash =
+      typeof immutablePayloadHashRaw === 'string' && immutablePayloadHashRaw.trim()
+        ? immutablePayloadHashRaw.trim().toLowerCase()
+        : immutablePayloadHashRaw === null
+          ? null
+          : null;
+
+    if (!event || !eventId || !entryHash || !prevHash || !streamPrevHash) return null;
+    if (!isHashHex(entryHash)) return null;
+    if (!(prevHash === 'GENESIS' || isHashHex(prevHash))) return null;
+    if (!(streamPrevHash === 'GENESIS' || isHashHex(streamPrevHash))) return null;
+    if (!(immutablePayloadHash === null || isHashHex(immutablePayloadHash))) return null;
+
+    const sinksRaw = auditObj.immutableSinks;
+    if (!Array.isArray(sinksRaw)) return null;
+    const immutableSinks: ParticipationTicketReceipt['audit']['immutableSinks'] = [];
+    for (const sinkItem of sinksRaw) {
+      if (!sinkItem || typeof sinkItem !== 'object') return null;
+      const sinkObj = sinkItem as Record<string, unknown>;
+      const sink = this.normalizeStringField(sinkObj.sink);
+      const ref = this.normalizeStringField(sinkObj.ref);
+      const at = this.normalizeStringField(sinkObj.at);
+      if (!sink || !ref || !at) return null;
+      if (sink !== 'r2_entry' && sink !== 'r2_stream' && sink !== 'kv_index' && sink !== 'immutable_ingest') {
+        return null;
+      }
+      immutableSinks.push({ sink, ref, at });
+    }
+
+    return {
+      version: PARTICIPATION_TICKET_RECEIPT_VERSION,
+      type: PARTICIPATION_TICKET_RECEIPT_TYPE,
+      receiptId: receiptId.toLowerCase(),
+      receiptHash: receiptHash.toLowerCase(),
+      issuedAt,
+      confirmationCode,
+      subjectCommitment: subjectCommitment.toLowerCase(),
+      verifyEndpoint,
+      audit: {
+        event,
+        eventId,
+        entryHash: entryHash.toLowerCase(),
+        prevHash: prevHash === 'GENESIS' ? 'GENESIS' : prevHash.toLowerCase(),
+        streamPrevHash: streamPrevHash === 'GENESIS' ? 'GENESIS' : streamPrevHash.toLowerCase(),
+        immutableMode,
+        immutablePayloadHash,
+        immutableSinks,
+      },
+    };
+  }
+
+  private async storeParticipationTicketReceipt(
+    eventId: string,
+    subject: string,
+    receipt: ParticipationTicketReceipt
+  ): Promise<void> {
+    await this.ctx.storage.put(ticketReceiptByCodeKey(eventId, receipt.confirmationCode), receipt);
+    await this.ctx.storage.put(ticketReceiptBySubjectKey(eventId, subject), receipt);
+  }
+
+  private async getParticipationTicketReceipt(
+    eventId: string,
+    subject: string,
+    confirmationCode: string
+  ): Promise<ParticipationTicketReceipt | null> {
+    const byCode = this.parseParticipationTicketReceipt(
+      await this.ctx.storage.get(ticketReceiptByCodeKey(eventId, confirmationCode))
+    );
+    if (byCode) return byCode;
+
+    const bySubject = this.parseParticipationTicketReceipt(
+      await this.ctx.storage.get(ticketReceiptBySubjectKey(eventId, subject))
+    );
+    if (bySubject && bySubject.confirmationCode === confirmationCode) {
+      return bySubject;
+    }
+    return null;
+  }
+
+  private async getAuditEntryByHash(entryHash: string): Promise<AuditEvent | null> {
+    const hash = entryHash.trim().toLowerCase();
+    if (!isHashHex(hash)) return null;
+
+    const direct = await this.ctx.storage.get(auditEntryByHashKey(hash));
+    if (direct && typeof direct === 'object' && typeof (direct as { entry_hash?: unknown }).entry_hash === 'string') {
+      return direct as AuditEvent;
+    }
+
+    const rows = await this.ctx.storage.list({
+      prefix: AUDIT_HISTORY_PREFIX,
+      reverse: true,
+      limit: AUDIT_ENTRY_SCAN_LIMIT,
+    });
+    for (const value of rows.values()) {
+      if (!value || typeof value !== 'object') continue;
+      const entry = value as AuditEvent;
+      if (typeof entry.entry_hash === 'string' && entry.entry_hash.toLowerCase() === hash) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  private sinkSignatureSet(sinks: Array<{ sink: string; ref: string }>): Set<string> {
+    const out = new Set<string>();
+    for (const sink of sinks) {
+      out.add(`${sink.sink}|${sink.ref}`);
+    }
+    return out;
+  }
+
+  private async verifyParticipationTicketReceipt(
+    receipt: ParticipationTicketReceipt
+  ): Promise<ParticipationTicketReceiptVerification> {
+    const issues: ParticipationTicketReceiptValidationIssue[] = [];
+    const checks: ParticipationTicketReceiptVerification['checks'] = {
+      receiptHashValid: false,
+      entryExists: false,
+      entryHashValid: false,
+      confirmationCodeMatches: false,
+      eventIdMatches: false,
+      globalChainLinkValid: false,
+      streamChainLinkValid: false,
+      immutablePayloadHashMatches: false,
+      immutableSinksMatch: false,
+    };
+
+    const hashInput: Omit<ParticipationTicketReceipt, 'receiptHash'> = {
+      version: receipt.version,
+      type: receipt.type,
+      receiptId: receipt.receiptId,
+      issuedAt: receipt.issuedAt,
+      confirmationCode: receipt.confirmationCode,
+      subjectCommitment: receipt.subjectCommitment,
+      verifyEndpoint: receipt.verifyEndpoint,
+      audit: {
+        event: receipt.audit.event,
+        eventId: receipt.audit.eventId,
+        entryHash: receipt.audit.entryHash,
+        prevHash: receipt.audit.prevHash,
+        streamPrevHash: receipt.audit.streamPrevHash,
+        immutableMode: receipt.audit.immutableMode,
+        immutablePayloadHash: receipt.audit.immutablePayloadHash,
+        immutableSinks: receipt.audit.immutableSinks.map((sink) => ({
+          sink: sink.sink,
+          ref: sink.ref,
+          at: sink.at,
+        })),
+      },
+    };
+    const expectedReceiptHash = await this.computeParticipationTicketReceiptHash(hashInput);
+    checks.receiptHashValid = expectedReceiptHash === receipt.receiptHash;
+    if (!checks.receiptHashValid) {
+      issues.push({
+        code: 'receipt_hash_mismatch',
+        message: 'receiptHash does not match canonical receipt payload',
+        field: 'receiptHash',
+      });
+    }
+
+    const entry = await this.getAuditEntryByHash(receipt.audit.entryHash);
+    checks.entryExists = entry !== null;
+    if (!entry) {
+      issues.push({
+        code: 'entry_not_found',
+        message: 'audit entry referenced by receipt is not found in history',
+        field: 'audit.entryHash',
+      });
+      return {
+        ok: false,
+        checkedAt: new Date().toISOString(),
+        receiptId: receipt.receiptId,
+        eventId: receipt.audit.eventId,
+        confirmationCode: receipt.confirmationCode,
+        checks,
+        issues,
+        proof: {
+          entryHash: receipt.audit.entryHash,
+          prevHash: receipt.audit.prevHash,
+          streamPrevHash: receipt.audit.streamPrevHash,
+          immutablePayloadHash: receipt.audit.immutablePayloadHash,
+          immutableSinks: receipt.audit.immutableSinks.map((sink) => ({
+            sink: sink.sink,
+            ref: sink.ref,
+            at: sink.at,
+          })),
+        },
+      };
+    }
+
+    const recomputedEntryHash = await sha256Hex(canonicalize(this.buildAuditHashInput(entry)));
+    checks.entryHashValid = recomputedEntryHash === entry.entry_hash && entry.entry_hash === receipt.audit.entryHash;
+    if (!checks.entryHashValid) {
+      issues.push({
+        code: 'entry_hash_mismatch',
+        message: 'audit entry hash mismatch',
+        field: 'audit.entryHash',
+      });
+    }
+    if (receipt.receiptId !== receipt.audit.entryHash || receipt.receiptId !== entry.entry_hash) {
+      issues.push({
+        code: 'receipt_id_mismatch',
+        message: 'receiptId does not match the referenced audit entry hash',
+        field: 'receiptId',
+      });
+    }
+
+    const entryConfirmationCode = this.normalizeStringField((entry.data as Record<string, unknown>).confirmationCode);
+    checks.confirmationCodeMatches = entryConfirmationCode === receipt.confirmationCode;
+    if (!checks.confirmationCodeMatches) {
+      issues.push({
+        code: 'confirmation_code_mismatch',
+        message: 'confirmationCode does not match the audit entry payload',
+        field: 'confirmationCode',
+      });
+    }
+
+    checks.eventIdMatches =
+      entry.eventId === receipt.audit.eventId &&
+      entry.eventId.length > 0;
+    if (!checks.eventIdMatches) {
+      issues.push({
+        code: 'event_id_mismatch',
+        message: 'eventId does not match the audit entry',
+        field: 'eventId',
+      });
+    }
+
+    if (entry.prev_hash !== receipt.audit.prevHash) {
+      issues.push({
+        code: 'prev_hash_mismatch',
+        message: 'prevHash in receipt does not match the audit entry',
+        field: 'audit.prevHash',
+      });
+    }
+    if ((entry.stream_prev_hash ?? 'GENESIS') !== receipt.audit.streamPrevHash) {
+      issues.push({
+        code: 'stream_prev_hash_mismatch',
+        message: 'streamPrevHash in receipt does not match the audit entry',
+        field: 'audit.streamPrevHash',
+      });
+    }
+
+    if (entry.prev_hash === 'GENESIS') {
+      checks.globalChainLinkValid = true;
+    } else {
+      const prevEntry = await this.getAuditEntryByHash(entry.prev_hash);
+      checks.globalChainLinkValid = prevEntry !== null && prevEntry.entry_hash === entry.prev_hash;
+      if (!checks.globalChainLinkValid) {
+        issues.push({
+          code: 'global_chain_link_missing',
+          message: 'global predecessor entry is missing or invalid',
+          field: 'audit.prevHash',
+        });
+      }
+    }
+
+    const streamPrevHash = entry.stream_prev_hash ?? 'GENESIS';
+    if (streamPrevHash === 'GENESIS') {
+      checks.streamChainLinkValid = true;
+    } else {
+      const prevStreamEntry = await this.getAuditEntryByHash(streamPrevHash);
+      checks.streamChainLinkValid =
+        prevStreamEntry !== null &&
+        prevStreamEntry.entry_hash === streamPrevHash &&
+        prevStreamEntry.eventId === entry.eventId;
+      if (!checks.streamChainLinkValid) {
+        issues.push({
+          code: 'stream_chain_link_missing',
+          message: 'event stream predecessor entry is missing or invalid',
+          field: 'audit.streamPrevHash',
+        });
+      }
+    }
+
+    const recomputedImmutablePayloadHash = await sha256Hex(this.buildImmutablePayload(entry));
+    const entryImmutablePayloadHash = entry.immutable?.payload_hash ?? null;
+    const receiptImmutablePayloadHash = receipt.audit.immutablePayloadHash ?? null;
+    checks.immutablePayloadHashMatches =
+      (entryImmutablePayloadHash === null && receiptImmutablePayloadHash === null) ||
+      (entryImmutablePayloadHash === recomputedImmutablePayloadHash &&
+        receiptImmutablePayloadHash === recomputedImmutablePayloadHash);
+    if (!checks.immutablePayloadHashMatches) {
+      issues.push({
+        code: 'immutable_payload_hash_mismatch',
+        message: 'immutable payload hash mismatch between receipt and audit entry',
+        field: 'audit.immutablePayloadHash',
+      });
+    }
+
+    const entrySinkSet = this.sinkSignatureSet(
+      (entry.immutable?.sinks ?? []).map((sink) => ({ sink: sink.sink, ref: sink.ref }))
+    );
+    const receiptSinkSet = this.sinkSignatureSet(
+      receipt.audit.immutableSinks.map((sink) => ({ sink: sink.sink, ref: sink.ref }))
+    );
+    checks.immutableSinksMatch =
+      entrySinkSet.size === receiptSinkSet.size &&
+      Array.from(receiptSinkSet.values()).every((sig) => entrySinkSet.has(sig));
+    if (!checks.immutableSinksMatch) {
+      issues.push({
+        code: 'immutable_sinks_mismatch',
+        message: 'immutable sink references mismatch between receipt and audit entry',
+        field: 'audit.immutableSinks',
+      });
+    }
+
+    const entryImmutableMode = entry.immutable?.mode ?? 'off';
+    if (entryImmutableMode !== receipt.audit.immutableMode) {
+      issues.push({
+        code: 'immutable_mode_mismatch',
+        message: 'immutable mode mismatch between receipt and audit entry',
+        field: 'audit.immutableMode',
+      });
+    }
+
+    return {
+      ok: issues.length === 0,
+      checkedAt: new Date().toISOString(),
+      receiptId: receipt.receiptId,
+      eventId: receipt.audit.eventId,
+      confirmationCode: receipt.confirmationCode,
+      checks,
+      issues,
+      proof: {
+        entryHash: entry.entry_hash,
+        prevHash: entry.prev_hash,
+        streamPrevHash: entry.stream_prev_hash ?? 'GENESIS',
+        immutablePayloadHash: entry.immutable?.payload_hash ?? null,
+        immutableSinks: (entry.immutable?.sinks ?? []).map((sink) => ({
+          sink: sink.sink,
+          ref: sink.ref,
+          at: sink.at,
+        })),
+      },
+    };
   }
 
   private async verifyAuditIntegrity(limit: number, verifyImmutable: boolean): Promise<AuditIntegrityReport> {
@@ -2335,6 +2818,10 @@ export class SchoolStore implements DurableObject {
   }
 
   private actorForAudit(path: string, request: Request, body: unknown): AuditActor {
+    if (path === '/api/audit/receipts/verify') {
+      return { type: 'auditor', id: 'public' };
+    }
+
     if (path.startsWith('/api/admin/') || path.startsWith('/api/master/')) {
       const hasAuth = Boolean(this.extractBearerToken(request));
       return { type: 'operator', id: hasAuth ? 'authenticated' : 'anonymous' };
@@ -2551,6 +3038,28 @@ export class SchoolStore implements DurableObject {
       );
       const verifyImmutable = parseBooleanQuery(url.searchParams.get('verifyImmutable'), true);
       const report = await this.verifyAuditIntegrity(limit, verifyImmutable);
+      const status = report.ok ? 200 : 409;
+      return Response.json(report, { status });
+    }
+
+    // POST /api/audit/receipts/verify (public)
+    if (path === '/api/audit/receipts/verify' && request.method === 'POST') {
+      let body: { receipt?: unknown } | undefined;
+      try {
+        body = (await request.json()) as { receipt?: unknown };
+      } catch {
+        return Response.json({ error: 'invalid body' }, { status: 400 });
+      }
+      const receiptRaw =
+        body && typeof body === 'object' && 'receipt' in body
+          ? body.receipt
+          : body;
+      const receipt = this.parseParticipationTicketReceipt(receiptRaw);
+      if (!receipt) {
+        return Response.json({ error: 'invalid receipt payload' }, { status: 400 });
+      }
+
+      const report = await this.verifyParticipationTicketReceipt(receipt);
       const status = report.ok ? 200 : 409;
       return Response.json(report, { status });
     }
@@ -3280,7 +3789,12 @@ export class SchoolStore implements DurableObject {
       if (already) {
         const rec = await this.store.getClaimRecord(eventId, userId);
         const confirmationCode = rec?.confirmationCode ?? genConfirmationCode();
-        return Response.json({ status: 'already', confirmationCode } as UserClaimResponse);
+        const ticketReceipt = await this.getParticipationTicketReceipt(eventId, userId, confirmationCode);
+        return Response.json({
+          status: 'already',
+          confirmationCode,
+          ...(ticketReceipt ? { ticketReceipt } : {}),
+        } as UserClaimResponse);
       }
       const confirmationCode = genConfirmationCode();
       await this.store.addClaim(eventId, userId, confirmationCode);
@@ -3295,7 +3809,7 @@ export class SchoolStore implements DurableObject {
       if (displayName) pii.displayName = displayName;
       if (walletAddress) pii.walletAddress = walletAddress;
 
-      await this.appendAuditLog(
+      const auditEntry = await this.appendAuditLog(
         'USER_CLAIM',
         { type: 'user', id: userId },
         {
@@ -3313,8 +3827,15 @@ export class SchoolStore implements DurableObject {
         },
         eventId
       );
+      const ticketReceipt = await this.buildParticipationTicketReceipt({
+        eventId,
+        subject: userId,
+        confirmationCode,
+        auditEntry,
+      });
+      await this.storeParticipationTicketReceipt(eventId, userId, ticketReceipt);
 
-      return Response.json({ status: 'created', confirmationCode } as UserClaimResponse);
+      return Response.json({ status: 'created', confirmationCode, ticketReceipt } as UserClaimResponse);
     }
 
     if (request.method === 'OPTIONS') {

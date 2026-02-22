@@ -22,6 +22,13 @@ Hono による最小構成の API。`wene-mobile`（Cloudflare Pages）から固
   - `ENFORCE_ONCHAIN_POP=true` かつ on-chain 設定済みイベント（`solanaMint`/`solanaAuthority`/`solanaGrantId`）では、`walletAddress + txSignature + receiptPubkey` を必須化
   - `POST /api/events/:eventId/claim`（userId+PIN）でも同様に on-chain 証跡を必須化
   - **evt-003** → 常に `retryable`（デモ用）
+- `POST /api/events/:eventId/claim`（userId + PIN）
+  - レスポンス: `{ status: 'created'|'already'; confirmationCode: string; ticketReceipt?: ParticipationTicketReceipt }`
+  - `ticketReceipt` は監査ログの不変レシート（`entry_hash`, `prev_hash`, immutable sink 情報, `receiptHash`）を含む
+- `POST /api/audit/receipts/verify`（公開）
+  - リクエスト: `{ receipt: ParticipationTicketReceipt }`（または receipt オブジェクト直送）
+  - レスポンス: `ok`, `checks`, `issues`, `proof`
+  - 第三者が受け取った参加券レシートの整合性（ハッシュ・監査チェーン・immutable payload）を検証できる
 - `GET /v1/school/pop-status`
   - レスポンス: `{ enforceOnchainPop: boolean; signerConfigured: boolean; signerPubkey?: string | null; error?: string | null }`
 - `GET /v1/school/audit-status`
@@ -57,6 +64,22 @@ Hono による最小構成の API。`wene-mobile`（Cloudflare Pages）から固
 - `POST /v1/audit/log`（監査ログ強制書き込み用）
   - Authorization 必須（`Bearer <AUDIT_LOG_WRITE_TOKEN>`。未設定時は `ADMIN_PASSWORD`）
   - `AUDIT_LOG_WRITE_TOKEN` / `ADMIN_PASSWORD` が無効な設定の場合は 503
+
+## 不変レシート参加券（wallet不要）を採用する理由
+
+- 学校現場では、全参加者がウォレットを保有している前提を置けないため
+- `confirmationCode + ticketReceipt` により、参加証明をウォレット非依存で配布・保管できるため
+- `POST /api/audit/receipts/verify` により、第三者検証可能な監査連鎖を維持できるため
+- 本プロジェクトではこの学校運用を、ハッシュチェーンの社会検証における第一検証として位置づけているため
+
+### 運用モデル（Attend / Redeem）
+
+- Attend（主導線）: `POST /api/events/:eventId/claim` で `userId + PIN` により参加券（不変レシート）を発行
+- Redeem（任意）: イベントが on-chain 設定済みで `ENFORCE_ONCHAIN_POP=true` の場合のみ wallet + tx + receipt を要求
+
+重要な整理:
+- 学校ユースケースでの基本価値は Attend で完結する
+- Redeem は追加要件が必要な運用時だけ有効化する拡張パス
 
 契約型は `src/types.ts`（wene-mobile の `SchoolEvent` / `SchoolClaimResult` と一致）。
 

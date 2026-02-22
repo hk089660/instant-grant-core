@@ -25,6 +25,8 @@ export const schoolRoutes = {
       popEntryHash?: string;
       popAuditHash?: string;
       popSigner?: string;
+      auditReceiptId?: string;
+      auditReceiptHash?: string;
     }
   ) => {
     const base = `/u/success?eventId=${encodeURIComponent(eventId)}`;
@@ -41,6 +43,8 @@ export const schoolRoutes = {
     if (params?.popEntryHash) query.push(`popEntryHash=${encodeURIComponent(params.popEntryHash)}`);
     if (params?.popAuditHash) query.push(`popAuditHash=${encodeURIComponent(params.popAuditHash)}`);
     if (params?.popSigner) query.push(`popSigner=${encodeURIComponent(params.popSigner)}`);
+    if (params?.auditReceiptId) query.push(`auditReceiptId=${encodeURIComponent(params.auditReceiptId)}`);
+    if (params?.auditReceiptHash) query.push(`auditReceiptHash=${encodeURIComponent(params.auditReceiptHash)}`);
     return query.length > 0 ? `${base}&${query.join('&')}` : base;
   },
   schoolClaim: (eventId: string) => `/r/school/${eventId}`,

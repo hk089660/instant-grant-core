@@ -28,6 +28,8 @@ export const UserSuccessScreen: React.FC = () => {
     popEntryHash: popEntryHashRaw,
     popAuditHash: popAuditHashRaw,
     popSigner: popSignerRaw,
+    auditReceiptId: auditReceiptIdRaw,
+    auditReceiptHash: auditReceiptHashRaw,
   } = useLocalSearchParams<{
     tx?: string;
     receipt?: string;
@@ -40,6 +42,8 @@ export const UserSuccessScreen: React.FC = () => {
     popEntryHash?: string;
     popAuditHash?: string;
     popSigner?: string;
+    auditReceiptId?: string;
+    auditReceiptHash?: string;
   }>();
 
   const [event, setEvent] = useState<SchoolEvent | null>(null);
@@ -50,6 +54,10 @@ export const UserSuccessScreen: React.FC = () => {
   const popEntryHash = typeof popEntryHashRaw === 'string' && popEntryHashRaw.trim() ? popEntryHashRaw.trim() : undefined;
   const popAuditHash = typeof popAuditHashRaw === 'string' && popAuditHashRaw.trim() ? popAuditHashRaw.trim() : undefined;
   const popSigner = typeof popSignerRaw === 'string' && popSignerRaw.trim() ? popSignerRaw.trim() : undefined;
+  const auditReceiptId =
+    typeof auditReceiptIdRaw === 'string' && auditReceiptIdRaw.trim() ? auditReceiptIdRaw.trim() : undefined;
+  const auditReceiptHash =
+    typeof auditReceiptHashRaw === 'string' && auditReceiptHashRaw.trim() ? auditReceiptHashRaw.trim() : undefined;
   const reflectedOnchain = reflected === '1';
   const onchainBlockedByPeriod = onchainBlocked === '1';
   const storedTicket = targetEventId ? getTicketByEventId(targetEventId) : undefined;
@@ -109,6 +117,20 @@ export const UserSuccessScreen: React.FC = () => {
     });
   }, [targetEventId, resolvedPopSigner, resolvedPopEntryHash, resolvedPopAuditHash]);
 
+  const handleCopyAuditReceipt = useCallback(async () => {
+    const payload = [
+      'Participation Audit Receipt',
+      `eventId: ${targetEventId ?? '-'}`,
+      `receipt_id: ${auditReceiptId ?? '-'}`,
+      `receipt_hash: ${auditReceiptHash ?? '-'}`,
+      'verify_api: /api/audit/receipts/verify',
+    ].join('\n');
+
+    await copyTextWithFeedback(payload, {
+      successMessage: '監査レシート情報をコピーしました',
+    });
+  }, [targetEventId, auditReceiptId, auditReceiptHash]);
+
   if (!isValid) return null;
 
   return (
@@ -144,6 +166,34 @@ export const UserSuccessScreen: React.FC = () => {
             <AppText variant="small" style={styles.codeHint}>
               このコードは後で確認に使えます
             </AppText>
+          </Card>
+        )}
+
+        {(auditReceiptId || auditReceiptHash) && (
+          <Card style={styles.card}>
+            <AppText variant="caption" style={styles.label}>
+              監査レシート（参加券）
+            </AppText>
+            {auditReceiptId && (
+              <AppText variant="small" style={styles.value} selectable>
+                receipt_id: {auditReceiptId}
+              </AppText>
+            )}
+            {auditReceiptHash && (
+              <AppText variant="small" style={styles.value} selectable>
+                receipt_hash: {auditReceiptHash}
+              </AppText>
+            )}
+            <AppText variant="small" style={styles.codeHint}>
+              第三者は verify API で監査チェーン整合性を検証できます。
+            </AppText>
+            <Button
+              title="監査レシートをコピー"
+              variant="secondary"
+              size="medium"
+              onPress={handleCopyAuditReceipt}
+              style={styles.copyButton}
+            />
           </Card>
         )}
 

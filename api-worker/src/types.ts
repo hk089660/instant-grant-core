@@ -83,6 +83,31 @@ export interface PopProofResponse {
   issuedAt: number;
 }
 
+export interface ParticipationTicketReceipt {
+  version: 1;
+  type: 'participation_audit_receipt';
+  receiptId: string;
+  receiptHash: string;
+  issuedAt: string;
+  confirmationCode: string;
+  subjectCommitment: string;
+  verifyEndpoint: string;
+  audit: {
+    event: string;
+    eventId: string;
+    entryHash: string;
+    prevHash: string;
+    streamPrevHash: string;
+    immutableMode: 'off' | 'best_effort' | 'required';
+    immutablePayloadHash: string | null;
+    immutableSinks: Array<{
+      sink: 'r2_entry' | 'r2_stream' | 'kv_index' | 'immutable_ingest';
+      ref: string;
+      at: string;
+    }>;
+  };
+}
+
 /** POST /api/users/register */
 export interface RegisterBody {
   displayName?: string;
@@ -101,4 +126,5 @@ export interface UserClaimBody {
 export interface UserClaimResponse {
   status: 'created' | 'already';
   confirmationCode: string;
+  ticketReceipt?: ParticipationTicketReceipt;
 }
