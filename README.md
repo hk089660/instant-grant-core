@@ -35,6 +35,22 @@ What is unique:
 - Operational strict levels are separated (`master > admin`) for transfer/PII visibility.
 - Master search is server-side indexed and persisted in Durable Object SQLite (stable latency even after cold start).
 
+## Next-Generation PoP Concept for Public Administration
+Why this goes beyond classic P2P:
+- Winny demonstrated strong decentralized distribution, but policy-governed operational accountability and auditability were not first-class design goals.
+- Bitcoin proves transaction validity and ordering, but does not natively prove off-chain administrative process decisions (who reviewed what rule, and who approved).
+- Public administration requires both result integrity and process integrity.
+
+What PoP adds:
+1. Process proof layer: append all critical API-side operations into an immutable hash chain.
+2. Settlement binding: require process proof verification in on-chain claim settlement.
+3. Role-strict disclosure: separate visibility controls (`master > admin`) for transfer and personal data handling.
+
+Administrative value:
+- Explainable operations for auditors, institutions, and citizens.
+- Tamper-evident continuity from decision process to settlement result.
+- Practical deployment path for domestic infrastructure and future independent-chain operation.
+
 ## What Works Today
 - On-chain PoP verification in claim flow (`claim_grant` / `claim_grant_with_proof`).
 - Global and per-event audit chain (`prev_hash`, `stream_prev_hash`).
