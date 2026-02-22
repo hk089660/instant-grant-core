@@ -248,7 +248,12 @@ export async function fetchInviteCodes(masterPassword: string, includeRevoked = 
     },
   });
 
-  if (!res.ok) return [];
+  if (!res.ok) {
+    if (res.status === 401) {
+      throw new Error(await readErrorMessage(res, 'Session expired'));
+    }
+    return [];
+  }
   const json = await res.json() as { invites?: InviteCodeRecordPayload[] };
   const invitesRaw = Array.isArray(json?.invites) ? json.invites : [];
   return invitesRaw
@@ -268,7 +273,12 @@ export async function revokeInviteCode(masterPassword: string, code: string): Pr
     body: JSON.stringify({ code }),
   });
 
-  if (!res.ok) return false;
+  if (!res.ok) {
+    if (res.status === 401) {
+      throw new Error(await readErrorMessage(res, 'Session expired'));
+    }
+    return false;
+  }
   const json = await res.json();
   return json.success === true;
 }

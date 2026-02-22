@@ -3,8 +3,8 @@ import React, { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
 import { masterTheme } from '../../src/ui/masterTheme';
-import { useAuth } from '../../src/contexts/AuthContext'; // Reusing AuthContext or local storage check
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { loginAdmin } from '../../src/api/adminApi';
 
 export const MASTER_AUTH_KEY = 'master_auth_token';
 
@@ -17,9 +17,18 @@ export default function MasterLayout() {
         const checkAuth = async () => {
             try {
                 const token = await AsyncStorage.getItem(MASTER_AUTH_KEY);
-                // In a real app, verify token validity with API.
-                // For now, presence of token (master password) is enough.
-                setIsAuthorized(!!token);
+                if (!token) {
+                    setIsAuthorized(false);
+                    return;
+                }
+                // Validate session token against API so stale local tokens do not keep dashboard accessible.
+                const result = await loginAdmin(token);
+                if (result.success && result.role === 'master') {
+                    setIsAuthorized(true);
+                    return;
+                }
+                await AsyncStorage.removeItem(MASTER_AUTH_KEY);
+                setIsAuthorized(false);
             } catch (e) {
                 setIsAuthorized(false);
             }

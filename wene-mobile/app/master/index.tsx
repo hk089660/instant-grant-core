@@ -67,6 +67,21 @@ export default function MasterDashboard() {
         }
     }, [activeTab]);
 
+    const isSessionExpiredError = (error: unknown): boolean => {
+        const message = error instanceof Error ? error.message : String(error ?? '');
+        return /unauthorized|401|session expired/i.test(message);
+    };
+
+    const handleSessionExpired = async (error: unknown, silent = false): Promise<boolean> => {
+        if (!isSessionExpiredError(error)) return false;
+        await AsyncStorage.removeItem(MASTER_AUTH_KEY);
+        if (!silent) {
+            Alert.alert('Session expired', 'Please login again.');
+        }
+        router.replace('/master/login');
+        return true;
+    };
+
     const loadInvites = async () => {
         setInvitesLoading(true);
         try {
@@ -80,6 +95,7 @@ export default function MasterDashboard() {
         } catch (e) {
             console.error(e);
             setInvites([]);
+            await handleSessionExpired(e, true);
         } finally {
             setInvitesLoading(false);
         }
@@ -114,6 +130,7 @@ export default function MasterDashboard() {
             }
         } catch (e) {
             console.error(e);
+            await handleSessionExpired(e, true);
         } finally {
             setLoadingLogs(false);
         }
@@ -135,6 +152,11 @@ export default function MasterDashboard() {
             setAdminDisclosures(disclosure.admins || []);
         } catch (e) {
             console.error(e);
+            if (await handleSessionExpired(e, true)) {
+                setAdminDisclosures([]);
+                setDisclosureError(null);
+                return;
+            }
             setDisclosureError(e instanceof Error ? e.message : 'failed to load disclosure');
             setAdminDisclosures([]);
         } finally {
@@ -176,6 +198,12 @@ export default function MasterDashboard() {
         } catch (e) {
             if (searchRequestSeq.current !== requestId) return;
             console.error(e);
+            if (await handleSessionExpired(e, true)) {
+                setSearchError(null);
+                setSearchResults([]);
+                setSearchTotal(0);
+                return;
+            }
             setSearchError(e instanceof Error ? e.message : 'failed to search');
             setSearchResults([]);
             setSearchTotal(0);
@@ -234,6 +262,9 @@ export default function MasterDashboard() {
                 void loadAdminDisclosures();
             }
         } catch (e) {
+            if (await handleSessionExpired(e)) {
+                return;
+            }
             const message = e instanceof Error ? e.message : 'Failed to create code';
             Alert.alert('Error', message);
         } finally {
@@ -262,6 +293,9 @@ export default function MasterDashboard() {
                 Alert.alert('Error', 'Failed to revoke code');
             }
         } catch (e) {
+            if (await handleSessionExpired(e)) {
+                return;
+            }
             const message = e instanceof Error ? e.message : 'Failed to revoke';
             Alert.alert('Error', message);
         } finally {
@@ -301,6 +335,9 @@ export default function MasterDashboard() {
             void loadInvites();
             void loadAdminDisclosures();
         } catch (e) {
+            if (await handleSessionExpired(e)) {
+                return;
+            }
             const message = e instanceof Error ? e.message : 'Failed to rename admin';
             Alert.alert('Error', message);
         } finally {
