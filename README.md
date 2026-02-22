@@ -10,7 +10,19 @@ Public prototype for auditable school/public participation and grant operations 
 
 **Status (as of February 22, 2026 / 2026-02-22)**
 
+## Spec Freeze (as of 2026-02-22)
+- In the current `grant_program`, both `claim_grant` and `claim_grant_with_proof` call `verify_and_record_pop_proof`, so PoP verification is always required inside on-chain claim instructions.
+- In this README, `optional/required` refers to whether operations enforce the on-chain route. It does not mean PoP verification itself is switchable inside contract claims.
+- A contract-level PoP on/off flag is a next-phase extension and is not implemented in the current codebase.
+
 ## Quick Navigation
+- [Spec Freeze (PoP Required vs Optional Scope)](#spec-freeze-as-of-2026-02-22)
+- [Verification Scope (Ops Audit vs Independent Crypto Verification)](#verification-scope-ops-audit-vs-independent-crypto-verification)
+- [How to Verify (Independent / Server-Untrusted)](#how-to-verify-independent--server-untrusted)
+- [PoP Chain Recovery Runbook](#pop-chain-recovery-runbook)
+- [Trust Assumption (Prototype Centralization)](#trust-assumption-prototype-centralization)
+- [Decentralization Milestones (Planned)](#decentralization-milestones-planned)
+- [Pilot Plan (Anonymous OK)](#pilot-plan-anonymous-ok)
 - [Top Summary](#top-summary)
 - [Reviewer Evidence Highlights](#reviewer-evidence-highlights)
 - [Visual Overview](#visual-overview)
@@ -22,10 +34,10 @@ Public prototype for auditable school/public participation and grant operations 
 - [Milestones / What Grant Funds](#milestones--what-grant-funds)
 
 ## Top Summary
-- What it is: a 3-layer system that binds operational process logs to verifiable receipts, and optionally to Solana settlement.
-- Who it is for: students/users who join events, and operators (admin/master) who run and audit distribution.
+- What it is: a 3-layer system that binds operational process logs to verifiable receipts, with policy-controlled enforcement of the on-chain route.
+- Who it is for: students/users who join events, and operators (admin/master) who run and audit distribution. Initial pilot realism is defined as one institution with `admin 1-3` operators and `20-200` participants.
 - [Implemented] Student/user flow has two policy-gated modes: walletless off-chain Attend (`confirmationCode` + `ticketReceipt`) and wallet-signed on-chain Redeem (only when event policy requires on-chain proof).
-- [Implemented] On-chain settlement evidence on devnet is available and switchable by event policy (`optional`/`required`); when required, tx/receipt/Explorer evidence is mandatory.
+- [Implemented] On-chain settlement evidence on devnet is available, and route enforcement is policy-gated. When the on-chain route executes, `grant_program` claim instructions require PoP-linked evidence (tx/receipt/Explorer chain).
 - [Implemented] Accountable operator workflow: admin/master flows expose PoP/runtime status, transfer audit logs, and role-based disclosure/search.
 - [Implemented] Admin participant search is owner-scoped: admin accounts search only tickets from their own issued events; master keeps full scope.
 - [Implemented] UI-level PoP confirmation is available: admin events screen shows `PoP Runtime Proof` with `enforceOnchainPop` + `signerConfigured`, linked to `/v1/school/pop-status`.
@@ -34,6 +46,13 @@ Public prototype for auditable school/public participation and grant operations 
 - [Implemented] User evidence UI is available on success screen: `confirmationCode`, participation audit receipt (`receipt_id`, `receipt_hash`), and optional PoP proof copy actions.
 - [Implemented] Admin event issuance requires authenticated operator + connected Phantom wallet + runtime readiness checks.
 - [Implemented] Verifiability endpoints include `/v1/school/pop-status`, `/v1/school/runtime-status`, `/v1/school/audit-status`, and `/api/audit/receipts/verify-code`.
+- [Implemented] CI runs localnet `anchor test --skip-build --provider.cluster localnet` in addition to `anchor build`, so minimal contract integration tests are automatically verified.
+- [Implemented] Node dependencies are standardized on `npm`, and `npm ci` is the canonical install path. Canonical lockfiles are `package-lock.json` at root / `grant_program` / `api-worker` / `wene-mobile`.
+- [Implemented] CI fails on `yarn.lock` / `pnpm-lock.yaml` / non-canonical lockfile names (for example `package-lock 2.json`) to prevent reproducibility drift.
+- [Planned] To avoid “too-early” review outcomes, one anonymous-allowed pilot is now a fixed milestone with a one-page onboarding flow (`docs/PILOT_ONBOARDING_FLOW.md`).
+- Independent verification procedure: see `How to Verify (Independent / Server-Untrusted)` for fixed on-chain state + proof checks.
+- PoP failure recovery: `docs/POP_CHAIN_OPERATIONS.md` defines reset/fork handling/stream-cut operations.
+- Trust assumption: current PoC intentionally uses a single `PoP signer` and effectively single-operator model, with decentralization staged in the next phase.
 - Current deployment (We-ne): User `https://instant-grant-core.pages.dev/` / Admin `https://instant-grant-core.pages.dev/admin/login`.
 - Maturity: prototype focused on reproducibility and reviewer-verifiable evidence, not a production-complete public system.
 - Source of truth in this repo: `api-worker/src/storeDO.ts`, `wene-mobile/src/screens/user/*`, `wene-mobile/src/screens/admin/*`, `grant_program/programs/grant_program/src/lib.rs`.
@@ -51,6 +70,47 @@ Public prototype for auditable school/public participation and grant operations 
 - Master audit/disclosure with PII control:
   - UI code path: `wene-mobile/app/master/index.tsx` (public URL intentionally not listed).
   - PII is hidden by default (`pii: hidden`) and requires explicit `Show PII` toggle.
+
+## Verification Scope (Ops Audit vs Independent Crypto Verification)
+- `Ops audit (UI/API)`: validate operational status through admin/master screens and `/v1/school/*`, `/api/*` responses. Strong for observability, but it includes trust in `api-worker` and UI surfaces.
+- `Independent crypto verification (L1)`: validate claim correctness using only Solana transaction/account state, without trusting server/UI output. In this README, “third-party independently verifiable” refers to this path.
+- `off-chain Attend` (`confirmationCode + ticketReceipt`) can be checked through public receipt APIs, but that is not equivalent to trust-minimized L1-only verification.
+
+## How to Verify (Independent / Server-Untrusted)
+Prerequisite: use a successful on-chain path result (`txSignature`, `receiptPubkey`, `mint`).
+
+1. Fetch the transaction via Solana RPC (`getTransaction`) or Explorer using `txSignature`.
+2. Validate instruction order:
+   - an Ed25519 verify instruction exists immediately before the claim instruction.
+   - the claim instruction program is `grant_program` (`declare_id!` in `grant_program/programs/grant_program/src/lib.rs`).
+3. Validate PoP signer linkage:
+   - `pop-config` PDA (seed: `["pop-config", authority]`) `signer_pubkey` matches the Ed25519 signer.
+   - Ed25519 message fields (`grant`, `claimer`, `period_index`, `entry_hash`) match the claim context.
+4. Validate receipt linkage:
+   - recompute `receipt` PDA from `["receipt", grant, claimer, period_index]` and match `receiptPubkey`.
+   - confirm the receipt account exists on-chain (period-level double-claim prevention basis).
+5. Validate state updates:
+   - token transfer (vault -> claimer ATA) executed with amount equal to `grant.amount_per_period`.
+   - optionally verify `pop-state` PDA (`["pop-state", grant]`) updates for `last_global_hash` / `last_stream_hash`.
+
+## PoP Chain Recovery Runbook
+- Detailed playbook: `docs/POP_CHAIN_OPERATIONS.md`
+- Key points:
+  - on `PopHashChainBroken` / `PopStreamChainBroken`, perform cutover to a new grant instead of in-place reset
+  - preserve historical chain data (no rewrite) for fork handling
+  - stream boundary is grant-level; apply `1 event = 1 grant` as both policy and API constraint
+
+## Trust Assumption (Prototype Centralization)
+- In the current PoC, `PoP signer` is a single key and operations are effectively run by a single operator. This is an intentional choice to lock down implementation and reviewer verification paths quickly.
+- Under this model, third parties can independently verify on-chain claim/state correctness, but governance of signer legitimacy still includes a single-entity trust assumption.
+- The claim of this prototype is therefore not “no central trust,” but “explicit trust assumptions with independently verifiable state transitions.”
+
+## Decentralization Milestones (Planned)
+Next phase reduces this trust assumption in explicit steps (details in `docs/ROADMAP.md`):
+
+1. 2026-03-31: role-key separation (`operator`, `pop_signer`, `audit_admin`) plus key-rotation runbook.
+2. 2026-04-30: `2-of-3 multisig` for high-impact operations (`upsert_pop_config`, `set_paused`, `set_allowlist_root`, `close_grant`).
+3. 2026-05-31: `threshold PoP signer (t-of-n)` design freeze and devnet PoC.
 
 ## Visual Overview
 ```mermaid
@@ -70,9 +130,16 @@ flowchart LR
 - [Planned] Generalize settlement interfaces toward chain-agnostic adapters in the future public infrastructure direction, while Solana remains the active implementation in this PoC.
 - [Planned] This grant/PoC stage does not include launching a new independent chain.
 
+## Pilot Plan (Anonymous OK)
+- Target organization profile: one institution (school / education NPO / municipal contractor). Public naming can remain anonymous.
+- Expected users: `admin 1-3` operators and `20-200` participants (mixed wallet and non-wallet users).
+- Minimum pilot scope: run at least one event through `admin login -> QR issuance -> /u/scan -> /u/confirm -> /u/success -> audit verification`.
+- Reviewer-facing outputs: runtime/pop/audit readiness snapshots, `verify-code` checks, and (when on-chain path executes) `txSignature` / `receiptPubkey`.
+- One-page onboarding flow: `docs/PILOT_ONBOARDING_FLOW.md`
+
 ## Stage Clarity
 > - [Implemented] Off-chain Attend issues a participation ticket (`confirmationCode` + `ticketReceipt`) without requiring a wallet when policy allows.
-> - [Implemented] On-chain redeem/proof is implemented and policy-gated (`optional`/`required`); tx signature / receipt pubkey / Explorer evidence are produced when on-chain path executes.
+> - [Implemented] On-chain redeem/proof is implemented. Route enforcement is policy-gated, but PoP verification inside on-chain claim instructions is always required.
 > - [Implemented] PoP/runtime/audit operational checks are exposed via public endpoints and shown in admin UI.
 > - [Planned] Advanced anti-sybil eligibility modules, federation-ready operations, and chain-agnostic adapter design are roadmap items.
 
@@ -105,7 +172,7 @@ Public grants and school participation often expose only final outcomes, leaving
 | Capability | Status | Evidence |
 |---|---|---|
 | `Participation Ticket (off-chain Attend)` with immutable audit receipt | `Implemented` | `api-worker/src/storeDO.ts` (`/v1/school/claims`, `/api/events/:eventId/claim`, receipt builder/verify) |
-| `On-chain Redeem (optional)` with Phantom signing | `Implemented` | `wene-mobile/src/screens/user/UserConfirmScreen.tsx`, `grant_program/programs/grant_program/src/lib.rs` |
+| `On-chain Redeem` (policy-gated route, PoP mandatory in claim instructions) with Phantom signing | `Implemented` | `wene-mobile/src/screens/user/UserConfirmScreen.tsx`, `grant_program/programs/grant_program/src/lib.rs` |
 | PoP runtime/public status endpoints | `Implemented` | `/v1/school/pop-status`, `/v1/school/runtime-status`, `/v1/school/audit-status` |
 | Admin participant search with owner scope | `Implemented` | `/admin/participants`, `wene-mobile/src/screens/admin/AdminParticipantsScreen.tsx`, `/v1/school/events?scope=mine`, owner check in `/v1/school/events/:eventId/claimants` (`api-worker/src/storeDO.ts`) |
 | Admin transfer audit split (`onchain` vs `offchain`) | `Implemented` | `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`, `/api/admin/transfers` |
@@ -128,7 +195,7 @@ Public grants and school participation often expose only final outcomes, leaving
   - `/r/school/:eventId` web flow can use `joinToken` (walletless Attend)
   - `/u/*` flow can complete without wallet only when event/policy does not require on-chain proof
   - Code: `wene-mobile/src/hooks/useSchoolClaim.ts`, `api-worker/src/storeDO.ts`
-- `Implemented`: `On-chain Redeem (optional)` path returns `txSignature`, `receiptPubkey`, `mint`, and PoP hashes when used.
+- `Implemented`: when the on-chain route is executed, the path returns `txSignature`, `receiptPubkey`, `mint`, and PoP hashes (PoP verification is mandatory in claim instructions).
 
 ### 2) Operator/Admin Experience
 - `Implemented`: Admin login and role-based operator auth.
@@ -154,7 +221,7 @@ Public grants and school participation often expose only final outcomes, leaving
 ### 3) Security / Abuse Resistance (Current + Planned)
 - `Implemented`: per-subject claim gating with interval policy and `alreadyJoined` behavior.
   - Code: `api-worker/src/claimLogic.ts`
-- `Implemented`: on-chain proof fields required when `ENFORCE_ONCHAIN_POP=true` and event has on-chain config.
+- `Implemented`: when `ENFORCE_ONCHAIN_POP=true` and the event has on-chain config, requests that submit on-chain proof are validated for `walletAddress` / `txSignature` / `receiptPubkey`.
   - API checks in `/v1/school/claims` and `/api/events/:eventId/claim`
 - `Implemented`: immutable audit fail-close mode (`AUDIT_IMMUTABLE_MODE=required`) blocks mutating APIs if sink is not operational.
   - Code: `api-worker/src/storeDO.ts`
@@ -178,7 +245,7 @@ flowchart TB
     VR["Receipt Verify / Disclosure / Search APIs"]
   end
 
-  subgraph L1["L1: Settlement [Implemented, policy-gated/optional]"]
+  subgraph L1["L1: Settlement [Implemented, policy-gated route]"]
     SP["Solana Anchor Program\ngrant_program"]
   end
 
@@ -201,9 +268,9 @@ L2: Process Proof + Ops API (Implemented)
   - Receipt verify endpoints, admin/master disclosure/search
           |
           v
-L1: Settlement (Implemented, policy-gated/optional per event)
+L1: Settlement (Implemented, policy-gated route enforcement per event)
   - Solana Anchor program (`grant_program`)
-  - PoP-verified claim instructions + claim receipts
+  - PoP-verified claim instructions (mandatory in instruction flow) + claim receipts
 
 Dev-only optional path:
   - `wene-mobile/server/*` is a local mock API for development tests.
@@ -268,9 +335,13 @@ Expected: `ok=true` and a `verification.checks` object with chain/hash validatio
 
 ### F) Local run (minimal reproducibility)
 ```bash
+cd grant_program && npm ci && anchor build && anchor test --skip-build --provider.cluster localnet
 cd api-worker && npm ci && npm test && npx tsc --noEmit
 cd ../wene-mobile && npm ci && npm run test:server && npx tsc --noEmit
 ```
+Expected (contract):
+- major `grant_program (PDA)` scenarios pass (e.g., `3 passing`)
+- PoP-verified `claim_grant` succeeds and same-period double-claim is rejected
 
 ## Verification Evidence
 
@@ -288,7 +359,7 @@ curl -s -X POST "https://instant-grant-core.pages.dev/api/audit/receipts/verify-
 ```
 Expected: `ok=true` with chain/hash checks in `verification.checks`.
 
-### 2) On-chain evidence `[Optional]`
+### 2) On-chain evidence `[Implemented: when on-chain route executes]`
 Only when on-chain path is actually executed in `wene-mobile/src/screens/user/UserConfirmScreen.tsx`:
 - success UI shows `txSignature`, `receiptPubkey`, optional `mint`, PoP values
 - Explorer links appear only when those values exist
@@ -335,13 +406,14 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
 | M1: Reproducibility + Evidence (10-minute review) | [Implemented] Reviewer runbook for live + local verification with explicit evidence points | A reviewer can verify runtime status + ticket evidence in about 10 minutes without hidden setup | This README + `/v1/school/pop-status` + `/v1/school/runtime-status` + `/api/audit/receipts/verify-code` |
 | M2: Accountability Strengthening | [Implemented] Ops evidence surfaces (`PoP稼働証明`, `Transfer Audit (Hash Chain)`, transfer on/off-chain split, role-based disclosures); [Implemented] integrity check API (`/api/master/audit-integrity`) | Operators can inspect process evidence and auditors can run integrity checks with master auth | `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`, `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`, `wene-mobile/app/master/index.tsx`, `api-worker/src/storeDO.ts` |
 | M3: Federation-ready Generalization | [Planned] Doc-level federation model + minimal PoC hooks for chain-agnostic adapter boundaries (not a new chain launch) | Design docs and adapter/federation interfaces are explicit and testable without changing current Solana reference path | `docs/ROADMAP.md` + future PRs for adapter/federation interfaces |
+| M4: One Pilot (anonymous allowed) + fixed onboarding flow | [Planned] Single real-operator pilot plus fixed one-page onboarding flow | At least one real event is run end-to-end and produces a re-verifiable redacted evidence set | `docs/PILOT_ONBOARDING_FLOW.md` + `docs/ROADMAP.md` (pilot timeline/criteria) + redacted pilot evidence |
 
 ## Scope Clarity
 
 > **In scope for this repo / this grant**
 > - Reproducible school participation flow
 > - `Participation Ticket (off-chain Attend)` with immutable audit receipt
-> - Policy-gated `On-chain Redeem (optional)`
+> - Policy-gated `On-chain Redeem` route, with mandatory PoP verification in on-chain claim instructions
 > - Admin/master auditability, disclosure separation, and verification endpoints
 >
 > **Out of scope (planned)**
@@ -353,6 +425,8 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
 - Architecture: `docs/ARCHITECTURE.md`
 - Security: `docs/SECURITY.md`
 - Roadmap: `docs/ROADMAP.md`
+- Pilot onboarding flow (one-page): `docs/PILOT_ONBOARDING_FLOW.md`
+- PoP operations runbook: `docs/POP_CHAIN_OPERATIONS.md`
 - Devnet setup: `docs/DEVNET_SETUP.md`
 - Worker API details: `api-worker/README.md`
 - UI verification report: `wene-mobile/docs/STATIC_VERIFICATION_REPORT.md`

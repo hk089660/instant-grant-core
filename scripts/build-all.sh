@@ -20,7 +20,7 @@ run_contract_test() {
 
 run_mobile_build() {
   echo "━━━ wene-mobile: install & typecheck ━━━"
-  (cd wene-mobile && npm install --legacy-peer-deps && npx tsc --noEmit)
+  (cd wene-mobile && npm ci --legacy-peer-deps && npx tsc --noEmit)
 }
 
 case "$MODE" in

@@ -6,13 +6,15 @@
   "scripts": {
     "build": "npm run build:contract && npm run build:mobile",
     "build:contract": "cd grant_program && anchor build",
-    "build:mobile": "cd wene-mobile && npm install --legacy-peer-deps && npx tsc --noEmit",
+    "build:mobile": "cd wene-mobile && npm ci --legacy-peer-deps && npx tsc --noEmit",
+    "check:lockfiles": "bash scripts/check-lockfile-policy.sh",
     "test": "npm run test:contract",
     "test:contract": "cd grant_program && anchor test",
     "test:mobile": "cd wene-mobile && npx tsc --noEmit",
     "setup:mobile": "cd wene-mobile && npm run setup",
     "verify:production": "node scripts/verify-production-readiness.mjs"
   },
+  "packageManager": "npm@10.8.2",
   "repository": {
     "type": "git",
     "url": "https://github.com/we-ne/we-ne.git"

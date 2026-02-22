@@ -312,12 +312,12 @@ function checkNodeModules() {
     log.error('node_modules not found');
     issues++;
     if (FIX_MODE) {
-      log.fix('Running npm install...');
+      log.fix('Running npm ci...');
       try {
-        execSync('npm install --legacy-peer-deps', { cwd: ROOT, stdio: 'inherit' });
+        execSync('npm ci --legacy-peer-deps', { cwd: ROOT, stdio: 'inherit' });
         fixed++;
       } catch (e) {
-        log.error('npm install failed');
+        log.error('npm ci failed');
       }
     }
   } else {

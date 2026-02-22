@@ -376,7 +376,7 @@ From the repository root you can build and test everything without entering each
 git clone https://github.com/<owner>/we-ne.git
 cd we-ne
 
-npm install # optional: only if you want to run root scripts
+npm ci # optional: only if you want to run root scripts
 npm run build # build contract + mobile typecheck
 npm run test  # run Anchor tests
 ```
@@ -407,7 +407,7 @@ UI final check on Pixel 8 (USB debugging) is planned after returning home.
 
 | Step                                   | Result                                                                               |
 | -------------------------------------- | ------------------------------------------------------------------------------------ |
-| `npm run build` / `build-all.sh build` | Contract builds with `anchor build`; mobile passes `npm install + tsc --noEmit`      |
+| `npm run build` / `build-all.sh build` | Contract builds with `anchor build`; mobile passes `npm ci + tsc --noEmit`           |
 | `npm run test` / `build-all.sh test`   | Anchor tests (e.g. create_grant, fund_grant, claimer can claim once per period) pass |
 | `build-all.sh all`                     | All of the above; ends with “✅ Done.”                                                |
 
@@ -425,7 +425,7 @@ The repo uses:
 For mobile-only setup, use:
 
 ```bash
-npm install --legacy-peer-deps
+npm ci --legacy-peer-deps
 ```
 
 See `docs/DEVELOPMENT.md` for per-component setup and recent changes for third-party builds.
@@ -442,7 +442,7 @@ cd wene-mobile
 npm run setup
 
 # Or manual setup:
-npm install --legacy-peer-deps
+npm ci --legacy-peer-deps
 
 npm run doctor:fix
 npx expo prebuild --clean

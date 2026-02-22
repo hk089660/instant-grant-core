@@ -6,7 +6,7 @@ This guide covers setting up the development environment for we-ne. Third-party 
 
 ### All Platforms
 - Node.js v18+ (recommended: v20 LTS)
-- npm or yarn
+- npm (v10+, bundled with Node.js v20)
 - Git
 
 ### Smart Contract Development
@@ -49,22 +49,23 @@ chmod +x scripts/build-all.sh
 git clone https://github.com/hk089660/instant-grant-core.git
 cd we-ne
 
-# Install mobile app dependencies (uses wene-mobile/.npmrc for legacy-peer-deps)
+# Install mobile app dependencies (deterministic install via lockfile)
 cd wene-mobile
-npm install
+npm ci --legacy-peer-deps
 
 # Start development server
 npm start
 ```
 
-If you see peer dependency errors in `wene-mobile`, use `npm install --legacy-peer-deps`; root build scripts and CI already apply this.
+If you see peer dependency errors in `wene-mobile`, use `npm ci --legacy-peer-deps`; root build scripts and CI already apply this.
 
 ## CI (GitHub Actions)
 
 On every push/PR to `main` or `master`, [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs:
 
-- **Smart contract**: Install Rust, Solana CLI, Anchor → `grant_program`: `yarn install`, `anchor build`, `anchor test`
-- **Mobile app**: Node 20 → `wene-mobile`: `npm install --legacy-peer-deps`, `npx tsc --noEmit`
+- **Policy check**: reject `yarn.lock`, `pnpm-lock.yaml`, and non-canonical lockfile names.
+- **Smart contract**: Install Rust, Solana CLI, Anchor → `grant_program`: `npm ci`, `anchor build`, `anchor test`
+- **Mobile app**: Node 20 → `wene-mobile`: `npm ci --legacy-peer-deps`, `npx tsc --noEmit`
 
 No secrets required. The README CI badge reflects this workflow once the repo is on GitHub.
 
@@ -141,7 +142,7 @@ anchor deploy --provider.cluster devnet
 
 ```bash
 cd wene-mobile
-npm install   # or npm install --legacy-peer-deps if you see peer dependency errors
+npm ci --legacy-peer-deps
 ```
 
 ### Development Server

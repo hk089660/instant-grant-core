@@ -279,6 +279,45 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     expect(message[0]).toBe(2);
   });
 
+  it('rejects duplicate on-chain grant config across events', async () => {
+    const onchainConfig = {
+      solanaMint: 'So11111111111111111111111111111111111111112',
+      solanaAuthority: '11111111111111111111111111111111',
+      solanaGrantId: '999',
+    };
+    const createFirst = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'first onchain event',
+          datetime: '2026/02/21 11:00',
+          host: 'admin',
+          ticketTokenAmount: 1,
+          ...onchainConfig,
+        }),
+      })
+    );
+    expect(createFirst.status).toBe(201);
+
+    const createSecond = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'second onchain event',
+          datetime: '2026/02/21 11:30',
+          host: 'admin',
+          ticketTokenAmount: 1,
+          ...onchainConfig,
+        }),
+      })
+    );
+    expect(createSecond.status).toBe(409);
+    const body = (await createSecond.json()) as { error?: string };
+    expect(body.error).toContain('on-chain grant config already linked to event');
+  });
+
   it('accepts user claim without on-chain proof on on-chain configured event (off-chain fallback)', async () => {
     const createRes = await store.fetch(
       new Request('https://example.com/v1/school/events', {

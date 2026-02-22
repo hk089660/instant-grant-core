@@ -64,7 +64,7 @@
 ### devnetConfig.ts の _RAW
 
 - **含めるもの**: `authority`, `mint`, `grantId`, `startTs`, `periodSeconds` のみ（devnet_setup の _RAW 貼り付け用ブロックと同じ）。
-- **確認**: `yarn devnet:setup`（または `npx ts-node tests/devnet_setup.ts`）実行後、標準出力の「_RAW（wene-mobile/src/solana/devnetConfig.ts に貼り付け）」ブロックと、`wene-mobile/src/solana/devnetConfig.ts` の `_RAW` を比較し、**完全一致**させる。
+- **確認**: `npm run devnet:setup`（または `npx ts-node tests/devnet_setup.ts`）実行後、標準出力の「_RAW（wene-mobile/src/solana/devnetConfig.ts に貼り付け）」ブロックと、`wene-mobile/src/solana/devnetConfig.ts` の `_RAW` を比較し、**完全一致**させる。
 - **vault**: devnetConfig には持たない。アプリ側で `getVaultPda(grantPda)` から計算。authority / mint / grantId / programId が一致していれば vault PDA も一致する。
 
 mainnet 由来の ID を貼り込まないこと（devnet_setup は devnet RPC に対して実行した結果だけを貼る）。

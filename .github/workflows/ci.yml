@@ -14,9 +14,19 @@ env:
   NODE_VERSION: "20"
 
 jobs:
+  lockfile_policy:
+    name: Lockfile policy (npm-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enforce lockfile policy
+        run: bash scripts/check-lockfile-policy.sh
+
   contract:
     name: Smart contract (Anchor)
     runs-on: ubuntu-latest
+    needs: lockfile_policy
     steps:
       - uses: actions/checkout@v4
 
@@ -37,21 +47,26 @@ jobs:
           solana-cli-version: ${{ env.SOLANA_VERSION }}
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install yarn and grant_program deps
+      - name: Install grant_program deps (npm ci)
         run: |
-          npm install -g yarn
-          cd grant_program && yarn install --frozen-lockfile
+          cd grant_program && npm ci
 
       - name: Build
         working-directory: grant_program
         run: anchor build
 
-      # anchor test は devnet デプロイが必要なため CI ではスキップ。
-      # 統合テストは手動で「cd grant_program && anchor test」で実行（localnet に切り替え可）。
+      - name: Localnet integration test (Anchor)
+        working-directory: grant_program
+        run: |
+          export ANCHOR_PROVIDER_URL="http://127.0.0.1:8899"
+          export ANCHOR_WALLET="${RUNNER_TEMP}/anchor-wallet.json"
+          solana-keygen new --no-bip39-passphrase --silent -o "$ANCHOR_WALLET"
+          anchor test --skip-build --provider.cluster localnet
 
   mobile:
     name: Mobile app (Expo / TypeScript)
     runs-on: ubuntu-latest
+    needs: lockfile_policy
     # School claim flow (useSchoolClaim, schoolRoutes, eventId, Result types) validated via tsc
     steps:
       - uses: actions/checkout@v4
@@ -65,7 +80,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: wene-mobile
-        run: npm install --legacy-peer-deps
+        run: npm ci --legacy-peer-deps
 
       - name: Type check
         working-directory: wene-mobile

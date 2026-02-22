@@ -3548,11 +3548,28 @@ export class SchoolStore implements DurableObject {
       if (maxClaimsPerInterval !== null && (!Number.isInteger(maxClaimsPerInterval) || maxClaimsPerInterval <= 0)) {
         return Response.json({ error: 'maxClaimsPerInterval must be null or a positive integer' }, { status: 400 });
       }
+      const solanaMint = this.normalizeStringField(body.solanaMint);
+      const solanaAuthority = this.normalizeStringField(body.solanaAuthority);
+      const solanaGrantId = this.normalizeStringField(body.solanaGrantId);
+      if (solanaMint && solanaAuthority && solanaGrantId) {
+        const events = await this.store.getEvents();
+        const duplicated = events.find((event) =>
+          this.normalizeStringField(event.solanaMint) === solanaMint &&
+          this.normalizeStringField(event.solanaAuthority) === solanaAuthority &&
+          this.normalizeStringField(event.solanaGrantId) === solanaGrantId
+        );
+        if (duplicated) {
+          return Response.json(
+            { error: `on-chain grant config already linked to event: ${duplicated.id}` },
+            { status: 409 }
+          );
+        }
+      }
       const event = await this.store.createEvent({
         title, datetime, host, state: body.state,
-        solanaMint: body.solanaMint,
-        solanaAuthority: body.solanaAuthority,
-        solanaGrantId: body.solanaGrantId,
+        solanaMint: solanaMint ?? undefined,
+        solanaAuthority: solanaAuthority ?? undefined,
+        solanaGrantId: solanaGrantId ?? undefined,
         ticketTokenAmount,
         claimIntervalDays,
         maxClaimsPerInterval,
@@ -3570,7 +3587,9 @@ export class SchoolStore implements DurableObject {
           createdByAdminId: operator.adminId,
           createdByAdminName: operator.name,
           createdBySource: operator.source,
-          solanaMint: body.solanaMint,
+          solanaMint,
+          solanaAuthority,
+          solanaGrantId,
           ticketTokenAmount,
           claimIntervalDays,
           maxClaimsPerInterval,

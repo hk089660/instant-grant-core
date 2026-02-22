@@ -140,7 +140,7 @@ we-ne/
 git clone https://github.com/hk089660/instant-grant-core.git
 cd instant-grant-core
 
-npm install
+npm ci
 npm run build
 npm run test
 ```

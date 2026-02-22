@@ -14,6 +14,7 @@ Hono による最小構成の API。`wene-mobile`（Cloudflare Pages）から固
   - `ticketTokenAmount` は 1 以上の整数（数値文字列も許容）
   - `claimIntervalDays` は 1 以上の整数（未指定時 30）
   - `maxClaimsPerInterval` は `null`（無制限）または 1 以上の整数（未指定時 1）
+  - `solanaAuthority + solanaMint + solanaGrantId` が既存イベントと重複する場合は 409（同一 grant のイベント再利用を禁止）
   - レスポンス: 作成された `SchoolEvent`
 - `POST /v1/school/claims`  
   - リクエスト: `{ eventId: string; walletAddress?: string; joinToken?: string; txSignature?: string; receiptPubkey?: string }`  
@@ -85,6 +86,7 @@ Hono による最小構成の API。`wene-mobile`（Cloudflare Pages）から固
 重要な整理:
 - 学校ユースケースでの基本価値は Attend で完結する
 - Redeem は追加要件が必要な運用時だけ有効化する拡張パス
+- PoP チェーン復旧（reset/fork handling/stream cut）は `../docs/POP_CHAIN_OPERATIONS.md` を参照
 
 契約型は `src/types.ts`（wene-mobile の `SchoolEvent` / `SchoolClaimResult` と一致）。
 

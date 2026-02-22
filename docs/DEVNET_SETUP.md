@@ -16,7 +16,7 @@
 ### a) Grant と Vault を作成・入金
 
 ```bash
-cd grant_program && yarn devnet:setup
+cd grant_program && npm run devnet:setup
 ```
 
 - 検証ログで `vault token balance (after fund_grant) > 0`、`authority SOL balance >= 0.01` を確認

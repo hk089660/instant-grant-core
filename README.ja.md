@@ -10,7 +10,19 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 
 **Status（2026-02-22 / February 22, 2026 時点）**
 
+## 仕様確定（2026-02-22）
+- 現行 `grant_program` では `claim_grant` / `claim_grant_with_proof` の両方で `verify_and_record_pop_proof` を実行するため、オンチェーン claim 命令内の PoP 検証は常時必須です。
+- 本READMEでの `optional/required` は「オンチェーン経路を運用方針で強制するか」を指します。PoP 検証そのものを optional/required で切替える意味ではありません。
+- PoP 検証をコントラクトフラグで切替える機能は次フェーズの拡張対象で、現時点では未実装です。
+
 ## クイックナビ
+- [仕様確定（PoP必須/任意の整理）](#仕様確定2026-02-22)
+- [検証の定義（運用監査 vs 独立暗号検証）](#検証の定義運用監査-vs-独立暗号検証)
+- [How to Verify（Independent / サーバ非信頼）](#how-to-verifyindependent--サーバ非信頼)
+- [PoP Chain運用復旧ランブック](#pop-chain運用復旧ランブック)
+- [Trust Assumption（Prototype Centralization）](#trust-assumptionprototype-centralization)
+- [Decentralization Milestones（Planned）](#decentralization-milestonesplanned)
+- [Pilot Plan（匿名可）](#pilot-plan-anonymous-ok)
 - [Top Summary](#top-summary)
 - [審査向け証拠ハイライト](#審査向け証拠ハイライト)
 - [可視化サマリー](#可視化サマリー)
@@ -23,10 +35,10 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 - [Milestones / 助成金で実施する範囲](#milestones--助成金で実施する範囲)
 
 ## Top Summary
-- これは何か: 運用プロセスのログを検証可能レシートに結合し、Solana上の PoP 検証付き claim を方針で optional/required 切替できる3層システムです。
-- 誰のためか: イベント参加者（学生/利用者）と、運用する管理者・運営者のための実装です。
+- これは何か: 運用プロセスのログを検証可能レシートに結合し、オンチェーン経路の強制有無を方針で制御できる3層システムです。
+- 誰のためか: イベント参加者（学生/利用者）と、運用する管理者・運営者のための実装です。初期Pilotの実在想定は「1機関の運用担当（admin 1-3名）+ 参加者20-200名」です。
 - [Implemented] 学生/利用者導線は方針連動の2モードです。wallet不要の off-chain Attend（`confirmationCode` + `ticketReceipt`）と、方針で必要時のみ wallet署名を使う on-chain Redeem を切替できます。
-- [Implemented] オンチェーン決済証跡（devnet）は実装済みで、イベント方針で optional/required を切替できます。required の場合は on-chain claim と PoP 証跡（tx/receipt/Explorer）が必須です。
+- [Implemented] オンチェーン決済証跡（devnet）は実装済みで、イベント方針でオンチェーン経路の強制有無を切替できます。オンチェーン経路を実行した場合、`grant_program` の claim 命令で PoP 証跡（tx/receipt/Explorer を含む検証連鎖）が必須です。
 - [Implemented] 説明責任ある運用: admin/master 導線で PoP/runtime 状態、送金監査ログ、権限別開示/検索を確認できます。
 - [Implemented] 管理者の参加券検索は所有者スコープです。admin は自分が発行したイベント分のみ検索対象で、master は全体対象です。
 - [Implemented] PoPのUI確認: 管理者イベント一覧に `PoP稼働証明` を表示し、`enforceOnchainPop` / `signerConfigured` を `/v1/school/pop-status` と紐付けて確認できます。
@@ -35,6 +47,13 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 - [Implemented] 利用者向け証跡UI: 成功画面で `confirmationCode`、監査レシート（`receipt_id`, `receipt_hash`）、PoP証跡コピー導線（条件付き）を表示します。
 - [Implemented] 管理者のイベント発行は、管理者認証に加えて Phantom 接続と runtime readiness を必須にしています。
 - [Implemented] 検証用 endpoint: `/v1/school/pop-status`、`/v1/school/runtime-status`、`/v1/school/audit-status`、`/api/audit/receipts/verify-code`。
+- [Implemented] CI は `anchor build` に加えて localnet の `anchor test --skip-build --provider.cluster localnet` を実行し、コントラクトの最小統合テストを自動検証します。
+- [Implemented] Node依存は `npm` に統一し、インストールは `npm ci` を正とします。正本 lockfile は `package-lock.json`（root / `grant_program` / `api-worker` / `wene-mobile`）です。
+- [Implemented] CI は `yarn.lock` / `pnpm-lock.yaml` / 非正規名の lockfile（例: `package-lock 2.json`）混入を失敗扱いにし、依存再現性の逸脱を防止します。
+- [Planned] 「まだ早い」判定を避けるため、匿名可の Pilot 1件をマイルストーン化し、導入フロー1枚（`docs/PILOT_ONBOARDING_FLOW.md`）を固定します。
+- 独立検証手順: 「How to Verify（Independent / サーバ非信頼）」に、on-chain state + proof checks の固定手順を記載しています。
+- PoP障害復旧: `docs/POP_CHAIN_OPERATIONS.md` に reset / fork handling / stream cut の運用手順を固定しています。
+- 信頼仮定: 現在は `PoP signer` と主要オペレーションの責務が単一主体に集中する、意図的な PoC 構成です（次フェーズで分散化）。
 - 現在の公開先（We-ne）: 利用者 `https://instant-grant-core.pages.dev/` / 管理者 `https://instant-grant-core.pages.dev/admin/login`。
 - 成熟度: 本番完成形ではなく、再現性と第三者検証性を重視したプロトタイプです。
 - リポジトリ内の事実ソース: `api-worker/src/storeDO.ts`、`wene-mobile/src/screens/user/*`、`wene-mobile/src/screens/admin/*`、`grant_program/programs/grant_program/src/lib.rs`。
@@ -58,6 +77,47 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 - 審査モード: Solana系レビューでは `enforceOnchainPop=true` + オンチェーン設定済みイベントで実行すると、tx/receipt/PoP 連鎖を必須確認できます。
 - 文書整合性: 実装状況の正本は本READMEと `docs/ROADMAP.md`（Status snapshot as of `2026-02-22`）です。
 
+## 検証の定義（運用監査 vs 独立暗号検証）
+- `運用監査（UI/API）`: 管理画面や `/v1/school/*`、`/api/*` の表示/応答で運用状態を確認する検証。可観測性には強い一方、`api-worker` と表示系の信頼を含みます。
+- `独立暗号検証（L1）`: サーバや管理画面を信頼せず、Solana の transaction と account state だけで claim の正当性を検証する方法。本READMEでいう「第三者が独立検証可能」はこちらを指します。
+- `off-chain Attend` の `confirmationCode + ticketReceipt` は公開APIで整合確認できますが、L1単体の trust-minimized 検証とは区別します。
+
+## How to Verify（Independent / サーバ非信頼）
+前提: on-chain 経路を実行した成功結果（`txSignature`, `receiptPubkey`, `mint`）を使用。
+
+1. `txSignature` の transaction を Solana RPC (`getTransaction`) または Explorer で取得。
+2. 命令列を確認:
+   - claim 命令の直前に Ed25519 検証命令があること。
+   - claim 命令の program が `grant_program`（`grant_program/programs/grant_program/src/lib.rs` の `declare_id!`）であること。
+3. PoP signer の整合を確認:
+   - `pop-config` PDA（seed: `["pop-config", authority]`）の `signer_pubkey` と Ed25519 signer が一致。
+   - Ed25519 message の `grant` / `claimer` / `period_index` / `entry_hash` が claim 文脈と一致。
+4. receipt の整合を確認:
+   - `receipt` PDA（seed: `["receipt", grant, claimer, period_index]`）を再計算し、`receiptPubkey` と一致。
+   - 該当 account が chain 上に存在すること（同一期間二重受給防止の根拠）。
+5. state 更新を確認:
+   - token transfer（vault -> claimer ATA）が実行され、amount が `grant.amount_per_period` と一致。
+   - 必要なら `pop-state` PDA（seed: `["pop-state", grant]`）の `last_global_hash` / `last_stream_hash` 更新を確認。
+
+## PoP Chain運用復旧ランブック
+- 詳細手順: `docs/POP_CHAIN_OPERATIONS.md`
+- 要点:
+  - `PopHashChainBroken` / `PopStreamChainBroken` 発生時は in-place reset ではなく、`new grant` への cutover を実施
+  - 過去チェーンは書き換えず保全（fork handling）
+  - stream 境界は grant 単位。`1イベント=1grant` を運用ルール + API 制約として適用
+
+## Trust Assumption（Prototype Centralization）
+- 現行 PoC では、`PoP signer` は単一鍵で、運用オペレーションも実質単一運用者モデルです。これは実装と検証導線を短期間で固定するための意図的選択です。
+- この構成では「on-chain state の整合性」は第三者が独立検証できますが、「誰が signer であるべきか」というガバナンス層は単一主体への信頼を含みます。
+- したがって本プロトタイプの主張は、`中央依存がない` ではなく、`中央依存の信頼仮定を明示したうえで検証可能性を確保している` です。
+
+## Decentralization Milestones（Planned）
+次フェーズでは、中央依存の信頼仮定を以下の順で縮小します（詳細は `docs/ROADMAP.md`）。
+
+1. 2026-03-31: `role keys` 分離（`operator` / `pop_signer` / `audit_admin`）とローテーション手順の固定化。
+2. 2026-04-30: 高影響操作（`upsert_pop_config`、`set_paused`、`set_allowlist_root`、`close_grant`）の `2-of-3 multisig` 化。
+3. 2026-05-31: `threshold PoP signer (t-of-n)` の設計確定と devnet PoC（単一 signer 前提の段階的撤廃）。
+
 ## 可視化サマリー
 ```mermaid
 flowchart LR
@@ -76,9 +136,16 @@ flowchart LR
 - [Planned] 将来の公共基盤に向けて settlement interface を chain-agnostic adapter へ一般化します（PoC段階の実装基盤は引き続きSolana）。
 - [Planned] この助成/PoC段階で独立チェーンを新規立ち上げる計画は含みません。
 
+## Pilot Plan (Anonymous OK)
+- 対象組織（実在想定）: 1機関（学校/教育NPO/自治体委託先のいずれか）。組織名は匿名で公開可能です。
+- 想定利用者: 運用担当（admin 1-3名）と参加者（20-200名、ウォレット有無が混在）。
+- 最小実施範囲: 1イベント以上で `admin login -> QR配布 -> /u/scan -> /u/confirm -> /u/success -> 監査確認` を完走。
+- 成果物（審査向け）: `runtime/pop/audit` の状態スナップショット、`verify-code` 検証結果、（オンチェーン導線実行時）`txSignature` / `receiptPubkey`。
+- 導入フロー1枚: `docs/PILOT_ONBOARDING_FLOW.md`
+
 ## Stage Clarity
 > - [Implemented] Off-chain Attend は、方針が許すイベントで wallet なしでも参加券（`confirmationCode` + `ticketReceipt`）を発行します。
-> - [Implemented] On-chain redeem / PoP は実装済みで、イベント方針に応じて optional/required を切替できます（required では証跡表示が必須）。
+> - [Implemented] On-chain redeem / PoP は実装済みです。経路の強制有無はイベント方針で制御しますが、オンチェーン claim 命令内の PoP 検証は常時必須です。
 > - [Implemented] PoP/runtime/audit の運用確認は公開 endpoint と管理者UIで確認できます。
 > - [Planned] 高度なSybil耐性、連合運用向け設計、chain-agnostic adapter 設計はロードマップ項目です。
 
@@ -111,7 +178,7 @@ flowchart LR
 | 機能 | 状態 | 根拠 |
 |---|---|---|
 | `Participation Ticket (off-chain Attend)` の不変レシート発行 | `Implemented` | `api-worker/src/storeDO.ts`（`/v1/school/claims`、`/api/events/:eventId/claim`、レシート生成/検証） |
-| `On-chain Redeem (optional)` のPhantom署名フロー | `Implemented` | `wene-mobile/src/screens/user/UserConfirmScreen.tsx`、`grant_program/programs/grant_program/src/lib.rs` |
+| `On-chain Redeem`（経路は方針連動、PoP 検証は命令内必須）のPhantom署名フロー | `Implemented` | `wene-mobile/src/screens/user/UserConfirmScreen.tsx`、`grant_program/programs/grant_program/src/lib.rs` |
 | PoP稼働状態の公開エンドポイント | `Implemented` | `/v1/school/pop-status`、`/v1/school/runtime-status`、`/v1/school/audit-status` |
 | 管理者参加券検索の所有者スコープ | `Implemented` | `/admin/participants`、`wene-mobile/src/screens/admin/AdminParticipantsScreen.tsx`、`/v1/school/events?scope=mine`、`/v1/school/events/:eventId/claimants` の owner check（`api-worker/src/storeDO.ts`） |
 | 管理者画面での送金監査（onchain/offchain分離） | `Implemented` | `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`、`/api/admin/transfers` |
@@ -134,7 +201,7 @@ flowchart LR
   - `/r/school/:eventId`（Web）は `joinToken` で wallet不要 Attend が可能
   - `/u/*` は、イベント方針がオンチェーン必須でない場合に wallet不要で完了可能
   - コード: `wene-mobile/src/hooks/useSchoolClaim.ts`、`api-worker/src/storeDO.ts`
-- `Implemented`: `On-chain Redeem (optional)` を使った場合、`txSignature`、`receiptPubkey`、`mint`、PoPハッシュが返ります。
+- `Implemented`: On-chain 経路を実行した場合、`txSignature`、`receiptPubkey`、`mint`、PoPハッシュが返ります（PoP 検証は命令内で必須）。
 
 ### 2) 運用者/管理者体験
 - `Implemented`: 管理者ログインとロール付き認証。
@@ -160,7 +227,7 @@ flowchart LR
 ### 3) セキュリティ/濫用耐性（Current + Planned）
 - `Implemented`: subject単位の回数制御（期間/上限）と `alreadyJoined` 振る舞い。
   - コード: `api-worker/src/claimLogic.ts`
-- `Implemented`: `ENFORCE_ONCHAIN_POP=true` かつイベントがオンチェーン設定済みの場合、証跡フィールドを必須化。
+- `Implemented`: `ENFORCE_ONCHAIN_POP=true` かつイベントがオンチェーン設定済みの場合、on-chain 証跡を提出するリクエストでは `walletAddress` / `txSignature` / `receiptPubkey` を検証。
   - API: `/v1/school/claims`、`/api/events/:eventId/claim`
 - `Implemented`: `AUDIT_IMMUTABLE_MODE=required` で immutable sink が不調なら更新系APIを fail-close。
   - コード: `api-worker/src/storeDO.ts`
@@ -184,7 +251,7 @@ flowchart TB
     VR["レシート検証 / 開示 / 検索API"]
   end
 
-  subgraph L1["L1: Settlement [Implemented, 方針で任意]"]
+  subgraph L1["L1: Settlement [Implemented, 経路は方針連動]"]
     SP["Solana Anchor Program\ngrant_program"]
   end
 
@@ -207,9 +274,9 @@ L2: Process Proof + Ops API（Implemented）
   - 参加券検証API、admin/master開示・検索
           |
           v
-L1: Settlement（Implemented、イベント方針で任意/必須切替）
+L1: Settlement（Implemented、オンチェーン経路は方針で強制/非強制を切替）
   - Solana Anchor program（`grant_program`）
-  - PoP検証付きclaim命令 + claim receipt
+  - PoP検証付きclaim命令（命令内必須） + claim receipt
 
 開発専用の任意経路:
   - `wene-mobile/server/*` はローカル検証用のモックAPI。
@@ -275,9 +342,13 @@ curl -s -X POST "$BASE/api/audit/receipts/verify-code" \
 
 ### F) ローカル最小再現
 ```bash
+cd grant_program && npm ci && anchor build && anchor test --skip-build --provider.cluster localnet
 cd api-worker && npm ci && npm test && npx tsc --noEmit
 cd ../wene-mobile && npm ci && npm run test:server && npx tsc --noEmit
 ```
+期待値（contract）:
+- `grant_program (PDA)` の主要ケースが pass（例: `3 passing`）
+- `claim_grant` 経路で PoP 検証付き受給が成功し、同一期間の二重受給が失敗することを確認
 
 ## Verification Evidence
 
@@ -295,7 +366,7 @@ curl -s -X POST "https://instant-grant-core.pages.dev/api/audit/receipts/verify-
 ```
 期待値: `ok=true` と `verification.checks`（連鎖/ハッシュ検証）が返る。
 
-### 2) On-chain証跡 `[Implemented: 方針でrequired可]`
+### 2) On-chain証跡 `[Implemented: オンチェーン経路実行時]`
 `wene-mobile/src/screens/user/UserConfirmScreen.tsx` の on-chain 導線を実行した場合のみ:
 - 成功画面に `txSignature`、`receiptPubkey`、（任意で）`mint`、PoP値が表示
 - 値があるときだけ Explorer リンクが表示
@@ -342,13 +413,14 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
 | M1: 再現性 + 証跡整備（10分レビュー） | [Implemented] Live/Localを短時間で検証できる手順と証跡導線を固定化 | 初見レビュアーが隠し設定なしで約10分で稼働確認と証跡確認を実行できる | 本README + `/v1/school/pop-status` + `/v1/school/runtime-status` + `/api/audit/receipts/verify-code` |
 | M2: 説明責任の強化 | [Implemented] 運用証跡UI（`PoP稼働証明`、`送金監査 (Hash Chain)`、on/off-chain送金監査分離、権限別開示）+ [Implemented] 整合性確認API（`/api/master/audit-integrity`） | 運用者が証跡を確認でき、監査者が master 認証で整合性チェックを実行できる | `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`、`wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`、`wene-mobile/app/master/index.tsx`、`api-worker/src/storeDO.ts` |
 | M3: 連合運用に向けた一般化 | [Planned] federation model 文書化 + chain-agnostic adapter 境界の最小PoCフック（新規チェーン立ち上げは対象外） | 現行Solana参照実装を維持したまま、連合運用/adapter境界が明示される | `docs/ROADMAP.md` + 今後のPR（adapter/federation interface） |
+| M4: Pilot 1件（匿名可） + 導入フロー固定 | [Planned] 実在運用者による1件パイロットと one-page 導入フローの固定化 | 少なくとも1回の実イベントで運用フロー完走と証跡取得を実施し、匿名化した再検証可能な証跡セットを提示できる | `docs/PILOT_ONBOARDING_FLOW.md` + `docs/ROADMAP.md`（pilot timeline/criteria） + 匿名化した実行証跡 |
 
 ## Scope Clarity
 
 > **このリポジトリ/本助成の評価対象（In scope）**
 > - 学校参加導線の再現可能性
 > - `Participation Ticket (off-chain Attend)` と不変監査レシート
-> - 方針切替付き `On-chain Redeem`（optional/required）と PoP 検証
+> - 方針連動の `On-chain Redeem`（経路強制の切替）と、命令内必須の PoP 検証
 > - admin/master の監査性、開示分離、検証API
 >
 > **評価対象外（Out of scope, planned）**
@@ -360,6 +432,8 @@ curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
 - アーキテクチャ: `docs/ARCHITECTURE.md`
 - セキュリティ: `docs/SECURITY.md`
 - ロードマップ: `docs/ROADMAP.md`
+- Pilot導入フロー（1枚）: `docs/PILOT_ONBOARDING_FLOW.md`
+- PoP運用復旧ランブック: `docs/POP_CHAIN_OPERATIONS.md`
 - Devnetセットアップ: `docs/DEVNET_SETUP.md`
 - Worker API詳細: `api-worker/README.md`
 - UI検証レポート: `wene-mobile/docs/STATIC_VERIFICATION_REPORT.md`
