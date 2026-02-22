@@ -1,169 +1,247 @@
 # Asuka Network Core (Prototype)
-> Public infrastructure protocol that makes administrative process integrity verifiable through Proof of Process (PoP).
 
-[![Solana](https://img.shields.io/badge/Solana-Devnet-green?style=flat&logo=solana)]
-[![Edge](https://img.shields.io/badge/Edge-Cloudflare_Workers-orange?style=flat&logo=cloudflare)]
-[![License](https://img.shields.io/badge/License-MIT-blue)]
-[![Status](https://img.shields.io/badge/Status-Mitou_Applied-red)]
+Public prototype for auditable school/public participation and grant operations using PoP (Proof of Process).
 
-[Japanese README](./README.ja.md)
+[日本語 README](./README.ja.md)
 
-## Demo
-- User app: https://instant-grant-core.pages.dev/
-- Admin app: https://instant-grant-core.pages.dev/admin/login
+## Top Summary
+- What it is: a 3-layer system that binds operational process logs to verifiable receipts, and optionally to Solana settlement.
+- Who it is for: students/users who join events, and operators (admin/master) who run and audit distribution.
+- Implemented now: `Participation Ticket (off-chain Attend)` with `confirmationCode + ticketReceipt`.
+- Implemented now: `On-chain Redeem (optional)` for on-chain-configured events, policy-gated by runtime settings.
+- Third-party verifiable today: PoP runtime status, audit integrity status, ticket verify-by-code API, and Explorer links when on-chain path is used.
+- Design principle: non-custodial signatures where on-chain is used, plus accountability by immutable process audit chain.
+- Current deployment: `https://instant-grant-core.pages.dev/` (user) and `/admin/login` (operator).
+- Maturity: prototype focused on reproducibility and reviewer-verifiable evidence, not a production-complete public system.
+- Source of truth in this repo: `api-worker/src/storeDO.ts`, `wene-mobile/src/screens/user/*`, `wene-mobile/src/screens/admin/*`, `grant_program/programs/grant_program/src/lib.rs`.
 
-## We-ne
-We-ne is the reference application built on this core protocol, focused on school/public participation and grant operation flows.
+## Why This Matters
+Public grants, school participation, and benefit operations often expose only final outcomes, not the decision/process trail that produced them.
 
-For product-level details, see:
-- `wene-mobile/README.md`
-- `wene-mobile/docs/STATIC_VERIFICATION_REPORT.md`
+Result-only transparency is insufficient for public trust. Reviewers and auditors need to verify:
+- who executed which operation,
+- whether process logs are tamper-evident,
+- and how process evidence links to settlement evidence.
 
-## Reviewer Summary (as of February 22, 2026)
-This repository proposes and implements a practical answer to one question:
-How can public systems prove not only what happened on-chain, but also how decisions and operations happened before settlement?
+This repository focuses on that process-accountability gap.
 
-Core answer:
-- PoP (Proof of Process): bind API-side process logs to immutable receipts first, and optionally to on-chain settlement.
-- Three-layer architecture:
-1. Layer 1 (Solana, Anchor): settlement finality and anti-double-claim controls.
-2. Layer 2 (Cloudflare Workers + Durable Objects): append-only process hash chain and operator APIs.
-3. Layer 3 (Web/Mobile UI): user, admin, and master operations.
+## What’s Implemented Now
 
-What is unique:
-- Process integrity and settlement integrity are cryptographically linked.
-- Operational strict levels are separated (`master > admin`) for transfer/PII visibility.
-- Master search is server-side indexed and persisted in Durable Object SQLite (stable latency even after cold start).
+### Truth Table (Implemented vs Planned)
+| Capability | Status | Evidence |
+|---|---|---|
+| `Participation Ticket (off-chain Attend)` with immutable audit receipt | `Implemented` | `api-worker/src/storeDO.ts` (`/v1/school/claims`, `/api/events/:eventId/claim`, receipt builder/verify) |
+| `On-chain Redeem (optional)` with Phantom signing | `Implemented` | `wene-mobile/src/screens/user/UserConfirmScreen.tsx`, `grant_program/programs/grant_program/src/lib.rs` |
+| PoP runtime/public status endpoints | `Implemented` | `/v1/school/pop-status`, `/v1/school/runtime-status`, `/v1/school/audit-status` |
+| Admin transfer audit split (`onchain` vs `offchain`) | `Implemented` | `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`, `/api/admin/transfers` |
+| Master strict disclosure (`master > admin`) | `Implemented` | `/api/master/transfers`, `/api/master/admin-disclosures`, `wene-mobile/app/master/index.tsx` |
+| Server-side indexed search with DO SQLite persistence | `Implemented` | `/api/master/search`, `api-worker/src/storeDO.ts` (`master_search_*` tables) |
+| FairScale/advanced anti-sybil identity layer | `Planned` | `docs/ROADMAP.md` |
+| Dedicated sovereign chain operation | `Planned` | roadmap direction only (not implemented in this repo) |
 
-## Next-Generation PoP Concept for Public Administration
-Why this goes beyond classic P2P:
-- Winny demonstrated strong decentralized distribution, but policy-governed operational accountability and auditability were not first-class design goals.
-- Bitcoin proves transaction validity and ordering, but does not natively prove off-chain administrative process decisions (who reviewed what rule, and who approved).
-- Public administration requires both result integrity and process integrity.
+### 1) Student/User Experience
+- `Implemented`: User flow screens are present and connected: `/u/scan` → `/u/confirm` → `/u/success`.
+  - Code: `wene-mobile/src/screens/user/UserScanScreen.tsx`, `wene-mobile/src/screens/user/UserConfirmScreen.tsx`, `wene-mobile/src/screens/user/UserSuccessScreen.tsx`
+- `Implemented`: User registration/login by `displayName + PIN` / `userId + PIN`.
+  - API: `/api/users/register`, `/api/auth/verify`
+- `Implemented`: Attend creates artifacts:
+  - `confirmationCode`
+  - `ticketReceipt` (`receiptId`, `receiptHash`, `entryHash`, `prevHash`, `streamPrevHash`, immutable sink refs)
+  - Code: `api-worker/src/storeDO.ts` (`buildParticipationTicketReceipt`, `storeParticipationTicketReceipt`)
+- `Implemented`: walletless path exists, with policy conditions:
+  - `/r/school/:eventId` web flow can use `joinToken` (walletless Attend)
+  - `/u/*` flow can complete without wallet only when event/policy does not require on-chain proof
+  - Code: `wene-mobile/src/hooks/useSchoolClaim.ts`, `api-worker/src/storeDO.ts`
+- `Implemented`: `On-chain Redeem (optional)` path returns `txSignature`, `receiptPubkey`, `mint`, and PoP hashes when used.
 
-What PoP adds:
-1. Process proof layer: append all critical API-side operations into an immutable hash chain.
-2. Settlement binding: when redeem policy is enabled, require process proof verification in on-chain claim settlement.
-3. Role-strict disclosure: separate visibility controls (`master > admin`) for transfer and personal data handling.
+### 2) Operator/Admin Experience
+- `Implemented`: Admin login and role-based operator auth.
+  - UI: `/admin/login`
+  - API: `/api/admin/login`
+- `Implemented`: Event issuance requires runtime readiness + wallet signing.
+  - UI: runtime card and checks in `AdminCreateEventScreen`
+  - API: `/v1/school/runtime-status`
+- `Implemented`: Admin dashboard shows PoP runtime proof card and verification endpoint.
+  - UI: `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`
+- `Implemented`: Event detail view includes:
+  - participant list + confirmation codes
+  - transfer audit grouped as `On-chain署名` and `Off-chain監査署名`
+  - Code: `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`
+- `Implemented`: Master dashboard can issue/revoke/rename admin codes, inspect disclosures, and run indexed search.
+  - UI: `wene-mobile/app/master/index.tsx`
+  - API: `/api/admin/invite`, `/api/admin/revoke`, `/api/admin/rename`, `/api/master/admin-disclosures`, `/api/master/search`
 
-Administrative value:
-- Explainable operations for auditors, institutions, and citizens.
-- Tamper-evident continuity from decision process to settlement result.
-- Practical deployment path for domestic infrastructure and future independent-chain operation.
+### 3) Security / Abuse Resistance (Current + Planned)
+- `Implemented`: per-subject claim gating with interval policy and `alreadyJoined` behavior.
+  - Code: `api-worker/src/claimLogic.ts`
+- `Implemented`: on-chain proof fields required when `ENFORCE_ONCHAIN_POP=true` and event has on-chain config.
+  - API checks in `/v1/school/claims` and `/api/events/:eventId/claim`
+- `Implemented`: immutable audit fail-close mode (`AUDIT_IMMUTABLE_MODE=required`) blocks mutating APIs if sink is not operational.
+  - Code: `api-worker/src/storeDO.ts`
+- `Implemented`: strict disclosure levels:
+  - admin can view transfer identifiers without PII (`strictLevel: admin_transfer_visible_no_pii`)
+  - master can view full disclosure (`strictLevel: master_full`)
+- `Planned`: stronger anti-sybil/eligibility integration (e.g., FairScale-class gating).
 
-## What Works Today
-- Wallet-free participation ticket issuance as immutable audit receipt (`confirmationCode` + `ticketReceipt`).
-- On-chain PoP verification in claim flow (`claim_grant` / `claim_grant_with_proof`).
-- Global and per-event audit chain (`prev_hash`, `stream_prev_hash`).
-- Immutable audit persistence outside DO (R2 + optional ingest), with fail-closed mode.
-- Operator auth hardening:
-  - Admin-protected APIs require Bearer auth.
-  - Master-only APIs require non-placeholder `ADMIN_PASSWORD`.
-- Master governance UI:
-  - Invite issue/revoke/rename.
-  - Full admin/user disclosure.
-  - Server-side indexed search endpoint: `GET /api/master/search`.
+## Architecture
 
-## Product Contract: Attend First, Redeem Optional
-To avoid blocking students who cannot or do not want to create wallets, the product is defined as:
+```text
+L3: UI (Implemented)
+  - User screens: /u/* and /r/school/:eventId (RN/Web)
+  - Admin/Master screens: /admin/*, /master/*
+          |
+          v
+L2: Process Proof + Ops API (Implemented)
+  - Cloudflare Worker + Durable Object
+  - Append-only audit hash chain + immutable sinks
+  - Receipt verify endpoints, admin/master disclosure/search
+          |
+          v
+L1: Settlement (Implemented, policy-gated/optional per event)
+  - Solana Anchor program (`grant_program`)
+  - PoP-verified claim instructions + claim receipts
 
-- Attend (primary): issue a participation ticket as immutable audit receipt.
-- Redeem (optional): perform on-chain settlement only when required by policy.
-
-This means the product value is complete at Attend stage (attendance proof, gate operation, and auditability), while Redeem is an extension path.
-
-## Wallet-Free Immutable Receipt Ticket (Current Primary Flow)
-The current school-facing primary flow is wallet-free participation ticket issuance on the audit hash chain.
-
-How it works:
-1. A participant joins with `userId + PIN` and receives `confirmationCode` and `ticketReceipt` (Attend).
-2. `ticketReceipt` includes `entryHash`, `prevHash`, `streamPrevHash`, immutable sink references, and `receiptHash`.
-3. Any third party can verify consistency via `POST /api/audit/receipts/verify` (receipt hash, chain links, immutable payload hash, sink refs).
-4. Auditors can also verify by code via `POST /api/audit/receipts/verify-code` with `{ eventId, confirmationCode }`.
-
-Why this design:
-- It expands school use cases to students and guardians who do not have crypto wallets.
-- It enables practical QR/paper-based gate operations while preserving later digital verification.
-- It keeps tamper-evident process auditability even when events are operated without wallet settlement.
-- In this project, school deployment is positioned as the first social verification pilot of this hash-chain process-proof model.
-
-Attend / Redeem boundary:
-- Attend (wallet-free): usable without wallet for ticket possession, verification, and school operation.
-- Redeem (optional on-chain): required only if organizer enables on-chain policy for that event.
-- In other words, on-chain is not the default requirement for students; it is a policy-driven extension path.
-
-## 5-Minute Verification for Reviewers
-Run these from repository root:
-
-```bash
-cd api-worker && npm test && npx tsc --noEmit
-cd ../wene-mobile && npm run test:server && npx tsc --noEmit
+Dev-only optional path:
+  - `wene-mobile/server/*` is a local mock API for development tests.
 ```
 
-Recommended runtime checks:
-- `GET /v1/school/runtime-status` => `ready: true`
-- `GET /v1/school/pop-status` => signer configured
-- `GET /api/master/audit-integrity?limit=50` => `ok: true`
-- `GET /api/master/search?q=<keyword>&limit=50` => indexed search results
+## Reviewer Quickstart (10 Minutes)
 
-## Architecture at a Glance
-- `grant_program/`: Solana program (Layer 1)
-- `api-worker/`: API, PoP process proof, audit, role-level APIs (Layer 2)
-- `wene-mobile/`: user/admin/master UI (Layer 3)
-- `functions/` and `wene-mobile/functions/`: Pages proxy routing (`/api`, `/v1`, `/metadata`, `/health`)
+### A) Live URLs (recommended)
+- User app: `https://instant-grant-core.pages.dev/`
+- Admin login: `https://instant-grant-core.pages.dev/admin/login`
+- Master login: `https://instant-grant-core.pages.dev/master/login`
 
-## Vision: Made-in-Japan Public Digital Infrastructure
-Goal:
-A domestic, auditable, and interoperable digital public infrastructure for grants, subsidies, and administrative workflows.
+### B) 2-minute runtime checks
+```bash
+BASE="https://instant-grant-core.pages.dev"
+curl -s "$BASE/health"
+curl -s "$BASE/v1/school/pop-status"
+curl -s "$BASE/v1/school/runtime-status"
+curl -s "$BASE/v1/school/audit-status"
+```
+Expected:
+- `/health` returns `{"ok":true}`
+- `pop-status.signerConfigured=true`
+- `runtime-status.ready=true`
+- `audit-status.operationalReady=true`
 
-Long-term objective:
-Expand PoP implementation to domestic Japanese server/compute infrastructure, including Fugaku-class environments, so servers can prove when, by whom, and through which process operations were executed.
-In this project, we describe this as “injecting time into domestic servers.”
+### C) UI click path (admin login → event → print QR → scan → confirm → success)
+1. Open `/admin/login` and sign in with an issued admin code (or demo/admin password provided by operator).
+2. Open a `Published` event, then open `印刷用PDF` and display the QR.
+3. On user app (`/u`), do register/login (`/u/register` or `/u/login`), then scan (`/u/scan`) the QR.
+4. Confirm on `/u/confirm` (PIN required; Phantom required only when event policy enforces on-chain proof).
+5. Land on `/u/success`.
 
-Principles:
-- Accountability by default: every critical operation leaves a verifiable process trail.
-- Non-custodial participation: users keep control of keys and signatures.
-- Operational sovereignty: architecture that can be run by domestic institutions and public operators.
-- Progressive decentralization: start practical, then federate.
+Expected output at the end:
+- Off-chain Attend evidence:
+  - `confirmationCode`
+  - `監査レシート（参加券）` card with `receipt_id` and `receipt_hash`
+- On-chain Redeem evidence (if that path is used):
+  - `txSignature` + `receiptPubkey` + `mint`
+  - Explorer buttons for tx/address evidence
+  - PoP proof values (`signer`, `entry_hash`, `audit_hash`)
 
-## Future Operation on an Independent Chain (Planned)
-Current production target is devnet-first validation on Solana.
-In parallel, the longer-term roadmap includes operation on an independent chain.
+### D) Verify ticket evidence by code
+Use `eventId` + `confirmationCode` from success UI:
+```bash
+curl -s -X POST "$BASE/api/audit/receipts/verify-code" \
+  -H "content-type: application/json" \
+  -d '{"eventId":"<EVENT_ID>","confirmationCode":"<CONFIRMATION_CODE>"}'
+```
+Expected: `ok=true` and a `verification.checks` object with chain/hash validations.
 
-Planned direction:
-1. Federation phase: consortium-style operation across municipalities/institutions.
-2. Sovereign infra phase: domestic validator and audit-network operations.
-3. Independent chain phase: PoP-native chain where process proofs are first-class consensus objects.
+### E) Common failure modes and misconfiguration signals
+- `runtime-status.ready=false`:
+  - Check `blockingIssues` for `ADMIN_PASSWORD`, PoP signer, or immutable sink setup.
+- `PoP signer not configured` / `PoP署名者公開鍵...`:
+  - Check `POP_SIGNER_*` worker secrets and `EXPO_PUBLIC_POP_SIGNER_PUBKEY`.
+- `on-chain claim proof required` / `wallet_required`:
+  - Event is on-chain-configured + enforcement is on; wallet+proof fields are missing.
+- `401 Unauthorized` on `/api/admin/*` or `/api/master/*`:
+  - Missing/invalid bearer token for admin/master routes.
 
-Design intent for independent chain:
-- Native data model for process proofs (not only transaction outcomes).
-- Deterministic grant/distribution vault semantics inherited from current program logic.
-- Interoperability with existing ecosystems (including Solana) for migration and bridge use cases.
+### F) Local run (minimal reproducibility)
+```bash
+cd api-worker && npm ci && npm test && npx tsc --noEmit
+cd ../wene-mobile && npm ci && npm run test:server && npx tsc --noEmit
+```
 
-Status note:
-- This independent-chain operation is a roadmap item, not yet implemented in this repository.
+## Verification Evidence
 
-## Repository Map
-- `grant_program/` Solana program and tests
-- `api-worker/` Worker API, audit logic, role-control APIs
-- `wene-mobile/` Expo app (Web/Mobile), admin/master UI
-- `docs/` architecture, security, development, roadmap
+### 1) PoP status endpoint
+```bash
+curl -s https://instant-grant-core.pages.dev/v1/school/pop-status
+```
+`ready` equivalent condition in this endpoint:
+- `enforceOnchainPop=true`
+- `signerConfigured=true`
 
-## Detailed Docs
+### 2) Runtime and audit operational integrity
+```bash
+curl -s https://instant-grant-core.pages.dev/v1/school/runtime-status
+curl -s https://instant-grant-core.pages.dev/v1/school/audit-status
+curl -s -H "Authorization: Bearer <MASTER_PASSWORD>" \
+  "https://instant-grant-core.pages.dev/api/master/audit-integrity?limit=50"
+```
+Interpretation:
+- `runtime-status.ready=true` means operational prerequisites are satisfied.
+- `audit-status.operationalReady=true` means immutable sink path is available.
+- `audit-integrity.ok=true` means recent chain integrity checks passed.
+
+### 3) Where evidence appears in UI
+- PoP runtime evidence card:
+  - `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`
+  - labels include `PoP稼働証明` and endpoint `/v1/school/pop-status`
+- On-chain vs off-chain transfer separation:
+  - `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`
+  - labels include `On-chain署名` and `Off-chain監査署名`
+- Participation ticket evidence card and copy action:
+  - `wene-mobile/src/screens/user/UserSuccessScreen.tsx`
+
+### 4) Explorer evidence
+When on-chain path is used, success UI provides direct links:
+- Tx: `https://explorer.solana.com/tx/<signature>?cluster=devnet`
+- Receipt/Mint address pages: `https://explorer.solana.com/address/<pubkey>?cluster=devnet`
+
+## Milestones / What Grant Funds
+
+| Milestone | Deliverable | Success Criteria | Reviewer-verifiable Evidence |
+|---|---|---|---|
+| M1: Reproducibility Pack | Fast reviewer runbook and stable verification steps for live + local | A reviewer can execute runtime checks and tests without hidden setup | This README + `api-worker/package.json` scripts + `wene-mobile/package.json` scripts |
+| M2: Evidence-first Ticket UX/API | Make `Participation Ticket (off-chain)` the primary evidence artifact across flows | `confirmationCode + ticketReceipt` is visible in UI and verifiable by API for created/already paths | `wene-mobile/src/screens/user/UserSuccessScreen.tsx`, `/api/audit/receipts/verify-code`, `api-worker/src/storeDO.ts` |
+| M3: Scale-ready operator verification (planned) | Harden indexed search and policy modules; add L1 adapter abstraction (not a new chain launch) | Search and disclosure stay stable with larger datasets; policy modules are test-covered and explicit | `/api/master/search`, `api-worker/src/storeDO.ts` (SQLite index), future PR/tests for adapter abstraction |
+
+## Scope Clarity
+
+> **In scope for this repo / this grant**
+> - Reproducible school participation flow
+> - `Participation Ticket (off-chain Attend)` with immutable audit receipt
+> - Policy-gated `On-chain Redeem (optional)`
+> - Admin/master auditability, disclosure separation, and verification endpoints
+>
+> **Out of scope (planned)**
+> - Full walletless on-chain settlement for every event policy
+> - Federation across institutions/municipalities
+> - Dedicated sovereign chain deployment
+
+## Links and Docs
 - Architecture: `docs/ARCHITECTURE.md`
 - Security: `docs/SECURITY.md`
 - Roadmap: `docs/ROADMAP.md`
 - Devnet setup: `docs/DEVNET_SETUP.md`
-- API details: `api-worker/README.md`
-- App details: `wene-mobile/README.md`
+- Worker API details: `api-worker/README.md`
+- UI verification report: `wene-mobile/docs/STATIC_VERIFICATION_REPORT.md`
 
-## Author
-Kira (hk089660), 19 years old
-
-## Applications
-- IPA Mitou Program (Applied)
-- Solana Foundation grant track (Applied)
-- Masayoshi Son Foundation (Applied)
+### Reviewer Shortcut (source of truth files)
+- `api-worker/src/storeDO.ts`
+- `api-worker/src/claimLogic.ts`
+- `grant_program/programs/grant_program/src/lib.rs`
+- `wene-mobile/src/screens/user/UserConfirmScreen.tsx`
+- `wene-mobile/src/screens/user/UserSuccessScreen.tsx`
+- `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`
+- `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`
+- `wene-mobile/app/master/index.tsx`
 
 ## License
 MIT
