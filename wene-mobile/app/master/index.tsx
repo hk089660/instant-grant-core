@@ -226,13 +226,13 @@ export default function MasterDashboard() {
 
             const res = await createInviteCode(password, newAdminName);
             setGeneratedCode(res.code);
-            // Refresh the list after generating
-            await loadInvites();
-            if (activeTab === 'disclosure') {
-                await loadAdminDisclosures();
-            }
             setNewAdminName('');
             Alert.alert('Success', `Code created: ${res.code}`);
+            // Do not block button recovery on list refresh.
+            void loadInvites();
+            if (activeTab === 'disclosure') {
+                void loadAdminDisclosures();
+            }
         } catch (e) {
             const message = e instanceof Error ? e.message : 'Failed to create code';
             Alert.alert('Error', message);
@@ -253,11 +253,11 @@ export default function MasterDashboard() {
 
             const success = await revokeInviteCode(password, code);
             if (success) {
-                await loadInvites();
-                if (activeTab === 'disclosure') {
-                    await loadAdminDisclosures();
-                }
                 Alert.alert('Success', 'Code revoked (status updated)');
+                void loadInvites();
+                if (activeTab === 'disclosure') {
+                    void loadAdminDisclosures();
+                }
             } else {
                 Alert.alert('Error', 'Failed to revoke code');
             }
@@ -294,12 +294,12 @@ export default function MasterDashboard() {
                 ...(code ? { code } : {}),
                 ...(adminId ? { adminId } : {}),
             });
-            await loadInvites();
-            await loadAdminDisclosures();
             setRenameCode('');
             setRenameAdminId('');
             setRenameName('');
             Alert.alert('Success', `Renamed: ${renamed.name}`);
+            void loadInvites();
+            void loadAdminDisclosures();
         } catch (e) {
             const message = e instanceof Error ? e.message : 'Failed to rename admin';
             Alert.alert('Error', message);

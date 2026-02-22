@@ -160,6 +160,26 @@ async function readErrorMessage(res: Response, fallback: string): Promise<string
   }
 }
 
+const MASTER_API_TIMEOUT_MS = 15_000;
+
+async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs = MASTER_API_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      throw new Error(`Request timeout (${timeoutMs}ms)`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function normalizeInviteCodeRecord(payload: InviteCodeRecordPayload, fallbackName = 'Unknown Admin'): InviteCodeRecord | null {
   const code = typeof payload?.code === 'string' ? payload.code.trim() : '';
   if (!code) return null;
@@ -197,7 +217,7 @@ export async function createInviteCode(masterPassword: string, name: string): Pr
   if (!trimmedName) {
     throw new Error('admin name is required');
   }
-  const res = await fetch(`${base}/api/admin/invite`, {
+  const res = await fetchWithTimeout(`${base}/api/admin/invite`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -221,7 +241,7 @@ export async function createInviteCode(masterPassword: string, name: string): Pr
 export async function fetchInviteCodes(masterPassword: string, includeRevoked = true): Promise<InviteCodeRecord[]> {
   const base = getBaseUrl();
   const query = includeRevoked ? '?includeRevoked=1' : '?includeRevoked=0';
-  const res = await fetch(`${base}/api/admin/invites${query}`, {
+  const res = await fetchWithTimeout(`${base}/api/admin/invites${query}`, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${masterPassword}`,
@@ -239,7 +259,7 @@ export async function fetchInviteCodes(masterPassword: string, includeRevoked = 
 /** 招待コード無効化 (Master Only) */
 export async function revokeInviteCode(masterPassword: string, code: string): Promise<boolean> {
   const base = getBaseUrl();
-  const res = await fetch(`${base}/api/admin/revoke`, {
+  const res = await fetchWithTimeout(`${base}/api/admin/revoke`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -260,7 +280,7 @@ export async function renameInviteCode(masterPassword: string, params: {
   adminId?: string;
 }): Promise<InviteCodeRecord> {
   const base = getBaseUrl();
-  const res = await fetch(`${base}/api/admin/rename`, {
+  const res = await fetchWithTimeout(`${base}/api/admin/rename`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
