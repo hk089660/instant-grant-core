@@ -16,6 +16,7 @@ import { useRecipientStore } from '../../store/recipientStore';
 import { usePhantomStore } from '../../store/phantomStore';
 import { initiatePhantomConnect } from '../../utils/phantom';
 import { setPhantomWebReturnPath } from '../../utils/phantomWebReturnPath';
+import { preparePhantomWebPopup } from '../../utils/phantomWebPopup';
 import * as nacl from 'tweetnacl';
 import { issueEventTicketToken } from '../../solana/adminTicketIssuer';
 import { isSimulationFailedError } from '../../solana/sendTx';
@@ -213,6 +214,13 @@ export const AdminCreateEventScreen: React.FC = () => {
     }, [saveKeyPair, setPhantomSession, setWalletPubkey]);
 
     const handleCreate = useCallback(async () => {
+        if (Platform.OS === 'web' && !(extensionReady && extensionProvider)) {
+            const prepared = preparePhantomWebPopup();
+            if (!prepared) {
+                setError('Phantom署名ポップアップを開けません。ブラウザでポップアップを許可して再試行してください。');
+                return;
+            }
+        }
         setLoading(true);
         setError(null);
         setSetupTxSignatures([]);

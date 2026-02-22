@@ -6,6 +6,11 @@ import * as LinkingExpo from 'expo-linking';
 import { setPendingSignTx, resolvePendingSignTx, rejectPendingSignTx } from './phantomSignTxPending';
 import { openPhantomConnect } from '../wallet/openPhantom';
 import { setLastPhantomConnect, setLastPhantomSign } from './phantomUrlDebug';
+import {
+  clearPhantomWebSignResult,
+  consumePhantomWebSignResult,
+  subscribePhantomWebSignResult,
+} from './phantomWebSignBridge';
 
 export interface PhantomConnectParams {
   dappEncryptionPublicKey: string;
@@ -434,18 +439,55 @@ export const signTransaction = async (
   params: PhantomSignTransactionParams
 ): Promise<Transaction> => {
   const url = buildPhantomSignTransactionUrl(params);
+  const isWeb = Platform.OS === 'web' && typeof window !== 'undefined';
+
+  if (isWeb) {
+    // stale result が残っていると誤解決するため、開始時に毎回クリア
+    clearPhantomWebSignResult();
+  }
 
   return new Promise<Transaction>((resolve, reject) => {
+    let settled = false;
+    let unsubscribeWebBridge: (() => void) | null = null;
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (unsubscribeWebBridge) {
+        unsubscribeWebBridge();
+        unsubscribeWebBridge = null;
+      }
+      fn();
+    };
+
     setPendingSignTx(resolve, reject);
 
+    if (isWeb) {
+      unsubscribeWebBridge = subscribePhantomWebSignResult((result) => {
+        if (result.ok) {
+          settle(() => resolvePendingSignTx(result.tx));
+        } else {
+          settle(() => rejectPendingSignTx(new Error(result.error)));
+        }
+      });
+      // 同タブ fallback で callback 処理が先行した場合のために即時取り込み
+      const immediate = consumePhantomWebSignResult();
+      if (immediate) {
+        if (immediate.ok) {
+          settle(() => resolvePendingSignTx(immediate.tx));
+        } else {
+          settle(() => rejectPendingSignTx(new Error(immediate.error)));
+        }
+      }
+    }
+
     console.log('[CLAIM] signTransaction: before openPhantomConnect');
-    openPhantomConnect(url)
+    openPhantomConnect(url, { preferPopup: isWeb })
       .then(() => {
         console.log('[CLAIM] signTransaction: openPhantomConnect done, waiting for Phantom redirect');
       })
       .catch((err) => {
         console.error('[CLAIM] signTransaction: openPhantomConnect failed:', err);
-        rejectPendingSignTx(err instanceof Error ? err : new Error(String(err)));
+        settle(() => rejectPendingSignTx(err instanceof Error ? err : new Error(String(err))));
       });
   });
 };

@@ -1,5 +1,14 @@
 import { Linking, Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
+import { openPhantomWebPopup } from '../utils/phantomWebPopup';
+
+export interface OpenPhantomOptions {
+  /**
+   * Web のみ: 可能なら新規タブを使って元タブのJS状態を維持する。
+   * （署名待機中Promiseを保持するため）
+   */
+  preferPopup?: boolean;
+}
 
 // ToastAndroidはAndroid専用のため、条件付きで使用
 const getToastAndroid = () => {
@@ -16,7 +25,7 @@ const getToastAndroid = () => {
  * @param url Phantom Connect URL
  * @returns Promise<void> - 成功時はresolve、失敗時はreject
  */
-export async function openPhantomConnect(url: string): Promise<void> {
+export async function openPhantomConnect(url: string, options: OpenPhantomOptions = {}): Promise<void> {
   // URLの検証（空文字/undefined対策）
   if (!url || url.trim() === '') {
     const error = new Error('URLが空です');
@@ -26,6 +35,21 @@ export async function openPhantomConnect(url: string): Promise<void> {
 
   const urlPreview = url.length > 50 ? url.substring(0, 50) + '...' : url;
   console.log('[openPhantomConnect] URL:', urlPreview);
+
+  // Web署名時は新規タブ優先。元タブの pending promise を保持する。
+  if (
+    Platform.OS === 'web' &&
+    options.preferPopup &&
+    typeof window !== 'undefined' &&
+    typeof window.open === 'function'
+  ) {
+    const opened = openPhantomWebPopup(url);
+    if (opened) {
+      console.log('[openPhantomConnect] web popup open/reuse succeeded');
+      return;
+    }
+    throw new Error('ポップアップがブロックされました。ブラウザでこのサイトのポップアップを許可してください。');
+  }
 
   // canOpenURL を必ず事前確認（ログ用。AndroidではfalseでもopenURLを試す）
   try {

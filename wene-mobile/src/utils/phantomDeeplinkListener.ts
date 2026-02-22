@@ -5,10 +5,18 @@
  */
 import { Linking, Platform, AppState, AppStateStatus } from 'react-native';
 import { ToastAndroid } from 'react-native';
+import { Transaction } from '@solana/web3.js';
 import { usePhantomStore } from '../store/phantomStore';
 import { useRecipientStore } from '../store/recipientStore';
 import { handlePhantomConnectRedirect, handleRedirect } from './phantom';
 import { rejectPendingSignTx } from './phantomSignTxPending';
+
+export type ProcessPhantomUrlResult =
+  | { kind: 'ignored'; ok: false; error: string }
+  | { kind: 'connect'; ok: true }
+  | { kind: 'connect'; ok: false; error: string }
+  | { kind: 'sign'; ok: true; tx: Transaction }
+  | { kind: 'sign'; ok: false; error: string };
 
 async function waitForDappSecretKey(timeoutMs: number): Promise<boolean> {
   const startTime = Date.now();
@@ -23,8 +31,10 @@ async function waitForDappSecretKey(timeoutMs: number): Promise<boolean> {
   return false;
 }
 
-export async function processPhantomUrl(url: string, source: 'event' | 'initial'): Promise<void> {
-  if (!url.startsWith('wene://phantom/')) return;
+export async function processPhantomUrl(url: string, source: 'event' | 'initial'): Promise<ProcessPhantomUrlResult> {
+  if (!url.startsWith('wene://phantom/')) {
+    return { kind: 'ignored', ok: false, error: 'not phantom url' };
+  }
   console.log(`[DEEPLINK] ${source} received, URL全文:`, url);
 
   const phantomStore = usePhantomStore.getState();
@@ -39,7 +49,7 @@ export async function processPhantomUrl(url: string, source: 'event' | 'initial'
     recipientStore.setError(msg);
     rejectPendingSignTx(new Error(msg));
     if (Platform.OS === 'android') ToastAndroid.show('接続エラー: キーが利用できません', ToastAndroid.LONG);
-    return;
+    return { kind: url.includes('/phantom/sign') ? 'sign' : 'connect', ok: false, error: msg };
   }
 
   const { dappSecretKey } = usePhantomStore.getState();
@@ -48,7 +58,7 @@ export async function processPhantomUrl(url: string, source: 'event' | 'initial'
     recipientStore.setError(msg);
     rejectPendingSignTx(new Error(msg));
     if (Platform.OS === 'android') ToastAndroid.show('接続エラー: キーが利用できません', ToastAndroid.LONG);
-    return;
+    return { kind: url.includes('/phantom/sign') ? 'sign' : 'connect', ok: false, error: msg };
   }
 
   try {
@@ -63,10 +73,12 @@ export async function processPhantomUrl(url: string, source: 'event' | 'initial'
         recipientStore.setState('Connected');
         console.log('[PhantomDeeplink] connect success');
         if (Platform.OS === 'android') ToastAndroid.show('Phantomに接続しました', ToastAndroid.SHORT);
+        return { kind: 'connect', ok: true };
       } else {
         const msg = `[${result.stage}] ${result.error}`;
         recipientStore.setError(msg);
         if (Platform.OS === 'android') ToastAndroid.show(`接続エラー: ${msg}`, ToastAndroid.LONG);
+        return { kind: 'connect', ok: false, error: msg };
       }
     } else if (url.includes('/phantom/sign')) {
       console.log('[PhantomDeeplink] sign callback');
@@ -74,16 +86,19 @@ export async function processPhantomUrl(url: string, source: 'event' | 'initial'
       const result = handleRedirect(url, dappSecretKey, phantomPk ?? undefined);
       if (result.ok) {
         console.log('[PhantomDeeplink] sign resolvePendingSignTx done');
+        return { kind: 'sign', ok: true, tx: result.tx };
       } else {
         console.error('[PhantomDeeplink] sign failed:', result.error);
         recipientStore.setError(result.error);
         if (Platform.OS === 'android') ToastAndroid.show(`署名エラー: ${result.error}`, ToastAndroid.LONG);
+        return { kind: 'sign', ok: false, error: result.error };
       }
     } else {
       console.warn('[PhantomDeeplink] unknown path:', url.substring(0, 80));
       const msg = '不明なリダイレクトです';
       recipientStore.setError(msg);
       rejectPendingSignTx(new Error(msg));
+      return { kind: 'ignored', ok: false, error: msg };
     }
   } catch (e) {
     const msg = (e as Error)?.message ?? String(e);
@@ -91,6 +106,7 @@ export async function processPhantomUrl(url: string, source: 'event' | 'initial'
     recipientStore.setError(msg);
     rejectPendingSignTx(new Error(msg));
     if (Platform.OS === 'android') ToastAndroid.show(`エラー: ${msg.substring(0, 50)}`, ToastAndroid.LONG);
+    return { kind: url.includes('/phantom/sign') ? 'sign' : 'connect', ok: false, error: msg };
   } finally {
     const current = useRecipientStore.getState().state;
     if (current === 'Connecting') {

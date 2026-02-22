@@ -6,6 +6,10 @@ import { theme } from '../../src/ui/theme';
 import { processPhantomUrl } from '../../src/utils/phantomDeeplinkListener';
 import { rejectPendingSignTx } from '../../src/utils/phantomSignTxPending';
 import { consumePhantomWebReturnPath } from '../../src/utils/phantomWebReturnPath';
+import {
+  publishPhantomWebSignError,
+  publishPhantomWebSignSuccess,
+} from '../../src/utils/phantomWebSignBridge';
 
 const SAFE_TIMEOUT_MS = 10_000;
 
@@ -68,16 +72,19 @@ export default function PhantomRedirectScreen() {
 
       try {
         let handled = false;
+        let processed:
+          | Awaited<ReturnType<typeof processPhantomUrl>>
+          | null = null;
 
         if (fallbackUrlFromParams?.includes('wene://phantom/')) {
-          await processPhantomUrl(fallbackUrlFromParams, 'initial');
+          processed = await processPhantomUrl(fallbackUrlFromParams, 'initial');
           handled = true;
         }
 
         if (!handled) {
           const initialUrl = await Linking.getInitialURL();
           if (initialUrl && initialUrl.startsWith('wene://phantom/')) {
-            await processPhantomUrl(initialUrl, 'initial');
+            processed = await processPhantomUrl(initialUrl, 'initial');
             handled = true;
           }
         }
@@ -91,9 +98,34 @@ export default function PhantomRedirectScreen() {
           return;
         }
 
+        if (action.startsWith('sign') && Platform.OS === 'web' && processed?.kind === 'sign') {
+          if (processed.ok) {
+            publishPhantomWebSignSuccess(processed.tx);
+          } else {
+            publishPhantomWebSignError(processed.error);
+            setSafeStatus('error', processed.error);
+            return;
+          }
+        }
+
+        if (processed && !processed.ok) {
+          setSafeStatus('error', processed.error);
+          return;
+        }
+
         setSafeStatus('done', 'コールバック処理が完了しました。画面に戻ります…');
         setTimeout(() => {
           if (cancelled) return;
+          if (
+            Platform.OS === 'web' &&
+            action.startsWith('sign') &&
+            typeof window !== 'undefined' &&
+            window.opener &&
+            !window.opener.closed
+          ) {
+            setSafeStatus('done', '署名結果を送信しました。このウィンドウは次の署名で再利用されます。');
+            return;
+          }
           router.replace(returnPath as any);
         }, 200);
       } catch (err) {
