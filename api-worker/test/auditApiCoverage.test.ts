@@ -153,4 +153,45 @@ describe('API coverage audit logs', () => {
 
     expect(res.status).toBe(500);
   });
+
+  it('allows master admin-code control routes even when immutable audit fail-close is active', async () => {
+    const localState = new MockDurableObjectState();
+    const strictEnv: Env = {
+      ADMIN_PASSWORD: 'master-secret',
+      AUDIT_IMMUTABLE_MODE: 'required',
+    };
+    // @ts-expect-error mock for DurableObjectState
+    const strictStore = new SchoolStore(localState, strictEnv);
+
+    const inviteRes = await strictStore.fetch(
+      new Request('https://example.com/api/admin/invite', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: 'Bearer master-secret',
+        },
+        body: JSON.stringify({ name: 'Bootstrap Admin' }),
+      })
+    );
+
+    expect(inviteRes.status).toBe(200);
+
+    const eventCreateRes = await strictStore.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: 'Bearer master-secret',
+        },
+        body: JSON.stringify({
+          title: 'blocked',
+          datetime: '2026/02/20 16:00',
+          host: 'admin',
+          ticketTokenAmount: 1,
+        }),
+      })
+    );
+
+    expect(eventCreateRes.status).toBe(503);
+  });
 });

@@ -455,8 +455,17 @@ export class SchoolStore implements DurableObject {
     return m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE';
   }
 
-  private isAuditFailClosed(method: string): boolean {
-    return this.getAuditImmutableMode() === 'required' && this.isMutatingMethod(method);
+  private isAuditFailCloseExemptRoute(path: string, method: string): boolean {
+    const m = method.toUpperCase();
+    if (m !== 'POST') return false;
+    return path === '/api/admin/login' || path === '/api/admin/invite' || path === '/api/admin/rename' || path === '/api/admin/revoke';
+  }
+
+  private isAuditFailClosed(path: string, method: string): boolean {
+    if (this.getAuditImmutableMode() !== 'required') return false;
+    if (!this.isMutatingMethod(method)) return false;
+    if (this.isAuditFailCloseExemptRoute(path, method)) return false;
+    return true;
   }
 
   private isEventOnchainConfigured(event: { solanaMint?: string; solanaAuthority?: string; solanaGrantId?: string } | null | undefined): boolean {
@@ -2460,7 +2469,7 @@ export class SchoolStore implements DurableObject {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('[audit] failed to append API audit trail', { event, path, message });
-      if (this.isAuditFailClosed(request.method)) {
+      if (this.isAuditFailClosed(path, request.method)) {
         throw new Error(`audit append failed: ${message}`);
       }
     }
@@ -3327,7 +3336,7 @@ export class SchoolStore implements DurableObject {
 
     // Fail closed before side-effects when immutable audit is required but not operational.
     // This avoids mutating state and then failing later during audit append.
-    if (this.isApiPath(path) && this.isAuditFailClosed(request.method)) {
+    if (this.isApiPath(path) && this.isAuditFailClosed(path, request.method)) {
       const auditStatus = this.getAuditStatus();
       if (!auditStatus.operationalReady) {
         return Response.json({
@@ -3355,7 +3364,7 @@ export class SchoolStore implements DurableObject {
       await this.appendApiAuditTrail(request, url, path, response, requestBody, startedAt, errorMessage);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (this.isAuditFailClosed(request.method)) {
+      if (this.isAuditFailClosed(path, request.method)) {
         return Response.json({ error: 'audit log persistence failed', detail: message }, { status: 503 });
       }
       console.error('[audit] non-blocking append failure', { path, method: request.method, message });
