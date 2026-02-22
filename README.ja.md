@@ -4,6 +4,10 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 
 [English README](./README.md)
 
+**稼働URL（We-ne）**
+- 利用者: `https://instant-grant-core.pages.dev/`
+- 管理者: `https://instant-grant-core.pages.dev/admin/login`（デモログインコード: `ebf366f9b3c44204a4a399a1c37fcc69`）
+
 ## Top Summary
 - これは何か: 運用プロセスのログを検証可能レシートに結合し、必要時のみSolana決済へ結合する3層システムです。
 - 誰のためか: イベント参加者（学生/利用者）と、運用する管理者・運営者のための実装です。

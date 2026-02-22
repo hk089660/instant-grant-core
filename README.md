@@ -4,6 +4,10 @@ Public prototype for auditable school/public participation and grant operations 
 
 [日本語 README](./README.ja.md)
 
+**Live URLs (We-ne)**
+- User: `https://instant-grant-core.pages.dev/`
+- Admin: `https://instant-grant-core.pages.dev/admin/login` (Demo login code: `ebf366f9b3c44204a4a399a1c37fcc69`)
+
 ## Top Summary
 - What it is: a 3-layer system that binds operational process logs to verifiable receipts, and optionally to Solana settlement.
 - Who it is for: students/users who join events, and operators (admin/master) who run and audit distribution.
