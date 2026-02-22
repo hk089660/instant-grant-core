@@ -26,6 +26,7 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 - [Implemented] 学生/利用者の参加は、対応経路では wallet なしで完了できます（off-chain 参加券として `confirmationCode` + `ticketReceipt` を発行）。
 - [Optional] オンチェーン決済証跡は devnet の任意経路です。tx/receipt/Explorer は on-chain claim 経路を実行した場合のみ表示されます。
 - [Implemented] 説明責任ある運用: admin/master 導線で PoP/runtime 状態、送金監査ログ、権限別開示/検索を確認できます。
+- [Implemented] 管理者の参加券検索は所有者スコープです。admin は自分が発行したイベント分のみ検索対象で、master は全体対象です。
 - [Implemented] PoPのUI確認: 管理者イベント一覧に `PoP稼働証明` を表示し、`enforceOnchainPop` / `signerConfigured` を `/v1/school/pop-status` と紐付けて確認できます。
 - [Implemented] Hash Chain稼働UI: イベント詳細で `送金監査 (Hash Chain)` を表示し、on/off-chain の各記録で `prevHash -> entryHash` を確認できます。
 - [Implemented] 利用者向け証跡UI: 成功画面で `confirmationCode`、監査レシート（`receipt_id`, `receipt_hash`）、PoP証跡コピー導線（条件付き）を表示します。
@@ -72,6 +73,10 @@ flowchart LR
   - 管理者UI導線: `/admin/events/:eventId` の `送金監査 (Hash Chain)` セクション。
   - 連鎖証跡: `hash: <prev> -> <current>` / `chain: <prev> -> <current>` を on/off-chain それぞれで確認可能。
   - CSV出力: 同じイベント詳細画面の `CSVダウンロード` ボタン。
+- [Implemented] 管理者参加券検索のスコープ:
+  - 管理者UI導線: `/admin/participants`。
+  - 振る舞い: admin は所有イベントの参加券のみ検索対象、master は全体対象。
+  - バックエンド根拠: `/v1/school/events?scope=mine` と `/v1/school/events/:eventId/claimants`（`api-worker/src/storeDO.ts` の owner check）。
 - [Restricted] Master Dashboard の監査/開示:
   - 高権限機能（招待コード、監査ログ、管理者開示、検索）は `wene-mobile/app/master/index.tsx`。
   - 公開URLは意図的に本READMEへ掲載しません。
@@ -86,6 +91,7 @@ flowchart LR
 | `Participation Ticket (off-chain Attend)` の不変レシート発行 | `Implemented` | `api-worker/src/storeDO.ts`（`/v1/school/claims`、`/api/events/:eventId/claim`、レシート生成/検証） |
 | `On-chain Redeem (optional)` のPhantom署名フロー | `Implemented` | `wene-mobile/src/screens/user/UserConfirmScreen.tsx`、`grant_program/programs/grant_program/src/lib.rs` |
 | PoP稼働状態の公開エンドポイント | `Implemented` | `/v1/school/pop-status`、`/v1/school/runtime-status`、`/v1/school/audit-status` |
+| 管理者参加券検索の所有者スコープ | `Implemented` | `/admin/participants`、`wene-mobile/src/screens/admin/AdminParticipantsScreen.tsx`、`/v1/school/events?scope=mine`、`/v1/school/events/:eventId/claimants` の owner check（`api-worker/src/storeDO.ts`） |
 | 管理者画面での送金監査（onchain/offchain分離） | `Implemented` | `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`、`/api/admin/transfers` |
 | 運営者優先の厳格開示（`master > admin`） | `Implemented` | `/api/master/transfers`、`/api/master/admin-disclosures`、`wene-mobile/app/master/index.tsx` |
 | サーバー側インデックス検索（DO SQLite永続化） | `Implemented` | `/api/master/search`、`api-worker/src/storeDO.ts`（`master_search_*`テーブル） |
@@ -117,6 +123,9 @@ flowchart LR
   - API: `/v1/school/runtime-status`
 - `Implemented`: 管理者ダッシュボードで PoP 稼働証明を表示。
   - UI: `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`
+- `Implemented`: 管理者参加券検索は所有イベント発行分のみを対象化。
+  - UI: `/admin/participants`（`wene-mobile/src/screens/admin/AdminParticipantsScreen.tsx`）
+  - API: `/v1/school/events?scope=mine` + `/v1/school/events/:eventId/claimants`（`api-worker/src/storeDO.ts` の所有者スコープ判定）
 - `Implemented`: イベント詳細画面で以下を表示:
   - 参加者一覧 + 確認コード
   - 送金監査ログの `On-chain署名` / `Off-chain監査署名` 分離

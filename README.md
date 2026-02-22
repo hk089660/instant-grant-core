@@ -26,6 +26,7 @@ Public prototype for auditable school/public participation and grant operations 
 - [Implemented] Student/user participation can be completed walletless via off-chain participation ticket issuance (`confirmationCode` + `ticketReceipt`) on supported paths.
 - [Optional] On-chain settlement evidence is an optional devnet path; tx/receipt/Explorer outputs appear only when the on-chain claim route is actually used.
 - [Implemented] Accountable operator workflow: admin/master flows expose PoP/runtime status, transfer audit logs, and role-based disclosure/search.
+- [Implemented] Admin participant search is owner-scoped: admin accounts search only tickets from their own issued events; master keeps full scope.
 - [Implemented] UI-level PoP confirmation is available: admin events screen shows `PoP Runtime Proof` with `enforceOnchainPop` + `signerConfigured`, linked to `/v1/school/pop-status`.
 - [Implemented] Hash-chain operation UI is available: admin event detail shows `Transfer Audit (Hash Chain)` with `prevHash -> entryHash` links for both on-chain and off-chain records.
 - [Implemented] User evidence UI is available on success screen: `confirmationCode`, participation audit receipt (`receipt_id`, `receipt_hash`), and optional PoP proof copy actions.
@@ -72,6 +73,10 @@ Public grants and school participation often expose only final outcomes, leaving
   - Admin UI route: `/admin/events/:eventId` -> `Transfer Audit (Hash Chain)` section.
   - Chain proof in UI: `hash: <prev> -> <current>` and `chain: <prev> -> <current>` for on-chain/off-chain records.
   - CSV export: `CSVダウンロード` button on the same event detail screen.
+- [Implemented] Admin participant search scope:
+  - Admin UI route: `/admin/participants`.
+  - Behavior: admin accounts search only claimants from owner-issued events; master has full scope.
+  - Backing APIs: `/v1/school/events?scope=mine` + `/v1/school/events/:eventId/claimants` (owner check in `api-worker/src/storeDO.ts`).
 - [Restricted] Master Dashboard audit/disclosure:
   - High-privilege surface (invite codes, audit logs, admin disclosure, indexed search) in `wene-mobile/app/master/index.tsx`.
   - Public URL is intentionally not listed.
@@ -86,6 +91,7 @@ Public grants and school participation often expose only final outcomes, leaving
 | `Participation Ticket (off-chain Attend)` with immutable audit receipt | `Implemented` | `api-worker/src/storeDO.ts` (`/v1/school/claims`, `/api/events/:eventId/claim`, receipt builder/verify) |
 | `On-chain Redeem (optional)` with Phantom signing | `Implemented` | `wene-mobile/src/screens/user/UserConfirmScreen.tsx`, `grant_program/programs/grant_program/src/lib.rs` |
 | PoP runtime/public status endpoints | `Implemented` | `/v1/school/pop-status`, `/v1/school/runtime-status`, `/v1/school/audit-status` |
+| Admin participant search with owner scope | `Implemented` | `/admin/participants`, `wene-mobile/src/screens/admin/AdminParticipantsScreen.tsx`, `/v1/school/events?scope=mine`, owner check in `/v1/school/events/:eventId/claimants` (`api-worker/src/storeDO.ts`) |
 | Admin transfer audit split (`onchain` vs `offchain`) | `Implemented` | `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`, `/api/admin/transfers` |
 | Master strict disclosure (`master > admin`) | `Implemented` | `/api/master/transfers`, `/api/master/admin-disclosures`, `wene-mobile/app/master/index.tsx` |
 | Server-side indexed search with DO SQLite persistence | `Implemented` | `/api/master/search`, `api-worker/src/storeDO.ts` (`master_search_*` tables) |
@@ -117,6 +123,9 @@ Public grants and school participation often expose only final outcomes, leaving
   - API: `/v1/school/runtime-status`
 - `Implemented`: Admin dashboard shows PoP runtime proof card and verification endpoint.
   - UI: `wene-mobile/src/screens/admin/AdminEventsScreen.tsx`
+- `Implemented`: Admin participant search only includes tickets from owner-issued events.
+  - UI: `/admin/participants` (`wene-mobile/src/screens/admin/AdminParticipantsScreen.tsx`)
+  - API: `/v1/school/events?scope=mine` + owner-scoped `/v1/school/events/:eventId/claimants` in `api-worker/src/storeDO.ts`
 - `Implemented`: Event detail view includes:
   - participant list + confirmation codes
   - transfer audit grouped as `On-chain署名` and `Off-chain監査署名`
