@@ -55,7 +55,6 @@ describe('master admin disclosure APIs', () => {
       AUDIT_IMMUTABLE_MODE: 'off',
       ENFORCE_ONCHAIN_POP: 'false',
     };
-    // @ts-expect-error mock for DurableObjectState
     store = new SchoolStore(state, env);
   });
 
