@@ -44,7 +44,7 @@ export function createV1SchoolRouter(deps: V1SchoolDeps): Router {
         ? Math.floor(rawTokenAmount)
         : typeof rawTokenAmount === 'string' && /^\d+$/.test(rawTokenAmount.trim())
           ? Number.parseInt(rawTokenAmount.trim(), 10)
-          : NaN;
+          : undefined;
     const rawClaimIntervalDays = body?.claimIntervalDays;
     const claimIntervalDays =
       typeof rawClaimIntervalDays === 'number' && Number.isFinite(rawClaimIntervalDays)
@@ -66,8 +66,8 @@ export function createV1SchoolRouter(deps: V1SchoolDeps): Router {
       res.status(400).json({ error: 'title, datetime, host are required' });
       return;
     }
-    if (!Number.isInteger(ticketTokenAmount) || ticketTokenAmount <= 0) {
-      res.status(400).json({ error: 'ticketTokenAmount must be a positive integer' });
+    if (ticketTokenAmount !== undefined && (!Number.isInteger(ticketTokenAmount) || ticketTokenAmount <= 0)) {
+      res.status(400).json({ error: 'ticketTokenAmount must be a positive integer if provided' });
       return;
     }
     if (!Number.isInteger(claimIntervalDays) || claimIntervalDays <= 0) {

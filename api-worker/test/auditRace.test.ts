@@ -59,7 +59,7 @@ describe('SchoolStore Audit Log Race Condition', () => {
         // If race condition exists, multiple entries might have 'GENESIS' as prev_hash
         const genesisCount = hashes.filter(h => h === 'GENESIS').length;
 
-        console.log('Prev Hashes:', hashes);
+
 
         // Ideally, only 1 should be GENESIS
         expect(genesisCount).toBe(1);

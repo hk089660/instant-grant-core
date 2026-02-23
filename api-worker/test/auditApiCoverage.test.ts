@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SchoolStore, type Env } from '../src/storeDO';
 import type { AuditEvent } from '../src/audit/types';
 
@@ -59,8 +59,7 @@ describe('API coverage audit logs', () => {
   beforeEach(() => {
     state = new MockDurableObjectState();
     env = { ADMIN_PASSWORD: 'master-secret', AUDIT_IMMUTABLE_MODE: 'off' };
-    // @ts-expect-error mock for DurableObjectState
-    store = new SchoolStore(state, env);
+    store = new SchoolStore(state as any, env);
   });
 
   it('tracks admin login attempts and redacts password', async () => {
@@ -141,8 +140,7 @@ describe('API coverage audit logs', () => {
   it('returns server configuration error for master-only routes when default password is not replaced', async () => {
     const localState = new MockDurableObjectState();
     const insecureEnv: Env = { ADMIN_PASSWORD: 'change-this-in-dashboard', AUDIT_IMMUTABLE_MODE: 'off' };
-    // @ts-expect-error mock for DurableObjectState
-    const insecureStore = new SchoolStore(localState, insecureEnv);
+    const insecureStore = new SchoolStore(localState as any, insecureEnv);
 
     const res = await insecureStore.fetch(
       new Request('https://example.com/api/master/audit-logs', {
@@ -160,8 +158,9 @@ describe('API coverage audit logs', () => {
       ADMIN_PASSWORD: 'master-secret',
       AUDIT_IMMUTABLE_MODE: 'required',
     };
-    // @ts-expect-error mock for DurableObjectState
-    const strictStore = new SchoolStore(localState, strictEnv);
+    const strictStore = new SchoolStore(localState as any, strictEnv);
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
 
     const inviteRes = await strictStore.fetch(
       new Request('https://example.com/api/admin/invite', {
@@ -193,5 +192,7 @@ describe('API coverage audit logs', () => {
     );
 
     expect(eventCreateRes.status).toBe(503);
+
+    consoleErrorSpy.mockRestore();
   });
 });
