@@ -230,6 +230,23 @@ we-ne is a non-custodial benefit distribution system built on Solana, designed t
 
 ---
 
+## 💡 Technical Highlights (Enterprise-Grade Architecture)
+
+This PoC goes beyond a simple smart contract demonstration; it is designed as an **enterprise-grade product ready for real-world mass adoption**, featuring the following advanced architectural patterns:
+
+### 1. Breaking the "UX Barrier" via Wallet-less Experience and Off-chain Signatures
+
+The biggest hurdle in Web3 adoption is forcing users to manage wallets (private keys) and gas fees. We bypass this barrier by leveraging Solana's native capability to **separate the Signer from the Fee Payer**. 
+By combining this with our proprietary off-chain processing layer (backend/relayer), we achieve a **seamless, wallet-less UX that rivals or exceeds Account Abstraction (AA) models in EVM ecosystems**. To the user, it feels like a standard Web2 app (just scan a QR code), while complex cryptographic operations are completely abstracted in the background.
+
+### 2. Complete Auditability via Off-chain Data and Proof of Process (Hash Chains)
+
+Distributing public grants requires balancing two conflicting needs: **transparency/auditability** and **protection of Personally Identifiable Information (PII)**.
+We solve this by keeping detailed personal data (like receipts or event logs) purely off-chain (e.g., in Cloudflare Durable Objects). We then link the **tamper-proof hash of this data to the on-chain transaction signature**, forming a cryptographic Hash Chain (Proof of Process).
+This design fully satisfies enterprise compliance and auditing requirements without the computational overhead of zero-knowledge proofs (ZKP), retaining practical, fast, and low-cost execution.
+
+---
+
 ## Unified Balance List (Credits, Vouchers, and SPL Tokens)
 
 The app shows a single balance list that normalizes credits, vouchers, coupons, and SPL tokens into one `BalanceItem` model. Issuer and usability (e.g. “usable today”) are shown in the UI so users understand who issued the value and when they can use it.

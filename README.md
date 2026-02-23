@@ -10,6 +10,22 @@ Public prototype for auditable school/public participation and grant operations 
 
 **Status (as of February 22, 2026 / 2026-02-22)**
 
+## 💡 Technical Approach in Implementation
+
+This prototype adopts the following architecture to solve practical challenges in real-world deployment (such as school or public events), specifically the "user onboarding barrier" and "administrator audit requirements":
+
+### 1. Decoupling Solana Settlement from Walletless Authentication (Attend)
+
+*   **Implementation challenge:** Forcing all participants to create a wallet (manage private keys) and hold SOL for gas upfront is a major UX barrier.
+*   **Our approach:** We leverage Solana's native capability to **separate the Signer from the Fee Payer** alongside our proprietary off-chain API (Cloudflare Worker). When event policy permits, users can obtain off-chain "participation evidence" (`confirmationCode` + `ticketReceipt`) using only a unique PIN and a QR code, completely walletless.
+*   **Result:** This architecture provides a seamless, Web2-like UX for general users while maintaining the flexibility to transition to on-chain settlement (Redeem) only when the explicit layer demands it.
+
+### 2. PII Protection and Hash Chain Auditability (Proof of Process)
+
+*   **Implementation challenge:** Fully transparent accountability for grants and participation records would expose Personally Identifiable Information (PII) on a public blockchain.
+*   **Our approach:** We isolate all detailed data and receipt information (including admin/user PII) in an off-chain layer (Durable Objects). We then construct an **append-only Hash Chain** of this data. When the on-chain route is executed, only the tamper-proof hash is cryptographically linked to the Solana transaction signature (**Proof of Process: PoP**).
+*   **Result:** This design enables low-cost, complete post-facto verification by third parties of "who approved what" without relying on computationally expensive cryptography like Zero-Knowledge Proofs (ZKP).
+
 ## Spec Freeze (as of 2026-02-22)
 - In the current `grant_program`, both `claim_grant` and `claim_grant_with_proof` call `verify_and_record_pop_proof`, so PoP verification is always required inside on-chain claim instructions.
 - In this README, `optional/required` refers to whether operations enforce the on-chain route. It does not mean PoP verification itself is switchable inside contract claims.
