@@ -33,8 +33,12 @@ const LAMPORTS_PER_SOL = 1e9;
 export const WalletScreen: React.FC = () => {
   const router = useRouter();
   const navigation = useNavigation();
-  const { walletPubkey } = useRecipientStore();
-  const { initializeKeyPair, saveKeyPair } = usePhantomStore();
+  const walletPubkey = useRecipientStore((s) => s.walletPubkey);
+  const setWalletPubkey = useRecipientStore((s) => s.setWalletPubkey);
+  const setPhantomSession = useRecipientStore((s) => s.setPhantomSession);
+  const setState = useRecipientStore((s) => s.setState);
+  const clearRecipientError = useRecipientStore((s) => s.clearError);
+  const { saveKeyPair, clearPhantomKeys } = usePhantomStore();
   const [solBalance, setSolBalance] = useState<number | null>(null);
   const [tokens, setTokens] = useState<TokenBalanceItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -135,6 +139,23 @@ export const WalletScreen: React.FC = () => {
     }
   };
 
+  const handleDisconnect = async () => {
+    try {
+      await clearPhantomKeys();
+      await setWalletPubkey(null);
+      setPhantomSession(null);
+      setState('Idle');
+      clearRecipientError();
+      setSolBalance(null);
+      setTokens([]);
+      setError(null);
+      setIsSettingsVisible(false);
+    } catch (e) {
+      console.error(e);
+      setError('接続解除に失敗しました');
+    }
+  };
+
   const showNoWallet = !walletPubkey;
   // loading表示はウォレットがある場合のみにする（未接続時は静的表示）
   const showLoading = !showNoWallet && loading && !refreshing;
@@ -160,12 +181,25 @@ export const WalletScreen: React.FC = () => {
               <AppText variant="body" style={styles.modalDescription}>
                 外部ウォレットと連携することで、保有資産を安全にリンクできます。
               </AppText>
+              {walletPubkey ? (
+                <AppText variant="small" style={styles.connectedWalletText}>
+                  接続中: {walletPubkey.slice(0, 8)}…{walletPubkey.slice(-8)}
+                </AppText>
+              ) : null}
               <Button
                 title="Phantom Walletと接続・連携する"
                 onPress={handleConnect}
                 variant="primary"
                 style={styles.connectButton}
               />
+              {walletPubkey ? (
+                <Button
+                  title="接続を解除する"
+                  onPress={handleDisconnect}
+                  variant="secondary"
+                  style={styles.disconnectButton}
+                />
+              ) : null}
               <Button
                 title="閉じる"
                 onPress={() => setIsSettingsVisible(false)}
@@ -425,7 +459,14 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     marginBottom: theme.spacing.md,
   },
+  connectedWalletText: {
+    color: theme.colors.textTertiary,
+    marginBottom: theme.spacing.sm,
+  },
   connectButton: {
+    marginBottom: theme.spacing.sm,
+  },
+  disconnectButton: {
     marginBottom: theme.spacing.sm,
   },
   closeButton: {
