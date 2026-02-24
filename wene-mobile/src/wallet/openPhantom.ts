@@ -11,39 +11,40 @@ export interface OpenPhantomOptions {
 }
 
 function buildPhantomCustomProtocolUrl(url: string): string | null {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'https:' || parsed.hostname !== 'phantom.app') {
-      return null;
-    }
-
-    const segments = parsed.pathname
-      .split('/')
-      .filter(Boolean);
-
-    if (segments.length < 2) {
-      return null;
-    }
-
-    let version = '';
-    let method = '';
-    if (segments[0] === 'ul') {
-      if (segments.length < 3) return null;
-      version = segments[1];
-      method = segments.slice(2).join('/');
-    } else {
-      version = segments[0];
-      method = segments.slice(1).join('/');
-    }
-
-    if (!version || !method) {
-      return null;
-    }
-
-    return `phantom://${version}/${method}${parsed.search}${parsed.hash}`;
-  } catch {
+  if (!url) {
     return null;
   }
+  const normalized = url.trim();
+  const prefix = 'https://phantom.app/ul/';
+  if (normalized.startsWith(prefix)) {
+    return `phantom://${normalized.slice(prefix.length)}`;
+  }
+  return null;
+}
+
+function buildPhantomCustomProtocolFallbackUrl(url: string): string | null {
+  if (!url) {
+    return null;
+  }
+  const normalized = url.trim();
+  const prefix = 'https://phantom.app/ul/';
+  if (normalized.startsWith(prefix)) {
+    return `phantom://ul/${normalized.slice(prefix.length)}`;
+  }
+  return null;
+}
+
+function buildPhantomAndroidIntentUrl(url: string): string | null {
+  if (!url) {
+    return null;
+  }
+  const normalized = url.trim();
+  const prefix = 'https://phantom.app/';
+  if (!normalized.startsWith(prefix)) {
+    return null;
+  }
+  const rest = normalized.slice(prefix.length);
+  return `intent://phantom.app/${rest}#Intent;scheme=https;package=app.phantom;end`;
 }
 
 // ToastAndroidはAndroid専用のため、条件付きで使用
@@ -99,15 +100,31 @@ export async function openPhantomConnect(url: string, options: OpenPhantomOption
 
   // Native は Phantom custom protocol を優先して直接アプリを開く（ブラウザ経由を回避）
   if (Platform.OS !== 'web') {
+    const androidIntentUrl = Platform.OS === 'android' ? buildPhantomAndroidIntentUrl(url) : null;
     const customProtocolUrl = buildPhantomCustomProtocolUrl(url);
-    if (customProtocolUrl) {
-      try {
-        await Linking.openURL(customProtocolUrl);
-        console.log('[openPhantomConnect] Phantom custom protocol open succeeded');
-        return;
-      } catch (e) {
-        console.warn('[openPhantomConnect] Phantom custom protocol open failed, fallback universal link:', e);
+    const fallbackCustomProtocolUrl = buildPhantomCustomProtocolFallbackUrl(url);
+    const nativeCandidates = [androidIntentUrl, customProtocolUrl, fallbackCustomProtocolUrl].filter((v): v is string => Boolean(v));
+    if (nativeCandidates.length > 0) {
+      let lastError: unknown = null;
+      for (const candidate of nativeCandidates) {
+        try {
+          await Linking.openURL(candidate);
+          console.log('[openPhantomConnect] Phantom custom protocol open succeeded:', candidate.substring(0, 40));
+          return;
+        } catch (e) {
+          lastError = e;
+          console.warn('[openPhantomConnect] Phantom custom protocol open failed:', candidate.substring(0, 40), e);
+        }
       }
+      const error = new Error('Phantomアプリを起動できませんでした。Phantomがインストール済みか確認してください。');
+      console.error('[openPhantomConnect] all Phantom custom protocol candidates failed', lastError);
+      if (Platform.OS === 'android') {
+        const ToastAndroid = getToastAndroid();
+        if (ToastAndroid) {
+          ToastAndroid.show('Phantomアプリを起動できませんでした', ToastAndroid.LONG);
+        }
+      }
+      throw error;
     }
   }
 

@@ -113,7 +113,7 @@ export const UserConfirmScreen: React.FC = () => {
     }
 
     return {
-      redirectLink: 'wene://phantom/sign?cluster=devnet',
+      redirectLink: 'wene://phantom/sign',
       appUrl: 'https://wene.app',
     };
   }, []);
