@@ -139,7 +139,7 @@ export const UserRegisterScreen: React.FC = () => {
             editable={!loading}
           />
           <AppText variant="caption" style={styles.pinNotice}>
-            参加券・トークン受け取り時にPIN入力が必須です。絶対に忘れないように控えてください。
+            ID、PINは必ず保存してください。忘れた場合、復元ができません。
           </AppText>
 
           {error ? (
