@@ -1,5 +1,5 @@
 /**
- * PIN再入力で利用者を確認（省略可・PoC用）
+ * ID + PIN で利用者ログイン
  * 確認後 /u/scan へ
  */
 
@@ -10,52 +10,71 @@ import { useRouter } from 'expo-router';
 import { AppText, Button } from '../../ui/components';
 import { theme } from '../../ui/theme';
 import { schoolRoutes } from '../../lib/schoolRoutes';
-import { getBaseUrl } from '../../api/userApi';
+import { syncUserTickets } from '../../api/userApi';
+import { HttpError } from '../../api/http/httpClient';
+import { useAuth } from '../../contexts/AuthContext';
+import { useRecipientTicketStore } from '../../store/recipientTicketStore';
 
+const USER_ID_REGEX = /^[a-z0-9][a-z0-9._-]{2,31}$/;
 const PIN_REGEX = /^\d{4,6}$/;
 
 export const UserLoginScreen: React.FC = () => {
   const router = useRouter();
+  const { clearUser, setUserId } = useAuth();
+  const replaceTickets = useRecipientTicketStore((state) => state.replaceTickets);
+  const [userId, setUserIdLocal] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleVerify = useCallback(async () => {
+    const userIdVal = userId.trim().toLowerCase();
     const pinVal = pin.trim();
     setError(null);
+    if (!USER_ID_REGEX.test(userIdVal)) {
+      setError('IDは3〜32文字、英小文字・数字・._-で入力してください');
+      return;
+    }
     if (!PIN_REGEX.test(pinVal)) {
       setError('PINは4〜6桁の数字で入力してください');
       return;
     }
     setLoading(true);
     try {
-      const base = getBaseUrl();
-      const url = `${base}/api/auth/verify`;
-      const { getUserId } = await import('../../lib/userStorage');
-      const userId = getUserId();
-      if (!userId) {
-        setError('登録がありません。はじめに参加登録を行ってください。');
-        setLoading(false);
-        return;
-      }
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, pin: pinVal }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError((data as { error?: string }).error === 'invalid pin' ? 'PINが正しくありません' : '確認に失敗しました');
-        setLoading(false);
-        return;
-      }
+      const syncResult = await syncUserTickets(userIdVal, pinVal);
+      await replaceTickets(
+        syncResult.tickets.map((ticket) => ({
+          eventId: ticket.eventId,
+          eventName: ticket.eventName,
+          joinedAt: ticket.claimedAt,
+          mintAddress: ticket.mint,
+          txSignature: ticket.txSignature,
+          receiptPubkey: ticket.receiptPubkey,
+          confirmationCode: ticket.confirmationCode,
+          auditReceiptId: ticket.auditReceiptId,
+          auditReceiptHash: ticket.auditReceiptHash,
+        }))
+      );
+      clearUser();
+      setUserId(userIdVal);
       router.replace(schoolRoutes.scan as any);
-    } catch {
+    } catch (e: unknown) {
+      if (e instanceof HttpError) {
+        const body = e.body as { code?: unknown; error?: unknown };
+        if (body?.code === 'invalid_pin' || body?.code === 'user_not_found') {
+          setError('IDまたはPINが正しくありません');
+          return;
+        }
+        if (typeof body?.error === 'string' && body.error.trim()) {
+          setError(body.error);
+          return;
+        }
+      }
       setError('接続に失敗しました');
     } finally {
       setLoading(false);
     }
-  }, [pin, router]);
+  }, [userId, pin, replaceTickets, clearUser, setUserId, router]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -65,11 +84,32 @@ export const UserLoginScreen: React.FC = () => {
       >
         <View style={styles.content}>
           <AppText variant="h2" style={styles.title}>
-            PINで確認
+            ログイン
           </AppText>
           <AppText variant="caption" style={styles.subtitle}>
-            登録したPINを入力してください
+            登録したIDとPINを入力してください
           </AppText>
+          <AppText variant="caption" style={styles.autofillHint}>
+            ブラウザでは、表示されるパスワード保存を許可するとID/PINの再入力を省略できます。
+          </AppText>
+
+          <AppText variant="caption" style={styles.label}>
+            ID
+          </AppText>
+          <TextInput
+            style={styles.input}
+            value={userId}
+            onChangeText={(t) => setUserIdLocal(t.toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 32))}
+            placeholder="登録したID"
+            placeholderTextColor={theme.colors.textTertiary}
+            maxLength={32}
+            editable={!loading}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="username"
+            textContentType="username"
+            importantForAutofill="yes"
+          />
 
           <AppText variant="caption" style={styles.label}>
             PIN
@@ -84,6 +124,9 @@ export const UserLoginScreen: React.FC = () => {
             secureTextEntry
             maxLength={6}
             editable={!loading}
+            autoComplete="password"
+            textContentType="password"
+            importantForAutofill="yes"
           />
 
           {error ? (
@@ -94,7 +137,7 @@ export const UserLoginScreen: React.FC = () => {
 
           <View style={styles.actionGroup}>
             <Button
-              title={loading ? '確認中…' : '確認する'}
+              title={loading ? 'ログイン中…' : 'ログインする'}
               onPress={handleVerify}
               loading={loading}
               disabled={loading}
@@ -137,7 +180,11 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.lg,
+    marginBottom: theme.spacing.sm,
+  },
+  autofillHint: {
+    color: theme.colors.textTertiary,
+    marginBottom: theme.spacing.md,
   },
   label: {
     color: theme.colors.textSecondary,

@@ -7,6 +7,7 @@ export interface RecipientTicket {
   eventId: string;
   eventName: string;
   joinedAt: number;
+  mintAddress?: string;
   txSignature?: string;
   receiptPubkey?: string;
   popEntryHash?: string;
@@ -21,6 +22,7 @@ interface RecipientTicketStore {
   tickets: RecipientTicket[];
   isLoading: boolean;
   loadTickets: () => Promise<void>;
+  replaceTickets: (tickets: RecipientTicket[]) => Promise<void>;
   addTicket: (ticket: RecipientTicket) => Promise<void>;
   isJoined: (eventId: string) => boolean;
   getTicketByEventId: (eventId: string) => RecipientTicket | undefined;
@@ -44,6 +46,7 @@ const loadFromStorage = async (): Promise<RecipientTicket[]> => {
           eventId,
           eventName,
           joinedAt,
+          mintAddress: typeof raw.mintAddress === 'string' ? raw.mintAddress : undefined,
           txSignature: typeof raw.txSignature === 'string' ? raw.txSignature : undefined,
           receiptPubkey: typeof raw.receiptPubkey === 'string' ? raw.receiptPubkey : undefined,
           popEntryHash: typeof raw.popEntryHash === 'string' ? raw.popEntryHash : undefined,
@@ -69,6 +72,7 @@ function mergeTicket(existing: RecipientTicket, incoming: RecipientTicket): Reci
     ...existing,
     ...incoming,
     joinedAt: existing.joinedAt || incoming.joinedAt,
+    mintAddress: incoming.mintAddress ?? existing.mintAddress,
     txSignature: incoming.txSignature ?? existing.txSignature,
     receiptPubkey: incoming.receiptPubkey ?? existing.receiptPubkey,
     popEntryHash: incoming.popEntryHash ?? existing.popEntryHash,
@@ -92,6 +96,29 @@ export const useRecipientTicketStore = create<RecipientTicketStore>((set, get) =
     } catch {
       set({ isLoading: false });
     }
+  },
+
+  replaceTickets: async (incomingTickets: RecipientTicket[]) => {
+    const deduped: RecipientTicket[] = [];
+    for (const incoming of incomingTickets) {
+      const eventId = incoming.eventId.trim();
+      const eventName = incoming.eventName.trim();
+      if (!eventId || !eventName) continue;
+      const normalized: RecipientTicket = {
+        ...incoming,
+        eventId,
+        eventName,
+        joinedAt: Number.isFinite(incoming.joinedAt) ? incoming.joinedAt : Date.now(),
+      };
+      const existingIndex = deduped.findIndex((ticket) => ticket.eventId === eventId);
+      if (existingIndex < 0) {
+        deduped.push(normalized);
+      } else {
+        deduped[existingIndex] = mergeTicket(deduped[existingIndex], normalized);
+      }
+    }
+    await saveToStorage(deduped);
+    set({ tickets: deduped });
   },
 
   addTicket: async (ticket: RecipientTicket) => {

@@ -116,6 +116,50 @@ export function createApiRouter(deps: ApiDeps): Router {
         res.json({ ok: true });
     });
 
+    // POST /api/users/tickets/sync
+    router.post('/users/tickets/sync', async (req: Request, res: Response) => {
+        const body = req.body;
+        const userId = normalizeUserId(body?.userId);
+        const pin = typeof body?.pin === 'string' ? body.pin : '';
+
+        if (!userId || !pin) {
+            res.status(400).json({ error: 'missing params' });
+            return;
+        }
+
+        const user = storage.getUser(userId);
+        if (!user) {
+            res.status(401).json({ message: 'User not found', code: 'user_not_found' });
+            return;
+        }
+
+        const pinHash = hashPin(pin);
+        if (user.pinHash !== pinHash) {
+            res.status(401).json({ message: 'Invalid PIN', code: 'invalid_pin' });
+            return;
+        }
+
+        const tickets = storage
+            .getUserClaims(userId)
+            .slice()
+            .sort((a, b) => b.joinedAt - a.joinedAt)
+            .map((claim) => {
+                const event = storage.getEvent(claim.eventId);
+                return {
+                    eventId: claim.eventId,
+                    eventName: event?.title ?? claim.eventId,
+                    claimedAt: claim.joinedAt,
+                    confirmationCode: claim.confirmationCode,
+                    mint: event?.solanaMint,
+                };
+            });
+
+        res.json({
+            syncedAt: new Date().toISOString(),
+            tickets,
+        });
+    });
+
     // POST /api/events/:eventId/claim
     router.post('/events/:eventId/claim', async (req: Request, res: Response) => {
         const eventId = req.params.eventId;

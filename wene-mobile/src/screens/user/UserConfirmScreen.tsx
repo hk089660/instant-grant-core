@@ -639,6 +639,23 @@ export const UserConfirmScreen: React.FC = () => {
             </View>
           </View>
         </View>
+        {status === 'loading' ? (
+          <View style={styles.loadingOverlay}>
+            <Card style={styles.loadingCard}>
+              <Loading
+                size="large"
+                message={
+                  waitingForPhantom
+                    ? 'ウォレット署名を待機しています…'
+                    : '参加情報を検証しています…'
+                }
+              />
+              <AppText variant="small" style={styles.loadingHint}>
+                画面を閉じずにこのままお待ちください
+              </AppText>
+            </Card>
+          </View>
+        ) : null}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -764,6 +781,24 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.sm,
   },
   fallbackButton: {
+    marginTop: theme.spacing.xs,
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.28)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.lg,
+  },
+  loadingCard: {
+    width: '100%',
+    maxWidth: 360,
+    alignItems: 'center',
+    borderRadius: 14,
+  },
+  loadingHint: {
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
     marginTop: theme.spacing.xs,
   },
 });

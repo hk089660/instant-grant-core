@@ -131,3 +131,26 @@ export interface UserClaimResponse {
   confirmationCode: string;
   ticketReceipt?: ParticipationTicketReceipt;
 }
+
+/** POST /api/users/tickets/sync */
+export interface UserTicketSyncBody {
+  userId?: string;
+  pin?: string;
+}
+
+export interface UserTicketSyncItem {
+  eventId: string;
+  eventName: string;
+  claimedAt: number;
+  confirmationCode?: string;
+  auditReceiptId?: string;
+  auditReceiptHash?: string;
+  txSignature?: string;
+  receiptPubkey?: string;
+  mint?: string;
+}
+
+export interface UserTicketSyncResponse {
+  syncedAt: string;
+  tickets: UserTicketSyncItem[];
+}

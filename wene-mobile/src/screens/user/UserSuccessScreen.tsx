@@ -13,6 +13,13 @@ import { getSchoolDeps } from '../../api/createSchoolDeps';
 import type { SchoolEvent } from '../../types/school';
 import { copyTextWithFeedback } from '../../utils/copyText';
 
+function shortenCode(value: string, head = 8, tail = 8): string {
+  const normalized = value.trim();
+  if (!normalized) return '-';
+  if (normalized.length <= head + tail + 1) return normalized;
+  return `${normalized.slice(0, head)}...${normalized.slice(-tail)}`;
+}
+
 export const UserSuccessScreen: React.FC = () => {
   const router = useRouter();
   const { eventId: targetEventId, isValid } = useEventIdFromParams({ redirectOnInvalid: true });
@@ -63,6 +70,12 @@ export const UserSuccessScreen: React.FC = () => {
   const storedTicket = targetEventId ? getTicketByEventId(targetEventId) : undefined;
   const resolvedTx = txSignature ?? storedTicket?.txSignature;
   const resolvedReceipt = receiptPubkey ?? storedTicket?.receiptPubkey;
+  const resolvedMintAddress = mintAddress ?? storedTicket?.mintAddress;
+  const resolvedConfirmationCode =
+    (typeof confirmationCode === 'string' && confirmationCode.trim() ? confirmationCode.trim() : undefined) ??
+    storedTicket?.confirmationCode;
+  const resolvedAuditReceiptId = auditReceiptId ?? storedTicket?.auditReceiptId;
+  const resolvedAuditReceiptHash = auditReceiptHash ?? storedTicket?.auditReceiptHash;
   const resolvedPopEntryHash = popEntryHash ?? storedTicket?.popEntryHash;
   const resolvedPopAuditHash = popAuditHash ?? storedTicket?.popAuditHash;
   const resolvedPopSigner = popSigner ?? storedTicket?.popSigner;
@@ -91,6 +104,7 @@ export const UserSuccessScreen: React.FC = () => {
             popEntryHash,
             popAuditHash,
             popSigner,
+            mintAddress,
             confirmationCode: typeof confirmationCode === 'string' ? confirmationCode : undefined,
             auditReceiptId,
             auditReceiptHash,
@@ -107,6 +121,7 @@ export const UserSuccessScreen: React.FC = () => {
     popEntryHash,
     popAuditHash,
     popSigner,
+    mintAddress,
     confirmationCode,
     auditReceiptId,
     auditReceiptHash,
@@ -115,7 +130,7 @@ export const UserSuccessScreen: React.FC = () => {
   const isAlready = already === '1' || status === 'already';
   const explorerTxUrl = resolvedTx ? `https://explorer.solana.com/tx/${resolvedTx}?cluster=devnet` : null;
   const explorerReceiptUrl = resolvedReceipt ? `https://explorer.solana.com/address/${resolvedReceipt}?cluster=devnet` : null;
-  const explorerMintUrl = mintAddress ? `https://explorer.solana.com/address/${mintAddress}?cluster=devnet` : null;
+  const explorerMintUrl = resolvedMintAddress ? `https://explorer.solana.com/address/${resolvedMintAddress}?cluster=devnet` : null;
 
   const handleCopyPopProof = useCallback(async () => {
     const payload = [
@@ -135,16 +150,16 @@ export const UserSuccessScreen: React.FC = () => {
     const payload = [
       'Participation Audit Receipt',
       `eventId: ${targetEventId ?? '-'}`,
-      `confirmation_code: ${confirmationCode ?? '-'}`,
-      `receipt_id: ${auditReceiptId ?? '-'}`,
-      `receipt_hash: ${auditReceiptHash ?? '-'}`,
+      `confirmation_code: ${resolvedConfirmationCode ?? '-'}`,
+      `receipt_id: ${resolvedAuditReceiptId ?? '-'}`,
+      `receipt_hash: ${resolvedAuditReceiptHash ?? '-'}`,
       'verify_api: /api/audit/receipts/verify-code',
     ].join('\n');
 
     await copyTextWithFeedback(payload, {
       successMessage: '監査レシート情報をコピーしました',
     });
-  }, [targetEventId, confirmationCode, auditReceiptId, auditReceiptHash]);
+  }, [targetEventId, resolvedConfirmationCode, resolvedAuditReceiptId, resolvedAuditReceiptHash]);
 
   if (!isValid) return null;
 
@@ -172,11 +187,11 @@ export const UserSuccessScreen: React.FC = () => {
         )}
 
         {/* 確認コード */}
-        {confirmationCode && (
+        {resolvedConfirmationCode && (
           <Card style={styles.card}>
             <AppText variant="caption" style={styles.label}>確認コード</AppText>
             <AppText variant="h2" style={styles.code} selectable>
-              #{confirmationCode}
+              #{resolvedConfirmationCode}
             </AppText>
             <AppText variant="small" style={styles.codeHint}>
               このコードは後で確認に使えます
@@ -184,19 +199,19 @@ export const UserSuccessScreen: React.FC = () => {
           </Card>
         )}
 
-        {(auditReceiptId || auditReceiptHash) && (
+        {(resolvedAuditReceiptId || resolvedAuditReceiptHash) && (
           <Card style={styles.card}>
             <AppText variant="caption" style={styles.label}>
               監査レシート（参加券）
             </AppText>
-            {auditReceiptId && (
-              <AppText variant="small" style={styles.value} selectable>
-                receipt_id: {auditReceiptId}
+            {resolvedAuditReceiptId && (
+              <AppText variant="small" style={styles.value}>
+                receipt_id: {shortenCode(resolvedAuditReceiptId)}
               </AppText>
             )}
-            {auditReceiptHash && (
-              <AppText variant="small" style={styles.value} selectable>
-                receipt_hash: {auditReceiptHash}
+            {resolvedAuditReceiptHash && (
+              <AppText variant="small" style={styles.value}>
+                receipt_hash: {shortenCode(resolvedAuditReceiptHash)}
               </AppText>
             )}
             <AppText variant="small" style={styles.codeHint}>
@@ -218,8 +233,8 @@ export const UserSuccessScreen: React.FC = () => {
             <AppText variant="caption" style={styles.label}>
               トランザクション署名
             </AppText>
-            <AppText variant="small" style={styles.value} selectable>
-              {resolvedTx}
+            <AppText variant="small" style={styles.value}>
+              {shortenCode(resolvedTx)}
             </AppText>
             {explorerTxUrl && (
               <Button
@@ -237,8 +252,8 @@ export const UserSuccessScreen: React.FC = () => {
             <AppText variant="caption" style={styles.label}>
               Receipt Pubkey
             </AppText>
-            <AppText variant="small" style={styles.value} selectable>
-              {resolvedReceipt}
+            <AppText variant="small" style={styles.value}>
+              {shortenCode(resolvedReceipt)}
             </AppText>
             {explorerReceiptUrl && (
               <Button
@@ -257,18 +272,18 @@ export const UserSuccessScreen: React.FC = () => {
               PoP証跡（Proof of Process）
             </AppText>
             {resolvedPopSigner && (
-              <AppText variant="small" style={styles.value} selectable>
-                signer: {resolvedPopSigner}
+              <AppText variant="small" style={styles.value}>
+                signer: {shortenCode(resolvedPopSigner)}
               </AppText>
             )}
             {resolvedPopEntryHash && (
-              <AppText variant="small" style={styles.value} selectable>
-                entry_hash: {resolvedPopEntryHash}
+              <AppText variant="small" style={styles.value}>
+                entry_hash: {shortenCode(resolvedPopEntryHash)}
               </AppText>
             )}
             {resolvedPopAuditHash && (
-              <AppText variant="small" style={styles.value} selectable>
-                audit_hash: {resolvedPopAuditHash}
+              <AppText variant="small" style={styles.value}>
+                audit_hash: {shortenCode(resolvedPopAuditHash)}
               </AppText>
             )}
             <AppText variant="small" style={styles.codeHint}>
@@ -284,13 +299,13 @@ export const UserSuccessScreen: React.FC = () => {
           </Card>
         )}
 
-        {mintAddress && (
+        {resolvedMintAddress && (
           <Card style={styles.card}>
             <AppText variant="caption" style={styles.label}>
               配布トークン Mint
             </AppText>
-            <AppText variant="small" style={styles.value} selectable>
-              {mintAddress}
+            <AppText variant="small" style={styles.value}>
+              {shortenCode(resolvedMintAddress)}
             </AppText>
             <AppText variant="small" style={styles.codeHint}>
               {reflectedOnchain
@@ -311,7 +326,7 @@ export const UserSuccessScreen: React.FC = () => {
         )}
 
         {/* confirmationCode もない、tx/receipt もない場合 */}
-        {!confirmationCode && !resolvedTx && !resolvedReceipt && !mintAddress && !resolvedPopEntryHash && !resolvedPopAuditHash && !resolvedPopSigner && (
+        {!resolvedConfirmationCode && !resolvedTx && !resolvedReceipt && !resolvedMintAddress && !resolvedPopEntryHash && !resolvedPopAuditHash && !resolvedPopSigner && (
           <Card style={styles.card}>
             <AppText variant="caption" style={styles.label}>参加記録</AppText>
             <AppText variant="small" style={styles.codeHint}>

@@ -268,6 +268,32 @@ export class ClaimStore {
     return out;
   }
 
+  /** subject（userId等）に紐づく参加履歴を全イベント横断で取得 */
+  async getClaimsBySubject(subject: string): Promise<Array<{ eventId: string; claimedAt: number; confirmationCode?: string }>> {
+    const normalizedSubject = subject.trim();
+    if (!normalizedSubject) return [];
+
+    const rows = await this.storage.list(CLAIM_PREFIX);
+    const out: Array<{ eventId: string; claimedAt: number; confirmationCode?: string }> = [];
+    for (const [key, value] of rows.entries()) {
+      if (!key.startsWith(CLAIM_PREFIX)) continue;
+      const suffix = key.slice(CLAIM_PREFIX.length);
+      const separatorAt = suffix.lastIndexOf(':');
+      if (separatorAt <= 0 || separatorAt >= suffix.length - 1) continue;
+      const eventId = suffix.slice(0, separatorAt);
+      const claimSubject = suffix.slice(separatorAt + 1);
+      if (claimSubject !== normalizedSubject) continue;
+
+      const history = parseClaimHistory(value);
+      if (history.length === 0) continue;
+      const latest = history[history.length - 1];
+      out.push({ eventId, claimedAt: latest.at, confirmationCode: latest.code });
+    }
+
+    out.sort((a, b) => b.claimedAt - a.claimedAt);
+    return out;
+  }
+
   /** 動的に作成されたイベントを取得 */
   private async getStoredEvents(): Promise<SchoolEvent[]> {
     const map = await this.storage.list(EVENT_PREFIX);

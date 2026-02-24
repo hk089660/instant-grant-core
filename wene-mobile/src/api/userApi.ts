@@ -41,6 +41,23 @@ export interface VerifyUserResponse {
   ok: true;
 }
 
+export interface UserTicketSyncItem {
+  eventId: string;
+  eventName: string;
+  claimedAt: number;
+  confirmationCode?: string;
+  auditReceiptId?: string;
+  auditReceiptHash?: string;
+  txSignature?: string;
+  receiptPubkey?: string;
+  mint?: string;
+}
+
+export interface UserTicketSyncResponse {
+  syncedAt: string;
+  tickets: UserTicketSyncItem[];
+}
+
 export async function registerUser(userId: string, displayName: string, pin: string): Promise<RegisterResponse> {
   const base = getBaseUrl();
   const url = `${base}/api/users/register`;
@@ -51,6 +68,12 @@ export async function verifyUserPin(userId: string, pin: string): Promise<Verify
   const base = getBaseUrl();
   const url = `${base}/api/auth/verify`;
   return httpPost<VerifyUserResponse>(url, { userId, pin });
+}
+
+export async function syncUserTickets(userId: string, pin: string): Promise<UserTicketSyncResponse> {
+  const base = getBaseUrl();
+  const url = `${base}/api/users/tickets/sync`;
+  return httpPost<UserTicketSyncResponse>(url, { userId, pin });
 }
 
 export async function claimEventWithUser(

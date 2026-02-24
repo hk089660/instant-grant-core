@@ -126,6 +126,63 @@ describe('participation audit receipt', () => {
     expect(body.ticketReceipt?.audit.eventId).toBe(eventId);
   });
 
+  it('syncs user tickets on login with off-chain and on-chain proof fields', async () => {
+    const { eventId, userId } = await prepareEventAndUser();
+
+    const claimRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(eventId)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          pin: '1234',
+          txSignature: 'tx-sync-001',
+          receiptPubkey: 'receipt-sync-001',
+        }),
+      })
+    );
+    expect(claimRes.status).toBe(200);
+    const claimBody = (await claimRes.json()) as {
+      confirmationCode: string;
+      ticketReceipt?: ParticipationTicketReceipt;
+    };
+
+    const syncRes = await store.fetch(
+      new Request('https://example.com/api/users/tickets/sync', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          pin: '1234',
+        }),
+      })
+    );
+    expect(syncRes.status).toBe(200);
+    const syncBody = (await syncRes.json()) as {
+      syncedAt?: string;
+      tickets?: Array<{
+        eventId: string;
+        eventName: string;
+        claimedAt: number;
+        confirmationCode?: string;
+        auditReceiptId?: string;
+        auditReceiptHash?: string;
+        txSignature?: string;
+        receiptPubkey?: string;
+      }>;
+    };
+    expect(typeof syncBody.syncedAt).toBe('string');
+    expect(Array.isArray(syncBody.tickets)).toBe(true);
+    const syncedTicket = syncBody.tickets?.find((ticket) => ticket.eventId === eventId);
+    expect(syncedTicket).toBeTruthy();
+    expect(syncedTicket?.eventName).toBe('receipt event');
+    expect(syncedTicket?.confirmationCode).toBe(claimBody.confirmationCode);
+    expect(syncedTicket?.auditReceiptId).toBe(claimBody.ticketReceipt?.receiptId);
+    expect(syncedTicket?.auditReceiptHash).toBe(claimBody.ticketReceipt?.receiptHash);
+    expect(syncedTicket?.txSignature).toBe('tx-sync-001');
+    expect(syncedTicket?.receiptPubkey).toBe('receipt-sync-001');
+  });
+
   it('returns ticket receipt on /v1/school/claims and supports verify-by-code', async () => {
     const createRes = await store.fetch(
       new Request('https://example.com/v1/school/events', {

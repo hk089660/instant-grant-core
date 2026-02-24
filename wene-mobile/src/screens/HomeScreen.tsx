@@ -9,7 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 export const HomeScreen: React.FC = () => {
   const router = useRouter();
-  const { userId, displayName } = useAuth();
+  const { userId, displayName, clearUser } = useAuth();
 
   const handleGoToEvents = () => {
     router.push(schoolRoutes.events as any);
@@ -25,6 +25,10 @@ export const HomeScreen: React.FC = () => {
 
   const handleLogin = () => {
     router.push(schoolRoutes.login as any);
+  };
+
+  const handleLogout = () => {
+    clearUser();
   };
 
   return (
@@ -75,11 +79,19 @@ export const HomeScreen: React.FC = () => {
             </View>
           </View>
         ) : (
-          <View style={styles.userBadge}>
-            <Ionicons name="person-circle-outline" size={16} color={theme.colors.textSecondary} />
-            <AppText variant="small" style={styles.userBadgeText}>
-              {displayName ?? 'ログイン済み'}
-            </AppText>
+          <View style={styles.loggedInSection}>
+            <View style={styles.userBadge}>
+              <Ionicons name="person-circle-outline" size={16} color={theme.colors.textSecondary} />
+              <AppText variant="small" style={styles.userBadgeText}>
+                {displayName ?? `ID: ${userId}`}
+              </AppText>
+            </View>
+            <Button
+              title="ログアウト"
+              variant="secondary"
+              onPress={handleLogout}
+              style={styles.logoutButton}
+            />
           </View>
         )}
       </View>
@@ -162,11 +174,15 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.gray300,
   },
   // ログイン済みバッジ
+  loggedInSection: {
+    marginTop: theme.spacing.xl,
+    alignItems: 'center',
+    width: '100%',
+  },
   userBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    marginTop: theme.spacing.xl,
     paddingVertical: theme.spacing.xs,
     paddingHorizontal: theme.spacing.md,
     backgroundColor: theme.colors.gray100,
@@ -174,5 +190,9 @@ const styles = StyleSheet.create({
   },
   userBadgeText: {
     color: theme.colors.textSecondary,
+  },
+  logoutButton: {
+    marginTop: theme.spacing.sm,
+    minWidth: 120,
   },
 });

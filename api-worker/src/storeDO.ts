@@ -10,6 +10,9 @@ import type {
   SchoolClaimResultSuccess,
   UserClaimBody,
   UserClaimResponse,
+  UserTicketSyncBody,
+  UserTicketSyncItem,
+  UserTicketSyncResponse,
 } from './types';
 import { ClaimStore, normalizeSubject, type IClaimStorage } from './claimLogic';
 import type { AuditActor, AuditEvent } from './audit/types';
@@ -192,6 +195,12 @@ type TransferLogView = {
 };
 
 type TransferLogRoleView = 'admin' | 'master';
+
+type UserTicketTransferSnapshot = {
+  txSignature: string | null;
+  receiptPubkey: string | null;
+  mint: string | null;
+};
 
 type ConfirmationCodeIndexRecord = {
   code: string;
@@ -2296,6 +2305,89 @@ export class SchoolStore implements DurableObject {
     return items;
   }
 
+  private async getLatestUserTransferSnapshots(
+    userId: string,
+    eventIds: Set<string>
+  ): Promise<Map<string, UserTicketTransferSnapshot>> {
+    const normalizedUserId = this.normalizeUserId(userId);
+    const snapshots = new Map<string, UserTicketTransferSnapshot>();
+    if (!normalizedUserId || eventIds.size === 0) return snapshots;
+
+    const rows = await this.ctx.storage.list({
+      prefix: AUDIT_HISTORY_PREFIX,
+      limit: AUDIT_ENTRY_SCAN_LIMIT,
+      reverse: true,
+    });
+
+    for (const value of rows.values()) {
+      if (snapshots.size >= eventIds.size) break;
+      if (!value || typeof value !== 'object') continue;
+      const entry = value as AuditEvent;
+      if (entry.event !== 'USER_CLAIM') continue;
+      if (!eventIds.has(entry.eventId)) continue;
+      if (snapshots.has(entry.eventId)) continue;
+
+      const view = this.toTransferLogView(entry);
+      if (!view) continue;
+
+      const piiUserId = this.normalizeUserId(view.pii?.userId);
+      const recipientUserId =
+        view.transfer.recipient.type === 'user'
+          ? this.normalizeUserId(view.transfer.recipient.id)
+          : '';
+      if (piiUserId !== normalizedUserId && recipientUserId !== normalizedUserId) continue;
+
+      snapshots.set(entry.eventId, {
+        txSignature: view.transfer.txSignature,
+        receiptPubkey: view.transfer.receiptPubkey,
+        mint: view.transfer.mint,
+      });
+    }
+
+    return snapshots;
+  }
+
+  private async buildUserTicketSyncItems(userId: string): Promise<UserTicketSyncItem[]> {
+    const normalizedUserId = this.normalizeUserId(userId);
+    if (!normalizedUserId) return [];
+
+    const claims = await this.store.getClaimsBySubject(normalizedUserId);
+    if (claims.length === 0) return [];
+
+    const eventIds = new Set(claims.map((claim) => claim.eventId));
+    const [events, transferSnapshots] = await Promise.all([
+      this.store.getEvents(),
+      this.getLatestUserTransferSnapshots(normalizedUserId, eventIds),
+    ]);
+    const eventById = new Map(events.map((event) => [event.id, event]));
+
+    const tickets: UserTicketSyncItem[] = [];
+    for (const claim of claims) {
+      const event = eventById.get(claim.eventId);
+      const snapshot = transferSnapshots.get(claim.eventId);
+      const receipt = this.parseParticipationTicketReceipt(
+        await this.ctx.storage.get(ticketReceiptBySubjectKey(claim.eventId, normalizedUserId))
+      );
+      const mint = snapshot?.mint ?? this.normalizeStringField(event?.solanaMint);
+      const confirmationCode = claim.confirmationCode ?? receipt?.confirmationCode;
+
+      tickets.push({
+        eventId: claim.eventId,
+        eventName: event?.title ?? claim.eventId,
+        claimedAt: claim.claimedAt,
+        ...(confirmationCode ? { confirmationCode } : {}),
+        ...(receipt?.receiptId ? { auditReceiptId: receipt.receiptId } : {}),
+        ...(receipt?.receiptHash ? { auditReceiptHash: receipt.receiptHash } : {}),
+        ...(snapshot?.txSignature ? { txSignature: snapshot.txSignature } : {}),
+        ...(snapshot?.receiptPubkey ? { receiptPubkey: snapshot.receiptPubkey } : {}),
+        ...(mint ? { mint } : {}),
+      });
+    }
+
+    tickets.sort((a, b) => b.claimedAt - a.claimedAt);
+    return tickets;
+  }
+
   private async getMasterAdminDisclosures(options: {
     includeRevoked: boolean;
     transferLimit: number;
@@ -3097,7 +3189,12 @@ export class SchoolStore implements DurableObject {
       return { type: 'wallet', id: this.maskActorId(subject || 'unknown') };
     }
 
-    if (path === '/api/users/register' || path === '/api/auth/verify' || /^\/api\/events\/[^/]+\/claim$/.test(path)) {
+    if (
+      path === '/api/users/register' ||
+      path === '/api/auth/verify' ||
+      path === '/api/users/tickets/sync' ||
+      /^\/api\/events\/[^/]+\/claim$/.test(path)
+    ) {
       const payload = body as { userId?: unknown } | undefined;
       const userId = this.normalizeUserId(payload?.userId);
       return { type: 'user', id: userId || 'anonymous' };
@@ -4127,6 +4224,36 @@ export class SchoolStore implements DurableObject {
         return Response.json({ message: 'Invalid PIN', code: 'invalid_pin' }, { status: 401 });
       }
       return Response.json({ ok: true });
+    }
+
+    // POST /api/users/tickets/sync
+    if (path === '/api/users/tickets/sync' && request.method === 'POST') {
+      let body: UserTicketSyncBody;
+      try {
+        body = (await request.json()) as UserTicketSyncBody;
+      } catch {
+        return Response.json({ error: 'invalid body' }, { status: 400 });
+      }
+      const userId = this.normalizeUserId(body?.userId);
+      const pin = typeof body?.pin === 'string' ? body.pin : '';
+      if (!userId || !pin) {
+        return Response.json({ error: 'missing params' }, { status: 400 });
+      }
+
+      const userRaw = await this.ctx.storage.get(userKey(userId));
+      if (!userRaw || typeof userRaw !== 'object' || !('pinHash' in userRaw)) {
+        return Response.json({ message: 'User not found', code: 'user_not_found' }, { status: 401 });
+      }
+      const pinHash = await hashPin(pin);
+      if ((userRaw as { pinHash: string }).pinHash !== pinHash) {
+        return Response.json({ message: 'Invalid PIN', code: 'invalid_pin' }, { status: 401 });
+      }
+
+      const tickets = await this.buildUserTicketSyncItems(userId);
+      return Response.json({
+        syncedAt: new Date().toISOString(),
+        tickets,
+      } satisfies UserTicketSyncResponse);
     }
 
     // POST /api/users/register

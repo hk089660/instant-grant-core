@@ -85,6 +85,7 @@ export function useSchoolClaim(
           eventId,
           eventName: event.title,
           joinedAt: Date.now(),
+          mintAddress: event.solanaMint,
           txSignature: result.txSignature,
           receiptPubkey: result.receiptPubkey,
           confirmationCode: result.confirmationCode,
