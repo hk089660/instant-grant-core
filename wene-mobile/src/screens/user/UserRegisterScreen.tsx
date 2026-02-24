@@ -1,5 +1,5 @@
 /**
- * 利用者登録（名前 + PIN）
+ * 利用者登録（ID + ニックネーム + PIN）
  * 登録後 /u/scan へ
  */
 
@@ -12,7 +12,11 @@ import { theme } from '../../ui/theme';
 import { useAuth } from '../../contexts/AuthContext';
 import { schoolRoutes } from '../../lib/schoolRoutes';
 import { registerUser } from '../../api/userApi';
+import { HttpError } from '../../api/http/httpClient';
 
+const USER_ID_MIN = 3;
+const USER_ID_MAX = 32;
+const USER_ID_REGEX = /^[a-z0-9][a-z0-9._-]{2,31}$/;
 const DISPLAY_NAME_MIN = 1;
 const DISPLAY_NAME_MAX = 32;
 const PIN_MIN = 4;
@@ -22,18 +26,24 @@ const PIN_REGEX = /^\d{4,6}$/;
 export const UserRegisterScreen: React.FC = () => {
   const router = useRouter();
   const { setUserId, setDisplayName } = useAuth();
+  const [userId, setUserIdLocal] = useState('');
   const [displayName, setDisplayNameLocal] = useState('');
   const [pin, setPinLocal] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleRegister = useCallback(async () => {
+    const normalizedUserId = userId.trim().toLowerCase();
     const name = displayName.trim();
     const pinVal = pin.trim();
     setError(null);
 
+    if (!USER_ID_REGEX.test(normalizedUserId)) {
+      setError(`IDは${USER_ID_MIN}〜${USER_ID_MAX}文字、英小文字・数字・._-で入力してください`);
+      return;
+    }
     if (name.length < DISPLAY_NAME_MIN || name.length > DISPLAY_NAME_MAX) {
-      setError(`名前は${DISPLAY_NAME_MIN}〜${DISPLAY_NAME_MAX}文字で入力してください`);
+      setError(`ニックネームは${DISPLAY_NAME_MIN}〜${DISPLAY_NAME_MAX}文字で入力してください`);
       return;
     }
     if (!PIN_REGEX.test(pinVal)) {
@@ -43,17 +53,28 @@ export const UserRegisterScreen: React.FC = () => {
 
     setLoading(true);
     try {
-      const res = await registerUser(name, pinVal);
+      const res = await registerUser(normalizedUserId, name, pinVal);
       setUserId(res.userId);
       setDisplayName(name);
       router.replace(schoolRoutes.scan as any);
     } catch (e: unknown) {
+      if (e instanceof HttpError) {
+        const body = e.body as { code?: unknown; error?: unknown };
+        if (e.status === 409 && body?.code === 'duplicate_user_id') {
+          setError('このIDは既に使われています。IDを再設定してください');
+          return;
+        }
+        if (typeof body?.error === 'string' && body.error.trim()) {
+          setError(body.error);
+          return;
+        }
+      }
       const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: string }).message) : '登録に失敗しました';
       setError(msg);
     } finally {
       setLoading(false);
     }
-  }, [displayName, pin, setUserId, setDisplayName, router]);
+  }, [userId, displayName, pin, setUserId, setDisplayName, router]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -66,11 +87,26 @@ export const UserRegisterScreen: React.FC = () => {
             参加登録
           </AppText>
           <AppText variant="caption" style={styles.subtitle}>
-            名前とPINを設定してください（PINは4〜6桁の数字）
+            ID・ニックネーム・PINを設定してください（PINは4〜6桁の数字）
           </AppText>
 
           <AppText variant="caption" style={styles.label}>
-            名前
+            ID
+          </AppText>
+          <TextInput
+            style={styles.input}
+            value={userId}
+            onChangeText={(text) => setUserIdLocal(text.toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, USER_ID_MAX))}
+            placeholder="例: user_001"
+            placeholderTextColor={theme.colors.textTertiary}
+            maxLength={USER_ID_MAX}
+            editable={!loading}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+
+          <AppText variant="caption" style={styles.label}>
+            ニックネーム
           </AppText>
           <TextInput
             style={styles.input}
@@ -97,6 +133,9 @@ export const UserRegisterScreen: React.FC = () => {
             maxLength={PIN_MAX}
             editable={!loading}
           />
+          <AppText variant="caption" style={styles.pinNotice}>
+            参加券・トークン受け取り時にPIN入力が必須です。絶対に忘れないように控えてください。
+          </AppText>
 
           {error ? (
             <AppText variant="caption" style={styles.errorText}>
@@ -164,6 +203,10 @@ const styles = StyleSheet.create({
     color: theme.colors.error,
     marginTop: theme.spacing.sm,
     marginBottom: theme.spacing.sm,
+  },
+  pinNotice: {
+    color: theme.colors.error,
+    marginTop: theme.spacing.xs,
   },
   actionGroup: {
     marginTop: theme.spacing.md,

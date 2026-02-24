@@ -341,7 +341,7 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
       new Request('https://example.com/api/users/register', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ displayName: 'User A', pin: '1234' }),
+        body: JSON.stringify({ userId: 'user-a', displayName: 'User A', pin: '1234' }),
       })
     );
     expect(registerRes.status).toBe(200);

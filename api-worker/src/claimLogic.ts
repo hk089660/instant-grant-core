@@ -215,6 +215,23 @@ export class ClaimStore {
     return { confirmationCode: latest.code };
   }
 
+  /** 既存の最新 claim レコードへ確認コードを補完（履歴数は増やさない） */
+  async setLatestClaimConfirmationCode(eventId: string, subject: string, confirmationCode: string): Promise<void> {
+    const code = confirmationCode.trim();
+    if (!code) return;
+    const history = await this.getClaimHistory(eventId, subject);
+    if (history.length === 0) return;
+    const latestIndex = history.length - 1;
+    history[latestIndex] = {
+      ...history[latestIndex],
+      code,
+    };
+    const serialized = serializeClaimHistory(history);
+    if (serialized !== undefined) {
+      await this.storage.put(claimKey(eventId, subject), serialized);
+    }
+  }
+
   async addClaim(eventId: string, subject: string, confirmationCode?: string): Promise<void> {
     const history = await this.getClaimHistory(eventId, subject);
     history.push({

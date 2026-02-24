@@ -112,6 +112,7 @@ export interface ParticipationTicketReceipt {
 
 /** POST /api/users/register */
 export interface RegisterBody {
+  userId?: string;
   displayName?: string;
   pin?: string;
 }

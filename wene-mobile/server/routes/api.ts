@@ -6,6 +6,10 @@ export interface ApiDeps {
     storage: SchoolStorage;
 }
 
+const USER_ID_MIN_LENGTH = 3;
+const USER_ID_MAX_LENGTH = 32;
+const USER_ID_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/;
+
 function hashPin(pin: string): string {
     return crypto.createHash('sha256').update(pin).digest('hex');
 }
@@ -19,15 +23,50 @@ function genConfirmationCode(): string {
 export function createApiRouter(deps: ApiDeps): Router {
     const router = Router();
     const { storage } = deps;
+    const userIdHashes = new Set<string>();
+    let userIdChainLastHash = '0'.repeat(64);
+
+    const normalizeUserId = (raw: unknown): string => {
+        if (typeof raw !== 'string') return '';
+        return raw.trim().toLowerCase();
+    };
+
+    const validateUserId = (userId: string): string | null => {
+        if (!userId) return `userId required (${USER_ID_MIN_LENGTH}-${USER_ID_MAX_LENGTH})`;
+        if (!USER_ID_RE.test(userId)) return 'userId must be 3-32 chars using a-z, 0-9, dot, underscore, hyphen';
+        return null;
+    };
+
+    const hashUserId = (userId: string): string => {
+        return crypto.createHash('sha256').update(`user-id:${userId}`).digest('hex');
+    };
+
+    const buildUserIdChainHash = (userIdHash: string, prevChainHash: string): string => {
+        return crypto
+            .createHash('sha256')
+            .update(JSON.stringify({
+                version: 1,
+                kind: 'user_id_register',
+                userIdHash,
+                prevChainHash,
+            }))
+            .digest('hex');
+    };
 
     // POST /api/users/register
     router.post('/users/register', async (req: Request, res: Response) => {
         const body = req.body;
+        const userId = normalizeUserId(body?.userId);
         const displayName = typeof body?.displayName === 'string' ? body.displayName.trim().slice(0, 32) : '';
         const pin = typeof body?.pin === 'string' ? body.pin : '';
 
+        const userIdError = validateUserId(userId);
+        if (userIdError) {
+            res.status(400).json({ error: userIdError, code: 'invalid_user_id' });
+            return;
+        }
         if (!displayName || displayName.length < 1) {
-            res.status(400).json({ error: 'displayName required (1-32)' });
+            res.status(400).json({ error: 'displayName required (nickname 1-32)' });
             return;
         }
         if (!/^\d{4,6}$/.test(pin)) {
@@ -35,10 +74,18 @@ export function createApiRouter(deps: ApiDeps): Router {
             return;
         }
 
-        const userId = crypto.randomUUID();
+        const userIdHash = hashUserId(userId);
+        if (storage.hasUser(userId) || userIdHashes.has(userIdHash)) {
+            res.status(409).json({ error: 'userId already exists', code: 'duplicate_user_id' });
+            return;
+        }
+
         const pinHash = hashPin(pin);
+        const chainHash = buildUserIdChainHash(userIdHash, userIdChainLastHash);
 
         storage.addUser({ id: userId, displayName, pinHash });
+        userIdHashes.add(userIdHash);
+        userIdChainLastHash = chainHash;
 
         res.json({ userId });
     });
@@ -46,7 +93,7 @@ export function createApiRouter(deps: ApiDeps): Router {
     // POST /api/auth/verify
     router.post('/auth/verify', async (req: Request, res: Response) => {
         const body = req.body;
-        const userId = typeof body?.userId === 'string' ? body.userId.trim() : '';
+        const userId = normalizeUserId(body?.userId);
         const pin = typeof body?.pin === 'string' ? body.pin : '';
 
         if (!userId || !pin) {
@@ -73,7 +120,7 @@ export function createApiRouter(deps: ApiDeps): Router {
     router.post('/events/:eventId/claim', async (req: Request, res: Response) => {
         const eventId = req.params.eventId;
         const body = req.body;
-        const userId = typeof body?.userId === 'string' ? body.userId.trim() : '';
+        const userId = normalizeUserId(body?.userId);
         const pin = typeof body?.pin === 'string' ? body.pin : '';
 
         if (!userId || !pin) {

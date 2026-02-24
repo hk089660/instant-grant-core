@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SchoolStore, type Env } from '../src/storeDO';
 import type { ParticipationTicketReceipt } from '../src/types';
 
@@ -85,6 +85,7 @@ describe('participation audit receipt', () => {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
+          userId: 'receipt-user',
           displayName: 'receipt-user',
           pin: '1234',
         }),
@@ -239,5 +240,117 @@ describe('participation audit receipt', () => {
     expect(tamperedBody.ok).toBe(false);
     expect(tamperedBody.issues.some((issue) => issue.code === 'receipt_hash_mismatch')).toBe(true);
     expect(tamperedBody.issues.some((issue) => issue.code === 'confirmation_code_mismatch')).toBe(true);
+  });
+
+  it('rejects duplicate userId at registration', async () => {
+    const firstRegisterRes = await store.fetch(
+      new Request('https://example.com/api/users/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: 'dup-user',
+          displayName: 'dup-user-1',
+          pin: '1234',
+        }),
+      })
+    );
+    expect(firstRegisterRes.status).toBe(200);
+
+    const duplicateRegisterRes = await store.fetch(
+      new Request('https://example.com/api/users/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: 'DUP-USER',
+          displayName: 'dup-user-2',
+          pin: '1234',
+        }),
+      })
+    );
+    expect(duplicateRegisterRes.status).toBe(409);
+    const duplicateBody = (await duplicateRegisterRes.json()) as { code?: string };
+    expect(duplicateBody.code).toBe('duplicate_user_id');
+  });
+
+  it('retries when generated confirmation code collides and keeps 6-char random rule', async () => {
+    const createRes = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'collision event',
+          datetime: '2026/02/22 12:00',
+          host: 'admin',
+          ticketTokenAmount: 1,
+        }),
+      })
+    );
+    expect(createRes.status).toBe(201);
+    const event = (await createRes.json()) as { id: string };
+
+    const registerUser = async (userId: string, displayName: string): Promise<string> => {
+      const registerRes = await store.fetch(
+        new Request('https://example.com/api/users/register', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            userId,
+            displayName,
+            pin: '1234',
+          }),
+        })
+      );
+      expect(registerRes.status).toBe(200);
+      const body = (await registerRes.json()) as { userId: string };
+      return body.userId;
+    };
+
+    const userA = await registerUser('collision-user-a', 'collision-user-a');
+    const userB = await registerUser('collision-user-b', 'collision-user-b');
+
+    const getRandomValuesSpy = vi.spyOn(globalThis.crypto, 'getRandomValues');
+    let callCount = 0;
+    getRandomValuesSpy.mockImplementation(((array: Uint8Array) => {
+      callCount += 1;
+      // 1回目: AAAAAA を発行
+      // 2回目: 同じ AAAAAA を再生成して衝突
+      // 3回目: BBBBBB を再生成して回避
+      const fill = callCount <= 2 ? 0 : 1;
+      array.fill(fill);
+      return array;
+    }) as typeof globalThis.crypto.getRandomValues);
+
+    try {
+      const firstClaimRes = await store.fetch(
+        new Request(`https://example.com/api/events/${encodeURIComponent(event.id)}/claim`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            userId: userA,
+            pin: '1234',
+          }),
+        })
+      );
+      expect(firstClaimRes.status).toBe(200);
+      const firstClaimBody = (await firstClaimRes.json()) as { confirmationCode?: string };
+      expect(firstClaimBody.confirmationCode).toBe('AAAAAA');
+
+      const secondClaimRes = await store.fetch(
+        new Request(`https://example.com/api/events/${encodeURIComponent(event.id)}/claim`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            userId: userB,
+            pin: '1234',
+          }),
+        })
+      );
+      expect(secondClaimRes.status).toBe(200);
+      const secondClaimBody = (await secondClaimRes.json()) as { confirmationCode?: string };
+      expect(secondClaimBody.confirmationCode).toBe('BBBBBB');
+      expect(secondClaimBody.confirmationCode).not.toBe(firstClaimBody.confirmationCode);
+    } finally {
+      getRandomValuesSpy.mockRestore();
+    }
   });
 });

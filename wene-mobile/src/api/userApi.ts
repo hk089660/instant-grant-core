@@ -41,10 +41,10 @@ export interface VerifyUserResponse {
   ok: true;
 }
 
-export async function registerUser(displayName: string, pin: string): Promise<RegisterResponse> {
+export async function registerUser(userId: string, displayName: string, pin: string): Promise<RegisterResponse> {
   const base = getBaseUrl();
   const url = `${base}/api/users/register`;
-  return httpPost<RegisterResponse>(url, { displayName, pin });
+  return httpPost<RegisterResponse>(url, { userId, displayName, pin });
 }
 
 export async function verifyUserPin(userId: string, pin: string): Promise<VerifyUserResponse> {

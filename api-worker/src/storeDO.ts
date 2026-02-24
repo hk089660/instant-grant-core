@@ -22,6 +22,8 @@ const EVENT_OWNER_PREFIX = 'event_owner:';
 const TICKET_RECEIPT_CODE_PREFIX = 'ticket_receipt:';
 const TICKET_RECEIPT_SUBJECT_PREFIX = 'ticket_receipt_subject:';
 const AUDIT_ENTRY_PREFIX = 'audit_entry:';
+const CONFIRMATION_CODE_INDEX_PREFIX = 'confirmation_code_index:';
+const USER_ID_INDEX_PREFIX = 'user_id_index:';
 
 function userKey(userId: string): string {
   return USER_PREFIX + userId;
@@ -43,15 +45,27 @@ function ticketReceiptBySubjectKey(eventId: string, subject: string): string {
   return `${TICKET_RECEIPT_SUBJECT_PREFIX}${eventId}:${subject}`;
 }
 
+function confirmationCodeIndexKey(confirmationCode: string): string {
+  return `${CONFIRMATION_CODE_INDEX_PREFIX}${confirmationCode}`;
+}
+
+function userIdIndexKey(userIdHash: string): string {
+  return `${USER_ID_INDEX_PREFIX}${userIdHash}`;
+}
+
 function auditEntryByHashKey(entryHash: string): string {
   return `${AUDIT_ENTRY_PREFIX}${entryHash}`;
 }
 
-async function hashPin(pin: string): Promise<string> {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin));
+async function hashString(input: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
   return Array.from(new Uint8Array(buf))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
+}
+
+async function hashPin(pin: string): Promise<string> {
+  return hashString(pin);
 }
 
 function genConfirmationCode(): string {
@@ -90,6 +104,10 @@ const POP_HASH_LEN = 32;
 const POP_MESSAGE_VERSION = 2;
 const POP_MESSAGE_LEN = 1 + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 8;
 const POP_HASH_GENESIS_HEX = '0'.repeat(64);
+const USER_ID_CHAIN_LAST_HASH_KEY = 'user_id_chain:last_hash';
+const USER_ID_MIN_LENGTH = 3;
+const USER_ID_MAX_LENGTH = 32;
+const USER_ID_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/;
 const AUDIT_HISTORY_PREFIX = 'audit_history:';
 const AUDIT_INTEGRITY_DEFAULT_LIMIT = 50;
 const AUDIT_INTEGRITY_MAX_LIMIT = 200;
@@ -104,6 +122,8 @@ const PARTICIPATION_TICKET_RECEIPT_VERSION = 1;
 const PARTICIPATION_TICKET_RECEIPT_TYPE = 'participation_audit_receipt';
 const PARTICIPATION_TICKET_VERIFY_ENDPOINT = '/api/audit/receipts/verify';
 const PARTICIPATION_TICKET_VERIFY_BY_CODE_ENDPOINT = '/api/audit/receipts/verify-code';
+const CONFIRMATION_CODE_MAX_ATTEMPTS = 128;
+const CONFIRMATION_CODE_LEGACY_SCAN_LIMIT = 20_000;
 
 type AuditIntegrityIssue = {
   code: string;
@@ -172,6 +192,21 @@ type TransferLogView = {
 };
 
 type TransferLogRoleView = 'admin' | 'master';
+
+type ConfirmationCodeIndexRecord = {
+  code: string;
+  eventId: string;
+  subject: string;
+  issuedAt: string;
+};
+
+type UserIdIndexRecord = {
+  userId: string;
+  userIdHash: string;
+  chainHash: string;
+  prevChainHash: string;
+  createdAt: string;
+};
 
 type AdminCodeRecord = {
   adminId: string;
@@ -447,6 +482,8 @@ export class SchoolStore implements DurableObject {
 
   private auditLock: Promise<void> = Promise.resolve();
   private popProofLock: Promise<void> = Promise.resolve();
+  private confirmationCodeLock: Promise<void> = Promise.resolve();
+  private userIdRegistrationLock: Promise<void> = Promise.resolve();
   private popSignerCache:
     | { secretKey: Uint8Array; signerPubkey: string }
     | null
@@ -1233,6 +1270,7 @@ export class SchoolStore implements DurableObject {
     subject: string,
     receipt: ParticipationTicketReceipt
   ): Promise<void> {
+    await this.ensureConfirmationCodeIndexed(eventId, subject, receipt.confirmationCode);
     await this.ctx.storage.put(ticketReceiptByCodeKey(eventId, receipt.confirmationCode), receipt);
     await this.ctx.storage.put(ticketReceiptBySubjectKey(eventId, subject), receipt);
   }
@@ -1254,6 +1292,199 @@ export class SchoolStore implements DurableObject {
       return bySubject;
     }
     return null;
+  }
+
+  private parseConfirmationCodeIndexRecord(raw: unknown): ConfirmationCodeIndexRecord | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const code = this.normalizeStringField(obj.code);
+    const eventId = this.normalizeStringField(obj.eventId);
+    const subject = this.normalizeStringField(obj.subject);
+    const issuedAt = this.normalizeStringField(obj.issuedAt);
+    if (!code || !eventId || !subject || !issuedAt) return null;
+    return { code, eventId, subject, issuedAt };
+  }
+
+  private parseUserIdIndexRecord(raw: unknown): UserIdIndexRecord | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const userId = this.normalizeStringField(obj.userId);
+    const userIdHash = this.normalizeStringField(obj.userIdHash);
+    const chainHash = this.normalizeStringField(obj.chainHash);
+    const prevChainHash = this.normalizeStringField(obj.prevChainHash);
+    const createdAt = this.normalizeStringField(obj.createdAt);
+    if (!userId || !userIdHash || !chainHash || !prevChainHash || !createdAt) return null;
+    if (!isHashHex(userIdHash) || !isHashHex(chainHash) || !isHashHex(prevChainHash)) return null;
+    return { userId, userIdHash, chainHash, prevChainHash, createdAt };
+  }
+
+  private withConfirmationCodeLock<T>(taskFn: () => Promise<T>): Promise<T> {
+    const task = this.confirmationCodeLock.then(taskFn);
+    this.confirmationCodeLock = task.then(() => { }, () => { });
+    return task;
+  }
+
+  private withUserIdRegistrationLock<T>(taskFn: () => Promise<T>): Promise<T> {
+    const task = this.userIdRegistrationLock.then(taskFn);
+    this.userIdRegistrationLock = task.then(() => { }, () => { });
+    return task;
+  }
+
+  private validateUserIdForRegistration(userId: string): string | null {
+    if (!userId) {
+      return `userId required (${USER_ID_MIN_LENGTH}-${USER_ID_MAX_LENGTH})`;
+    }
+    if (!USER_ID_RE.test(userId)) {
+      return 'userId must be 3-32 chars using a-z, 0-9, dot, underscore, hyphen';
+    }
+    return null;
+  }
+
+  private async registerUserWithUniqueId(params: {
+    userId: string;
+    displayName: string;
+    pinHash: string;
+  }): Promise<
+    | { ok: true; userIdHash: string; chainHash: string; prevChainHash: string }
+    | { ok: false }
+  > {
+    const userId = params.userId.trim();
+    if (!userId) throw new Error('userId is required');
+
+    return this.withUserIdRegistrationLock(async () => {
+      const existingUser = await this.ctx.storage.get(userKey(userId));
+      if (existingUser !== undefined) {
+        return { ok: false };
+      }
+
+      const userIdHash = await hashString(`user-id:${userId}`);
+      const indexKey = userIdIndexKey(userIdHash);
+      const existingIndex = this.parseUserIdIndexRecord(
+        await this.ctx.storage.get(indexKey)
+      );
+      if (existingIndex) {
+        return { ok: false };
+      }
+
+      const lastChainHashRaw = await this.ctx.storage.get<string>(USER_ID_CHAIN_LAST_HASH_KEY);
+      const prevChainHash =
+        typeof lastChainHashRaw === 'string' && isHashHex(lastChainHashRaw)
+          ? lastChainHashRaw.toLowerCase()
+          : POP_HASH_GENESIS_HEX;
+      const chainHash = await sha256Hex(
+        canonicalize({
+          version: 1,
+          kind: 'user_id_register',
+          userIdHash,
+          prevChainHash,
+        })
+      );
+      const createdAt = new Date().toISOString();
+
+      await this.ctx.storage.put(userKey(userId), {
+        pinHash: params.pinHash,
+        displayName: params.displayName,
+      });
+      await this.ctx.storage.put(indexKey, {
+        userId,
+        userIdHash,
+        chainHash,
+        prevChainHash,
+        createdAt,
+      } satisfies UserIdIndexRecord);
+      await this.ctx.storage.put(USER_ID_CHAIN_LAST_HASH_KEY, chainHash);
+
+      return {
+        ok: true,
+        userIdHash,
+        chainHash,
+        prevChainHash,
+      };
+    });
+  }
+
+  private async reserveUniqueConfirmationCode(eventId: string, subject: string): Promise<string> {
+    const normalizedEventId = eventId.trim();
+    const normalizedSubject = subject.trim();
+    if (!normalizedEventId || !normalizedSubject) {
+      throw new Error('eventId and subject are required to issue confirmation code');
+    }
+
+    return this.withConfirmationCodeLock(async () => {
+      const legacyReceiptRows = await this.ctx.storage.list({
+        prefix: TICKET_RECEIPT_CODE_PREFIX,
+        limit: CONFIRMATION_CODE_LEGACY_SCAN_LIMIT,
+      });
+      const legacyCodes = new Set<string>();
+      for (const key of legacyReceiptRows.keys()) {
+        const separatorAt = key.lastIndexOf(':');
+        if (separatorAt < 0 || separatorAt >= key.length - 1) continue;
+        const legacyCode = key.slice(separatorAt + 1).trim();
+        if (legacyCode) legacyCodes.add(legacyCode);
+      }
+
+      for (let attempt = 0; attempt < CONFIRMATION_CODE_MAX_ATTEMPTS; attempt += 1) {
+        const code = genConfirmationCode();
+        if (legacyCodes.has(code)) continue;
+        const key = confirmationCodeIndexKey(code);
+        const existing = await this.ctx.storage.get(key);
+        if (existing !== undefined) continue;
+        await this.ctx.storage.put(key, {
+          code,
+          eventId: normalizedEventId,
+          subject: normalizedSubject,
+          issuedAt: new Date().toISOString(),
+        } satisfies ConfirmationCodeIndexRecord);
+        return code;
+      }
+      throw new Error('failed to generate unique confirmation code');
+    });
+  }
+
+  private async ensureConfirmationCodeIndexed(
+    eventId: string,
+    subject: string,
+    confirmationCode: string
+  ): Promise<void> {
+    const code = confirmationCode.trim();
+    const normalizedEventId = eventId.trim();
+    const normalizedSubject = subject.trim();
+    if (!code || !normalizedEventId || !normalizedSubject) return;
+
+    await this.withConfirmationCodeLock(async () => {
+      const key = confirmationCodeIndexKey(code);
+      const existing = await this.ctx.storage.get(key);
+      if (existing !== undefined) {
+        return;
+      }
+      await this.ctx.storage.put(key, {
+        code,
+        eventId: normalizedEventId,
+        subject: normalizedSubject,
+        issuedAt: new Date().toISOString(),
+      } satisfies ConfirmationCodeIndexRecord);
+    });
+  }
+
+  private async releaseReservedConfirmationCode(
+    eventId: string,
+    subject: string,
+    confirmationCode: string
+  ): Promise<void> {
+    const code = confirmationCode.trim();
+    const normalizedEventId = eventId.trim();
+    const normalizedSubject = subject.trim();
+    if (!code || !normalizedEventId || !normalizedSubject) return;
+
+    await this.withConfirmationCodeLock(async () => {
+      const key = confirmationCodeIndexKey(code);
+      const existing = this.parseConfirmationCodeIndexRecord(
+        await this.ctx.storage.get(key)
+      );
+      if (!existing) return;
+      if (existing.eventId !== normalizedEventId || existing.subject !== normalizedSubject) return;
+      await this.ctx.storage.delete(key);
+    });
   }
 
   private async getAuditEntryByHash(entryHash: string): Promise<AuditEvent | null> {
@@ -1864,6 +2095,11 @@ export class SchoolStore implements DurableObject {
     if (typeof raw !== 'string') return null;
     const normalized = raw.trim();
     return normalized || null;
+  }
+
+  private normalizeUserId(raw: unknown): string {
+    if (typeof raw !== 'string') return '';
+    return raw.trim().toLowerCase();
   }
 
   private normalizeNumberField(raw: unknown): number | null {
@@ -2863,7 +3099,7 @@ export class SchoolStore implements DurableObject {
 
     if (path === '/api/users/register' || path === '/api/auth/verify' || /^\/api\/events\/[^/]+\/claim$/.test(path)) {
       const payload = body as { userId?: unknown } | undefined;
-      const userId = typeof payload?.userId === 'string' ? payload.userId.trim() : '';
+      const userId = this.normalizeUserId(payload?.userId);
       return { type: 'user', id: userId || 'anonymous' };
     }
 
@@ -3756,9 +3992,25 @@ export class SchoolStore implements DurableObject {
         } as SchoolClaimResult);
       }
 
-      const issuedConfirmationCode = genConfirmationCode();
-      const result = await this.store.submitClaim(body, { confirmationCode: issuedConfirmationCode });
+      let issuedConfirmationCode: string;
+      try {
+        issuedConfirmationCode = await this.reserveUniqueConfirmationCode(eventId, subject);
+      } catch {
+        return Response.json({
+          success: false,
+          error: { code: 'retryable', message: '確認コードの発行に失敗しました。時間を置いて再試行してください。' },
+        } as SchoolClaimResult);
+      }
+
+      let result: SchoolClaimResult;
+      try {
+        result = await this.store.submitClaim(body, { confirmationCode: issuedConfirmationCode });
+      } catch (err) {
+        await this.releaseReservedConfirmationCode(eventId, subject, issuedConfirmationCode);
+        throw err;
+      }
       if (!result.success) {
+        await this.releaseReservedConfirmationCode(eventId, subject, issuedConfirmationCode);
         return Response.json(result);
       }
 
@@ -3767,8 +4019,15 @@ export class SchoolStore implements DurableObject {
         const rec = await this.store.getClaimRecord(eventId, subject);
         confirmationCode = rec?.confirmationCode;
       }
+      if (confirmationCode) {
+        await this.ensureConfirmationCodeIndexed(eventId, subject, confirmationCode);
+        if (confirmationCode !== issuedConfirmationCode) {
+          await this.releaseReservedConfirmationCode(eventId, subject, issuedConfirmationCode);
+        }
+      }
 
       if (result.alreadyJoined) {
+        await this.releaseReservedConfirmationCode(eventId, subject, issuedConfirmationCode);
         const ticketReceipt =
           confirmationCode
             ? await this.getParticipationTicketReceipt(eventId, subject, confirmationCode)
@@ -3854,7 +4113,7 @@ export class SchoolStore implements DurableObject {
       } catch {
         return Response.json({ error: 'invalid body' }, { status: 400 });
       }
-      const userId = typeof body?.userId === 'string' ? body.userId.trim() : '';
+      const userId = this.normalizeUserId(body?.userId);
       const pin = typeof body?.pin === 'string' ? body.pin : '';
       if (!userId || !pin) {
         return Response.json({ error: 'missing params' }, { status: 400 });
@@ -3878,20 +4137,41 @@ export class SchoolStore implements DurableObject {
       } catch {
         return Response.json({ error: 'invalid body' }, { status: 400 });
       }
+      const userId = this.normalizeUserId(body?.userId);
       const displayName = typeof body?.displayName === 'string' ? body.displayName.trim().slice(0, 32) : '';
       const pin = typeof body?.pin === 'string' ? body.pin : '';
+      const userIdError = this.validateUserIdForRegistration(userId);
+      if (userIdError) {
+        return Response.json({ error: userIdError, code: 'invalid_user_id' }, { status: 400 });
+      }
       if (!displayName || displayName.length < 1) {
-        return Response.json({ error: 'displayName required (1-32)' }, { status: 400 });
+        return Response.json({ error: 'displayName required (nickname 1-32)' }, { status: 400 });
       }
       if (!/^\d{4,6}$/.test(pin)) {
         return Response.json({ error: 'pin must be 4-6 digits' }, { status: 400 });
       }
-      const userId = crypto.randomUUID();
       const pinHash = await hashPin(pin);
-      await this.ctx.storage.put(userKey(userId), { pinHash, displayName });
+      const registerResult = await this.registerUserWithUniqueId({
+        userId,
+        displayName,
+        pinHash,
+      });
+      if (!registerResult.ok) {
+        return Response.json({ error: 'userId already exists', code: 'duplicate_user_id' }, { status: 409 });
+      }
 
       // Audit Log
-      await this.appendAuditLog('USER_REGISTER', { type: 'user', id: userId }, { displayName }, 'system');
+      await this.appendAuditLog(
+        'USER_REGISTER',
+        { type: 'user', id: userId },
+        {
+          displayName,
+          userIdHash: registerResult.userIdHash,
+          userIdChainHash: registerResult.chainHash,
+          userIdPrevChainHash: registerResult.prevChainHash,
+        },
+        'system'
+      );
 
       return Response.json({ userId });
     }
@@ -3906,7 +4186,7 @@ export class SchoolStore implements DurableObject {
       } catch {
         return Response.json({ error: 'missing params' }, { status: 400 });
       }
-      const userId = typeof body?.userId === 'string' ? body.userId.trim() : '';
+      const userId = this.normalizeUserId(body?.userId);
       const pin = typeof body?.pin === 'string' ? body.pin : '';
       if (!userId || !pin) {
         return Response.json({ error: 'missing params' }, { status: 400 });
@@ -3949,7 +4229,16 @@ export class SchoolStore implements DurableObject {
       const already = await this.store.hasClaimed(eventId, userId, event);
       if (already) {
         const rec = await this.store.getClaimRecord(eventId, userId);
-        const confirmationCode = rec?.confirmationCode ?? genConfirmationCode();
+        let confirmationCode = rec?.confirmationCode;
+        if (!confirmationCode) {
+          try {
+            confirmationCode = await this.reserveUniqueConfirmationCode(eventId, userId);
+            await this.store.setLatestClaimConfirmationCode(eventId, userId, confirmationCode);
+          } catch {
+            return Response.json({ error: 'failed to issue confirmation code' }, { status: 500 });
+          }
+        }
+        await this.ensureConfirmationCodeIndexed(eventId, userId, confirmationCode);
         const ticketReceipt = await this.getParticipationTicketReceipt(eventId, userId, confirmationCode);
         return Response.json({
           status: 'already',
@@ -3957,8 +4246,20 @@ export class SchoolStore implements DurableObject {
           ...(ticketReceipt ? { ticketReceipt } : {}),
         } as UserClaimResponse);
       }
-      const confirmationCode = genConfirmationCode();
-      await this.store.addClaim(eventId, userId, confirmationCode);
+      let confirmationCode: string | null = null;
+      try {
+        confirmationCode = await this.reserveUniqueConfirmationCode(eventId, userId);
+        await this.store.addClaim(eventId, userId, confirmationCode);
+      } catch {
+        if (confirmationCode) {
+          await this.releaseReservedConfirmationCode(eventId, userId, confirmationCode);
+        }
+        return Response.json({ error: 'failed to issue confirmation code' }, { status: 500 });
+      }
+      if (!confirmationCode) {
+        return Response.json({ error: 'failed to issue confirmation code' }, { status: 500 });
+      }
+      await this.ensureConfirmationCodeIndexed(eventId, userId, confirmationCode);
 
       // Audit Log
       const displayName = this.normalizeStringField((userRaw as { displayName?: unknown }).displayName);

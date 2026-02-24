@@ -48,6 +48,7 @@ export interface SchoolStorage {
 
   // User & User Claims
   addUser(user: UserRecord): void;
+  hasUser(userId: string): boolean;
   getUser(userId: string): UserRecord | null;
   addUserClaim(eventId: string, userId: string, confirmationCode: string): void;
   hasClaimed(eventId: string, userId: string, claimIntervalDays?: number, maxClaimsPerInterval?: number | null): boolean;
@@ -83,7 +84,12 @@ export function createMemoryStorage(): SchoolStorage {
 
     // User related implementation
     addUser(user: UserRecord) {
+      const exists = users.some((u) => u.id === user.id);
+      if (exists) return;
       users.push(user);
+    },
+    hasUser(userId: string) {
+      return users.some((u) => u.id === userId);
     },
     getUser(userId: string) {
       return users.find((u) => u.id === userId) ?? null;

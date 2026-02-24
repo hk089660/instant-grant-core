@@ -576,6 +576,9 @@ export const UserConfirmScreen: React.FC = () => {
                   {/* TextInput */}
                   <PinInput value={pin} onChange={setPin} disabled={status === 'loading'} />
                 </View>
+                <AppText variant="small" style={styles.pinNotice}>
+                  参加券・トークン受け取り時にPINは必須です。絶対に忘れないようにしてください。
+                </AppText>
               </Card>
             )}
 
@@ -714,6 +717,9 @@ const styles = StyleSheet.create({
   },
   pinInputWrap: {
     marginBottom: theme.spacing.xs,
+  },
+  pinNotice: {
+    color: theme.colors.error,
   },
   pinInput: {
     borderWidth: 1,

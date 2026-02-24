@@ -154,6 +154,7 @@ describe('runtime readiness and fail-close preflight', () => {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
+          userId: 'student-a',
           displayName: 'Student A',
           pin: '1234',
         }),
