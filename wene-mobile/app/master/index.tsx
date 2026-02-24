@@ -571,7 +571,7 @@ export default function MasterDashboard() {
                             data={invites}
                             renderItem={renderInviteItem}
                             keyExtractor={item => item.code}
-                            contentContainerStyle={{ paddingBottom: 100 }}
+                            contentContainerStyle={styles.inviteListContent}
                             ListEmptyComponent={
                                 invitesLoading
                                     ? null
@@ -820,37 +820,47 @@ const styles = StyleSheet.create({
     },
     listTitle: {
         color: masterTheme.colors.textSecondary,
-        marginBottom: masterTheme.spacing.sm,
+        fontSize: 18,
+        fontWeight: '700',
+        marginBottom: masterTheme.spacing.md,
+        marginTop: masterTheme.spacing.xs,
+    },
+    inviteListContent: {
+        paddingBottom: 120,
     },
     listItem: {
         backgroundColor: '#111',
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: masterTheme.spacing.sm,
-        padding: masterTheme.spacing.md,
+        marginBottom: masterTheme.spacing.md,
+        paddingVertical: masterTheme.spacing.lg,
+        paddingHorizontal: masterTheme.spacing.lg,
+        minHeight: 118,
     },
     itemInfo: {
         flex: 1,
+        paddingRight: masterTheme.spacing.md,
     },
     itemName: {
         color: '#fff',
-        fontSize: 16,
+        fontSize: 18,
         fontWeight: 'bold',
     },
     itemCode: {
         color: masterTheme.colors.textSecondary,
-        fontSize: 14,
+        fontSize: 16,
         fontFamily: 'monospace',
-        marginVertical: 4,
+        marginVertical: 6,
     },
     itemDate: {
         color: '#666',
-        fontSize: 12,
+        fontSize: 13,
+        lineHeight: 18,
     },
     revokeButton: {
-        height: 36,
-        width: 80,
+        height: 42,
+        width: 96,
         marginLeft: masterTheme.spacing.md,
         backgroundColor: '#330000',
         borderColor: '#660000',
