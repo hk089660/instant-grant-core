@@ -10,6 +10,42 @@ export interface OpenPhantomOptions {
   preferPopup?: boolean;
 }
 
+function buildPhantomCustomProtocolUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'phantom.app') {
+      return null;
+    }
+
+    const segments = parsed.pathname
+      .split('/')
+      .filter(Boolean);
+
+    if (segments.length < 2) {
+      return null;
+    }
+
+    let version = '';
+    let method = '';
+    if (segments[0] === 'ul') {
+      if (segments.length < 3) return null;
+      version = segments[1];
+      method = segments.slice(2).join('/');
+    } else {
+      version = segments[0];
+      method = segments.slice(1).join('/');
+    }
+
+    if (!version || !method) {
+      return null;
+    }
+
+    return `phantom://${version}/${method}${parsed.search}${parsed.hash}`;
+  } catch {
+    return null;
+  }
+}
+
 // ToastAndroidはAndroid専用のため、条件付きで使用
 const getToastAndroid = () => {
   if (Platform.OS === 'android') {
@@ -59,6 +95,20 @@ export async function openPhantomConnect(url: string, options: OpenPhantomOption
       return;
     }
     throw new Error('ポップアップがブロックされました。ブラウザでこのサイトのポップアップを許可してください。');
+  }
+
+  // Native は Phantom custom protocol を優先して直接アプリを開く（ブラウザ経由を回避）
+  if (Platform.OS !== 'web') {
+    const customProtocolUrl = buildPhantomCustomProtocolUrl(url);
+    if (customProtocolUrl) {
+      try {
+        await Linking.openURL(customProtocolUrl);
+        console.log('[openPhantomConnect] Phantom custom protocol open succeeded');
+        return;
+      } catch (e) {
+        console.warn('[openPhantomConnect] Phantom custom protocol open failed, fallback universal link:', e);
+      }
+    }
   }
 
   // canOpenURL を必ず事前確認（ログ用。AndroidではfalseでもopenURLを試す）

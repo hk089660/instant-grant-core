@@ -113,7 +113,12 @@ export default function PhantomRedirectScreen() {
           return;
         }
 
-        setSafeStatus('done', 'コールバック処理が完了しました。画面に戻ります…');
+        const doneMessage = action.startsWith('connect')
+          ? 'ウォレット接続が完了しました。画面に戻ります…'
+          : action.startsWith('sign')
+            ? '署名が完了しました。画面に戻ります…'
+            : 'コールバック処理が完了しました。画面に戻ります…';
+        setSafeStatus('done', doneMessage);
         setTimeout(() => {
           if (cancelled) return;
           if (
