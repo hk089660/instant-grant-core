@@ -11,6 +11,7 @@ import { adminTheme } from '../../ui/adminTheme';
 
 import { loginAdmin } from '../../api/adminApi';
 import { saveAdminSession } from '../../lib/adminAuth';
+import { applyAdminSessionRuntimeScope } from '../../lib/adminRuntimeScope';
 
 // ...
 
@@ -35,14 +36,16 @@ export const AdminLoginScreen: React.FC = () => {
         const infoAdminId = typeof result.info?.adminId === 'string' ? result.info.adminId.trim() : '';
         const resolvedName =
           infoName || (result.role === 'master' ? 'Master Operator' : 'Admin Operator');
-        await saveAdminSession({
+        const session = {
           token: password,
           role: result.role,
           source,
           adminName: resolvedName,
           adminId: infoAdminId || undefined,
           createdAt: new Date().toISOString(),
-        });
+        } as const;
+        await saveAdminSession(session);
+        await applyAdminSessionRuntimeScope(session);
         router.replace('/admin' as any);
       } else {
         setError('パスコードが正しくありません');

@@ -3772,14 +3772,23 @@ export class SchoolStore implements DurableObject {
       const demoPassword = this.getConfiguredDemoPassword();
 
       if (masterPassword && password === masterPassword) {
-        return Response.json({ ok: true, role: 'master' });
+        return Response.json({
+          ok: true,
+          role: 'master',
+          info: {
+            adminId: 'master',
+            name: 'Master Operator',
+            source: 'master',
+            status: 'active',
+          },
+        });
       }
 
       if (demoPassword && password === demoPassword) {
         return Response.json({
           ok: true,
           role: 'admin',
-          info: { name: 'Demo Admin', source: 'demo' },
+          info: { adminId: 'demo-admin', name: 'Demo Admin', source: 'demo', status: 'active' },
         });
       }
 

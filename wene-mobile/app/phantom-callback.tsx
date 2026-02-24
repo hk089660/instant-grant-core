@@ -7,6 +7,9 @@ import { handlePhantomConnectRedirect } from '../src/utils/phantom';
 import { consumePhantomWebReturnPath } from '../src/utils/phantomWebReturnPath';
 import { AppText } from '../src/ui/components';
 import { theme } from '../src/ui/theme';
+import { useAuth } from '../src/contexts/AuthContext';
+import { loadAdminSession } from '../src/lib/adminAuth';
+import { applyAdminSessionRuntimeScope } from '../src/lib/adminRuntimeScope';
 
 const SAFE_TIMEOUT_MS = 3000;
 
@@ -17,6 +20,7 @@ const SAFE_TIMEOUT_MS = 3000;
  */
 export default function PhantomCallbackScreen() {
   const router = useRouter();
+  const { refresh } = useAuth();
   const { setWalletPubkey, setPhantomSession, setState, setError } = useRecipientStore();
   const { loadKeyPair, savePhantomConnectResult, setPhantomEncryptionPublicKey } = usePhantomStore();
   const [status, setStatus] = useState<'idle' | 'error' | 'done'>('idle');
@@ -75,6 +79,14 @@ export default function PhantomCallbackScreen() {
 
     const run = async () => {
       try {
+        const returnToAdmin = returnPath === '/admin' || returnPath.startsWith('/admin/');
+        if (returnToAdmin) {
+          const adminSession = await loadAdminSession();
+          await applyAdminSessionRuntimeScope(adminSession);
+        } else {
+          await refresh();
+        }
+
         await loadKeyPair();
         const dappSecretKey = usePhantomStore.getState().dappSecretKey;
         if (!dappSecretKey) {
@@ -113,7 +125,7 @@ export default function PhantomCallbackScreen() {
     run();
 
     return () => clearTimeout(timeoutId);
-  }, [loadKeyPair, savePhantomConnectResult, setPhantomEncryptionPublicKey, setWalletPubkey, setPhantomSession, setState, router, returnPath]);
+  }, [loadKeyPair, savePhantomConnectResult, setPhantomEncryptionPublicKey, setWalletPubkey, setPhantomSession, setState, router, returnPath, refresh]);
 
   if (status === 'idle') {
     return (

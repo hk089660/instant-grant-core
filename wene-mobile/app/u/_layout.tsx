@@ -10,9 +10,13 @@ import { TouchableOpacity } from 'react-native';
 
 /** /u/register, /u/login 以外で userId が無い場合は /u/register へ */
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { userId, isReady } = useAuth();
+  const { userId, isReady, refresh } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
+
+  useEffect(() => {
+    refresh().catch(() => { });
+  }, [refresh]);
 
   useEffect(() => {
     if (!isReady) return;

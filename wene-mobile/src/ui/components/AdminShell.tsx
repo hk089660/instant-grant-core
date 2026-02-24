@@ -5,6 +5,8 @@ import { AppText } from './AppText';
 import { adminTheme } from '../adminTheme';
 import { loginAdmin } from '../../api/adminApi';
 import { clearAdminSession, loadAdminSession, saveAdminSession } from '../../lib/adminAuth';
+import { clearAdminRuntimeArtifacts } from '../../lib/adminRuntimeScope';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface AdminShellProps {
   title: string;
@@ -14,6 +16,7 @@ interface AdminShellProps {
 
 export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
   const router = useRouter();
+  const { refresh } = useAuth();
   const [adminName, setAdminName] = useState('');
 
   useEffect(() => {
@@ -50,7 +53,10 @@ export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
   }, []);
 
   const handleLogout = async () => {
+    const currentSession = await loadAdminSession();
     await clearAdminSession();
+    await clearAdminRuntimeArtifacts(currentSession);
+    await refresh();
     router.replace('/admin/login' as any);
   };
 

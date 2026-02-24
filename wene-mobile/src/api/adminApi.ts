@@ -5,7 +5,8 @@
 
 import { HttpError, httpGet, httpPost } from './http/httpClient';
 import type { SchoolEvent } from '../types/school';
-import { clearAdminSession, getAdminToken } from '../lib/adminAuth';
+import { clearAdminSession, getAdminToken, loadAdminSession } from '../lib/adminAuth';
+import { clearAdminRuntimeArtifacts } from '../lib/adminRuntimeScope';
 
 function getBaseUrl(): string {
   if (typeof window !== 'undefined' && window.location?.origin) {
@@ -33,7 +34,9 @@ async function withAdminAuth<T>(request: () => Promise<T>): Promise<T> {
     return await request();
   } catch (e) {
     if (e instanceof HttpError && e.status === 401) {
+      const currentSession = await loadAdminSession();
       await clearAdminSession();
+      await clearAdminRuntimeArtifacts(currentSession);
     }
     throw e;
   }

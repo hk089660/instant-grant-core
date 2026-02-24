@@ -1,20 +1,34 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { View } from 'react-native';
 import { adminTheme } from '../../src/ui/adminTheme';
 import { loadAdminSession } from '../../src/lib/adminAuth';
+import { applyAdminSessionRuntimeScope, resolveAdminRuntimeScope } from '../../src/lib/adminRuntimeScope';
 import { Loading } from '../../src/ui/components';
+import { useAuth } from '../../src/contexts/AuthContext';
 
 export default function AdminLayout() {
   const router = useRouter();
   const segments = useSegments();
+  const { refresh } = useAuth();
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+  const appliedScopeRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
         const session = await loadAdminSession();
+        if (session?.token) {
+          const nextScope = resolveAdminRuntimeScope(session);
+          if (nextScope !== appliedScopeRef.current) {
+            await applyAdminSessionRuntimeScope(session);
+            appliedScopeRef.current = nextScope;
+          }
+        } else {
+          appliedScopeRef.current = null;
+          await refresh();
+        }
         if (!cancelled) {
           setIsAuthorized(Boolean(session?.token));
         }
@@ -28,7 +42,7 @@ export default function AdminLayout() {
     return () => {
       cancelled = true;
     };
-  }, [segments]);
+  }, [segments, refresh]);
 
   useEffect(() => {
     if (isAuthorized === null) return;
