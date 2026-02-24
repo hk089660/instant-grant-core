@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, StyleSheet, Linking, TouchableOpacity, Animated, Easing } from 'react-native';
+import { View, StyleSheet, Linking, TouchableOpacity, Animated, Easing, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { AppText, Button, Card } from '../../ui/components';
@@ -258,7 +258,11 @@ export const UserSuccessScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.iconWrap}>
           <View style={styles.checkAnimFrame}>
             <Animated.View
@@ -494,7 +498,7 @@ export const UserSuccessScreen: React.FC = () => {
           <Ionicons name="home-outline" size={14} color={theme.colors.textTertiary} />
           <AppText variant="small" style={styles.homeLinkText}>ホームに戻る</AppText>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -505,8 +509,9 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background,
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
     padding: theme.spacing.lg,
+    paddingBottom: theme.spacing.xxl,
   },
   iconWrap: {
     alignItems: 'center',

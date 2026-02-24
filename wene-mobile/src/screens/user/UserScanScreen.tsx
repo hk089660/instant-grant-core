@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, Linking, Platform } from 'react-native';
+import { View, StyleSheet, Linking, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -249,7 +249,11 @@ export const UserScanScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         <AppText variant="h2" style={styles.title}>
           QRを読み取る
         </AppText>
@@ -342,7 +346,7 @@ export const UserScanScreen: React.FC = () => {
             Webで読めない場合: HTTPS（またはlocalhost）、カメラ権限、Safari/Firefox最新版を確認してください。
           </AppText>
         ) : null}
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -353,8 +357,9 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background,
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
     padding: theme.spacing.lg,
+    paddingBottom: theme.spacing.xxl,
   },
   title: {
     marginBottom: theme.spacing.xs,

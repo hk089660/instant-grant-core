@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, StyleSheet, Platform, Image } from 'react-native';
+import { View, StyleSheet, Platform, Image, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as QRCode from 'qrcode';
@@ -97,7 +97,11 @@ export const AdminPrintScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.header} {...printHiddenProps}>
           <AppText variant="h2" style={styles.title}>
             印刷用QR
@@ -158,7 +162,7 @@ export const AdminPrintScreen: React.FC = () => {
         <View {...printHiddenProps}>
           <Button title="印刷する" variant="secondary" dark onPress={handlePrint} />
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -169,7 +173,7 @@ const styles = StyleSheet.create({
     backgroundColor: adminTheme.colors.background,
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
     padding: adminTheme.spacing.lg,
   },
   header: {
@@ -200,7 +204,7 @@ const styles = StyleSheet.create({
     color: adminTheme.colors.textSecondary,
   },
   qrBox: {
-    height: 220,
+    minHeight: 320,
     borderRadius: adminTheme.radius.md,
     borderWidth: 1,
     borderColor: adminTheme.colors.border,

@@ -3,7 +3,7 @@
  * 管理者パスコードを入力して管理画面に進む
  */
 import React, { useState } from 'react';
-import { View, StyleSheet, TextInput } from 'react-native';
+import { View, StyleSheet, TextInput, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { AppText, Button, Card } from '../../ui/components';
@@ -62,41 +62,52 @@ export const AdminLoginScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.content}>
-        <View style={styles.titleBlock}>
-          <AppText variant="h2" style={styles.title}>
-            管理者ログイン
-          </AppText>
-          <AppText variant="caption" style={styles.subtitle}>
-            管理用パスコードを入力してください
-          </AppText>
-        </View>
+      <KeyboardAvoidingView
+        style={styles.keyboard}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.content}>
+            <View style={styles.titleBlock}>
+              <AppText variant="h2" style={styles.title}>
+                管理者ログイン
+              </AppText>
+              <AppText variant="caption" style={styles.subtitle}>
+                管理用パスコードを入力してください
+              </AppText>
+            </View>
 
-        <Card style={styles.card}>
-          <AppText variant="caption" style={styles.label}>パスワード</AppText>
-          <TextInput
-            style={styles.input}
-            value={passcode}
-            onChangeText={setPasscode}
-            placeholder="パスワードを入力"
-            placeholderTextColor={adminTheme.colors.textTertiary}
-            secureTextEntry
-            keyboardType="default"
-            onSubmitEditing={handleLogin}
-          />
-          {error ? (
-            <AppText variant="small" style={styles.errorText}>{error}</AppText>
-          ) : null}
-        </Card>
+            <Card style={styles.card}>
+              <AppText variant="caption" style={styles.label}>パスワード</AppText>
+              <TextInput
+                style={styles.input}
+                value={passcode}
+                onChangeText={setPasscode}
+                placeholder="パスワードを入力"
+                placeholderTextColor={adminTheme.colors.textTertiary}
+                secureTextEntry
+                keyboardType="default"
+                onSubmitEditing={handleLogin}
+              />
+              {error ? (
+                <AppText variant="small" style={styles.errorText}>{error}</AppText>
+              ) : null}
+            </Card>
 
-        <Button
-          title={loading ? 'ログイン中…' : '管理者としてログイン'}
-          onPress={handleLogin}
-          loading={loading}
-          disabled={loading}
-          style={styles.loginButton}
-        />
-      </View>
+            <Button
+              title={loading ? 'ログイン中…' : '管理者としてログイン'}
+              onPress={handleLogin}
+              loading={loading}
+              disabled={loading}
+              style={styles.loginButton}
+            />
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
@@ -106,10 +117,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: adminTheme.colors.background,
   },
-  content: {
+  keyboard: {
     flex: 1,
-    padding: adminTheme.spacing.lg,
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
+  },
+  content: {
+    padding: adminTheme.spacing.lg,
     maxWidth: 400,
     alignSelf: 'center',
     width: '100%',

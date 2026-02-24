@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { View, StyleSheet, TextInput, Alert } from 'react-native';
+import { View, StyleSheet, TextInput, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { AppText, Button, Card } from '../../src/ui/components';
@@ -43,43 +43,54 @@ export default function MasterLoginScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-            <View style={styles.content}>
-                <View style={styles.titleBlock}>
-                    <AppText variant="h2" style={styles.title}>
-                        Master Admin
-                    </AppText>
-                    <AppText variant="caption" style={styles.subtitle}>
-                        システム管理者ログイン
-                    </AppText>
-                </View>
+            <KeyboardAvoidingView
+                style={styles.keyboard}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+                <ScrollView
+                    contentContainerStyle={styles.scrollContent}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                >
+                    <View style={styles.content}>
+                        <View style={styles.titleBlock}>
+                            <AppText variant="h2" style={styles.title}>
+                                Master Admin
+                            </AppText>
+                            <AppText variant="caption" style={styles.subtitle}>
+                                システム管理者ログイン
+                            </AppText>
+                        </View>
 
-                <Card style={styles.card}>
-                    <AppText variant="caption" style={styles.label}>Master Password</AppText>
-                    <TextInput
-                        style={styles.input}
-                        value={password}
-                        onChangeText={setPassword}
-                        placeholder="Enter Master Password"
-                        placeholderTextColor={masterTheme.colors.textSecondary}
-                        secureTextEntry
-                        keyboardType="default"
-                        autoCapitalize="none"
-                        onSubmitEditing={handleLogin}
-                    />
-                    {error ? (
-                        <AppText variant="small" style={styles.errorText}>{error}</AppText>
-                    ) : null}
-                </Card>
+                        <Card style={styles.card}>
+                            <AppText variant="caption" style={styles.label}>Master Password</AppText>
+                            <TextInput
+                                style={styles.input}
+                                value={password}
+                                onChangeText={setPassword}
+                                placeholder="Enter Master Password"
+                                placeholderTextColor={masterTheme.colors.textSecondary}
+                                secureTextEntry
+                                keyboardType="default"
+                                autoCapitalize="none"
+                                onSubmitEditing={handleLogin}
+                            />
+                            {error ? (
+                                <AppText variant="small" style={styles.errorText}>{error}</AppText>
+                            ) : null}
+                        </Card>
 
-                <Button
-                    title={loading ? '認証中...' : 'Login as Master'}
-                    onPress={handleLogin}
-                    loading={loading}
-                    disabled={loading}
-                    style={styles.loginButton}
-                    variant='primary' // Using primary to get white text, overriding bg below
-                />
-            </View>
+                        <Button
+                            title={loading ? '認証中...' : 'Login as Master'}
+                            onPress={handleLogin}
+                            loading={loading}
+                            disabled={loading}
+                            style={styles.loginButton}
+                            variant='primary' // Using primary to get white text, overriding bg below
+                        />
+                    </View>
+                </ScrollView>
+            </KeyboardAvoidingView>
         </SafeAreaView>
     );
 }
@@ -89,10 +100,15 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: masterTheme.colors.background,
     },
-    content: {
+    keyboard: {
         flex: 1,
-        padding: masterTheme.spacing.lg,
+    },
+    scrollContent: {
+        flexGrow: 1,
         justifyContent: 'center',
+    },
+    content: {
+        padding: masterTheme.spacing.lg,
         maxWidth: 400,
         alignSelf: 'center',
         width: '100%',
