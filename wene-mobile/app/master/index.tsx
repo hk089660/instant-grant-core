@@ -36,6 +36,7 @@ export default function MasterDashboard() {
     const [renameCode, setRenameCode] = useState('');
     const [renameAdminId, setRenameAdminId] = useState('');
     const [renameName, setRenameName] = useState('');
+    const [showInviteTools, setShowInviteTools] = useState(false);
 
     // Audit Logs State
     const [auditLogs, setAuditLogs] = useState<MasterAuditLog[]>([]);
@@ -504,70 +505,86 @@ export default function MasterDashboard() {
 
             <View style={styles.content}>
                 {activeTab === 'invites' ? (
-                    <View style={{ flex: 1 }}>
-                        <Card style={styles.createForm}>
-                            <AppText style={styles.sectionTitle}>Issue Admin Code</AppText>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="Admin Name (e.g. Tokyo High Admin)"
-                                placeholderTextColor={masterTheme.colors.textSecondary}
-                                value={newAdminName}
-                                onChangeText={setNewAdminName}
-                            />
+                    <View style={styles.invitesTabContainer}>
+                        <View style={styles.inviteListHeader}>
+                            <AppText style={styles.listTitle}>Admin Codes (Active + Revoked)</AppText>
                             <Button
-                                title={inviteActionLoading ? 'Generating...' : 'Generate Code'}
-                                onPress={handleCreateCode}
-                                style={styles.generateButton}
-                                variant='primary'
-                                disabled={inviteActionLoading}
-                            />
-                            {generatedCode && (
-                                <View style={styles.resultBox}>
-                                    <AppText style={styles.resultLabel}>Generated Code:</AppText>
-                                    <AppText style={styles.resultCode} selectable>{generatedCode}</AppText>
-                                    <AppText style={styles.resultNote}>Copy this code and send it to this named administrator.</AppText>
-                                </View>
-                            )}
-                        </Card>
-
-                        <Card style={styles.renameForm}>
-                            <AppText style={styles.sectionTitle}>Rename Admin</AppText>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="Code (optional if adminId is set)"
-                                placeholderTextColor={masterTheme.colors.textSecondary}
-                                value={renameCode}
-                                onChangeText={setRenameCode}
-                            />
-                            <TextInput
-                                style={styles.input}
-                                placeholder="Admin ID (optional if code is set)"
-                                placeholderTextColor={masterTheme.colors.textSecondary}
-                                value={renameAdminId}
-                                onChangeText={setRenameAdminId}
-                            />
-                            <TextInput
-                                style={styles.input}
-                                placeholder="New admin name"
-                                placeholderTextColor={masterTheme.colors.textSecondary}
-                                value={renameName}
-                                onChangeText={setRenameName}
-                            />
-                            <Button
-                                title={inviteActionLoading ? 'Updating...' : 'Update Name'}
-                                onPress={handleRename}
+                                title={showInviteTools ? 'Hide Tools' : 'Show Tools'}
+                                onPress={() => setShowInviteTools((prev) => !prev)}
                                 variant="secondary"
                                 dark
                                 size="medium"
-                                disabled={inviteActionLoading}
+                                style={styles.inviteToolsToggleButton}
                             />
-                        </Card>
+                        </View>
 
-                        <AppText style={styles.listTitle}>Admin Codes (Active + Revoked)</AppText>
+                        {showInviteTools && (
+                            <View style={styles.inviteToolsPanel}>
+                                <Card style={styles.createForm}>
+                                    <AppText style={styles.sectionTitle}>Issue Admin Code</AppText>
+                                    <TextInput
+                                        style={styles.input}
+                                        placeholder="Admin Name (e.g. Tokyo High Admin)"
+                                        placeholderTextColor={masterTheme.colors.textSecondary}
+                                        value={newAdminName}
+                                        onChangeText={setNewAdminName}
+                                    />
+                                    <Button
+                                        title={inviteActionLoading ? 'Generating...' : 'Generate Code'}
+                                        onPress={handleCreateCode}
+                                        style={styles.generateButton}
+                                        variant='primary'
+                                        disabled={inviteActionLoading}
+                                    />
+                                    {generatedCode && (
+                                        <View style={styles.resultBox}>
+                                            <AppText style={styles.resultLabel}>Generated Code:</AppText>
+                                            <AppText style={styles.resultCode} selectable>{generatedCode}</AppText>
+                                            <AppText style={styles.resultNote}>Copy this code and send it to this named administrator.</AppText>
+                                        </View>
+                                    )}
+                                </Card>
+
+                                <Card style={styles.renameForm}>
+                                    <AppText style={styles.sectionTitle}>Rename Admin</AppText>
+                                    <TextInput
+                                        style={styles.input}
+                                        placeholder="Code (optional if adminId is set)"
+                                        placeholderTextColor={masterTheme.colors.textSecondary}
+                                        value={renameCode}
+                                        onChangeText={setRenameCode}
+                                    />
+                                    <TextInput
+                                        style={styles.input}
+                                        placeholder="Admin ID (optional if code is set)"
+                                        placeholderTextColor={masterTheme.colors.textSecondary}
+                                        value={renameAdminId}
+                                        onChangeText={setRenameAdminId}
+                                    />
+                                    <TextInput
+                                        style={styles.input}
+                                        placeholder="New admin name"
+                                        placeholderTextColor={masterTheme.colors.textSecondary}
+                                        value={renameName}
+                                        onChangeText={setRenameName}
+                                    />
+                                    <Button
+                                        title={inviteActionLoading ? 'Updating...' : 'Update Name'}
+                                        onPress={handleRename}
+                                        variant="secondary"
+                                        dark
+                                        size="medium"
+                                        disabled={inviteActionLoading}
+                                    />
+                                </Card>
+                            </View>
+                        )}
+
                         {invitesLoading && (
                             <AppText style={styles.emptyText}>Loading codes...</AppText>
                         )}
                         <FlatList
+                            style={styles.inviteList}
                             data={invites}
                             renderItem={renderInviteItem}
                             keyExtractor={item => item.code}
@@ -764,6 +781,26 @@ const styles = StyleSheet.create({
         flex: 1,
         padding: masterTheme.spacing.md,
     },
+    invitesTabContainer: {
+        flex: 1,
+    },
+    inviteListHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: masterTheme.spacing.sm,
+        gap: masterTheme.spacing.sm,
+    },
+    inviteToolsToggleButton: {
+        minWidth: 116,
+        height: 36,
+    },
+    inviteToolsPanel: {
+        marginBottom: masterTheme.spacing.md,
+    },
+    inviteList: {
+        flex: 1,
+    },
     createForm: {
         backgroundColor: '#111',
         borderColor: masterTheme.colors.border,
@@ -822,8 +859,7 @@ const styles = StyleSheet.create({
         color: masterTheme.colors.textSecondary,
         fontSize: 18,
         fontWeight: '700',
-        marginBottom: masterTheme.spacing.md,
-        marginTop: masterTheme.spacing.xs,
+        flex: 1,
     },
     inviteListContent: {
         paddingBottom: 120,
