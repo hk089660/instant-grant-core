@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
-import { ActivityIndicator, View } from 'react-native';
+import { View } from 'react-native';
 import { adminTheme } from '../../src/ui/adminTheme';
 import { loadAdminSession } from '../../src/lib/adminAuth';
+import { Loading } from '../../src/ui/components';
 
 export default function AdminLayout() {
   const router = useRouter();
@@ -52,7 +53,7 @@ export default function AdminLayout() {
           backgroundColor: adminTheme.colors.background,
         }}
       >
-        <ActivityIndicator size="large" color={adminTheme.colors.text} />
+        <Loading message="管理画面を読み込み中です..." size="large" mode="admin" />
       </View>
     );
   }
@@ -65,4 +66,3 @@ export default function AdminLayout() {
     />
   );
 }
-

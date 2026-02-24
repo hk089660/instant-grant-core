@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, StyleSheet, ScrollView, Platform } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform, TextInput } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as QRCode from 'qrcode';
 import { AppText, Button, Card, AdminShell, Loading } from '../../ui/components';
@@ -25,6 +25,7 @@ export const AdminEventDetailScreen: React.FC = () => {
   const [transferStrictLevel, setTransferStrictLevel] = useState<string | null>(null);
   const [transferLoading, setTransferLoading] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
+  const [participantNameQuery, setParticipantNameQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -138,12 +139,23 @@ export const AdminEventDetailScreen: React.FC = () => {
     () => transfers.filter((item) => !isOnchainTransfer(item)),
     [transfers]
   );
+  const registeredParticipantNames = useMemo(() => {
+    const names = claimants
+      .map((c) => c.displayName.trim())
+      .filter((name) => Boolean(name) && name !== '-');
+    return Array.from(new Set(names));
+  }, [claimants]);
+  const filteredClaimants = useMemo(() => {
+    const q = participantNameQuery.trim().toLowerCase();
+    if (!q) return claimants;
+    return claimants.filter((c) => c.displayName.toLowerCase().includes(q));
+  }, [claimants, participantNameQuery]);
 
   if (loading) {
     return (
       <AdminShell title="イベント詳細" role="admin">
         <View style={styles.center}>
-          <Loading message="イベント詳細を読み込み中です..." size="large" />
+          <Loading message="イベント詳細を読み込み中です..." size="large" mode="admin" />
         </View>
       </AdminShell>
     );
@@ -178,7 +190,7 @@ export const AdminEventDetailScreen: React.FC = () => {
         <Card style={styles.card}>
           <View style={styles.stateBadge}>
             <AppText variant="small" style={{
-              color: event.state === 'published' ? '#00c853' : '#ff9800',
+              color: adminTheme.colors.text,
               fontWeight: '700',
             }}>
               {event.state === 'published' ? '公開中' : event.state === 'draft' ? '下書き' : '終了'}
@@ -230,15 +242,26 @@ export const AdminEventDetailScreen: React.FC = () => {
         <View style={styles.sectionHeader}>
           <AppText variant="h3" style={styles.title}>参加者一覧</AppText>
           <AppText variant="small" style={styles.muted}>
-            合計 {claimants.length} 名
+            合計 {claimants.length} 名 / 表示 {filteredClaimants.length} 名
           </AppText>
         </View>
 
         <Card style={styles.card}>
-          {claimants.length === 0 ? (
+          <TextInput
+            style={styles.searchInput}
+            value={participantNameQuery}
+            onChangeText={setParticipantNameQuery}
+            placeholder="登録名で絞り込み（例: 山田）"
+            placeholderTextColor={adminTheme.colors.textTertiary}
+          />
+          <AppText variant="small" style={styles.cardDim}>
+            登録名候補: {registeredParticipantNames.length} 件
+          </AppText>
+
+          {filteredClaimants.length === 0 ? (
             <View style={styles.center}>
               <AppText variant="caption" style={styles.cardMuted}>
-                まだ参加者がいません
+                {claimants.length === 0 ? 'まだ参加者がいません' : '該当する登録名が見つかりません'}
               </AppText>
             </View>
           ) : (
@@ -249,7 +272,7 @@ export const AdminEventDetailScreen: React.FC = () => {
                 <AppText variant="small" style={[styles.cardDim, { flex: 1, textAlign: 'center' }]}>確認コード</AppText>
                 <AppText variant="small" style={[styles.cardDim, { flex: 1, textAlign: 'right' }]}>参加時刻</AppText>
               </View>
-              {claimants.map((p, i) => (
+              {filteredClaimants.map((p, i) => (
                 <View key={`${p.subject}-${i}`} style={styles.participantRow}>
                   <View style={{ flex: 2 }}>
                     <AppText variant="body" style={styles.cardText}>{p.displayName}</AppText>
@@ -396,11 +419,24 @@ export const AdminEventDetailScreen: React.FC = () => {
           dark
           onPress={() => {
             if (typeof window === 'undefined') return;
-            const rows = [['表示名', 'サブジェクト', '確認コード', '参加時刻']];
+            const eventParticipantNames = claimants
+              .map((c) => {
+                const name = c.displayName.trim();
+                return name || '-';
+              });
+            const rows = [
+              ['イベントID', event.id, '', ''],
+              ['イベント名', event.title, '', ''],
+              ['参加者名一覧', eventParticipantNames.join(' / '), '', ''],
+              ['', '', '', ''],
+              ['表示名', 'サブジェクト', '確認コード', '参加時刻'],
+            ];
             claimants.forEach((c) => {
               rows.push([c.displayName, c.subject, c.confirmationCode ?? '', c.claimedAt ?? '']);
             });
-            const csv = rows.map((r) => r.map((v) => `"${v}"`).join(',')).join('\n');
+            const csv = rows
+              .map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
+              .join('\n');
             const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -438,12 +474,22 @@ const styles = StyleSheet.create({
   cardText: { color: adminTheme.colors.text },
   cardMuted: { color: adminTheme.colors.textSecondary, marginTop: 2 },
   cardDim: { color: adminTheme.colors.textTertiary, marginTop: 2 },
+  searchInput: {
+    borderWidth: 1,
+    borderColor: adminTheme.colors.border,
+    borderRadius: adminTheme.radius.sm,
+    paddingHorizontal: adminTheme.spacing.md,
+    paddingVertical: adminTheme.spacing.sm,
+    color: adminTheme.colors.text,
+    backgroundColor: adminTheme.colors.background,
+    marginBottom: adminTheme.spacing.xs,
+  },
   center: {
     paddingVertical: adminTheme.spacing.lg,
     alignItems: 'center',
   },
   muted: { color: adminTheme.colors.textTertiary },
-  errorText: { color: '#ff6b6b' },
+  errorText: { color: adminTheme.colors.text },
   stateBadge: {
     alignSelf: 'flex-start',
     paddingHorizontal: 10,
@@ -471,7 +517,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: adminTheme.spacing.md,
     padding: adminTheme.spacing.sm,
-    backgroundColor: '#ffffff',
+    backgroundColor: adminTheme.colors.background,
     borderRadius: adminTheme.radius.md,
     minHeight: 200,
   },
@@ -532,7 +578,7 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
   },
   transferError: {
-    color: '#ff8a80',
+    color: adminTheme.colors.text,
     marginBottom: adminTheme.spacing.sm,
   },
 });

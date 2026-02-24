@@ -131,7 +131,7 @@ export const AdminParticipantsScreen: React.FC = () => {
 
         {loading ? (
           <Card style={styles.card}>
-            <Loading message="参加者データを読み込み中です..." size="large" />
+            <Loading message="参加者データを読み込み中です..." size="large" mode="admin" />
           </Card>
         ) : error ? (
           <Card style={styles.card}>
@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
   cardText: { color: adminTheme.colors.text },
   cardMuted: { color: adminTheme.colors.textSecondary, marginTop: 1 },
   cardDim: { color: adminTheme.colors.textTertiary, marginTop: 1, fontSize: 11 },
-  errorText: { color: '#ff6b6b' },
+  errorText: { color: adminTheme.colors.text },
   retryButton: {
     marginTop: adminTheme.spacing.sm,
   },

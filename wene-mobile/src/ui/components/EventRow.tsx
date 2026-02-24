@@ -27,6 +27,7 @@ export const EventRow: React.FC<EventRowProps> = ({
   solanaMint,
 }) => {
   const textStyle = textColor ? { color: textColor } : undefined;
+  const tokenTextStyle = textColor ? { color: textColor } : styles.tokenText;
 
   return (
     <TouchableOpacity style={[styles.row, style]} onPress={onPress} disabled={!onPress}>
@@ -43,7 +44,7 @@ export const EventRow: React.FC<EventRowProps> = ({
         </AppText>
         {solanaMint && (
           <View style={styles.tokenBadge}>
-            <AppText variant="caption" style={styles.tokenText}>
+            <AppText variant="caption" style={tokenTextStyle}>
               SPL Token: {solanaMint.slice(0, 6)}...{solanaMint.slice(-4)}
             </AppText>
           </View>

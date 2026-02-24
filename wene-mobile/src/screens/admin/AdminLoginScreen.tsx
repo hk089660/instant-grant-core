@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
     height: 48,
   },
   errorText: {
-    color: '#ff6b6b',
+    color: adminTheme.colors.text,
     marginTop: adminTheme.spacing.sm,
     textAlign: 'center',
   },

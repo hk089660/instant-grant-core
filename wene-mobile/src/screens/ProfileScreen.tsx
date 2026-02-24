@@ -1,11 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { View, StyleSheet, ScrollView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { PublicKey } from '@solana/web3.js';
 import { AppText, Button, Card, CategoryTabs, BalanceList } from '../ui/components';
 import { theme } from '../ui/theme';
 import { useRecipientStore } from '../store/recipientStore';
+import { useRecipientTicketStore } from '../store/recipientTicketStore';
 import { usePhantomStore } from '../store/phantomStore';
 import { useAuth } from '../contexts/AuthContext';
 import { getConnection } from '../solana/singleton';
@@ -20,12 +22,33 @@ const CATEGORIES = [
 export const ProfileScreen: React.FC = () => {
     const router = useRouter();
     const { walletPubkey } = useRecipientStore();
+    const { tickets, isLoading: ticketsStoreLoading, loadTickets } = useRecipientTicketStore();
     const { clearPhantomKeys } = usePhantomStore();
-    const { userId, displayName: authDisplayName, clearUser } = useAuth();
+    const { displayName: authDisplayName, clearUser } = useAuth();
     const [activeTab, setActiveTab] = useState('profile');
     const [ticketItems, setTicketItems] = useState<BalanceItem[]>([]);
     const [ticketsLoading, setTicketsLoading] = useState(false);
     const [ticketsError, setTicketsError] = useState<string | null>(null);
+    const latestTicketWithCode = useMemo(() => {
+        const candidates = tickets.filter((ticket) => {
+            const code = ticket.confirmationCode?.trim();
+            return Boolean(code);
+        });
+        if (candidates.length === 0) return null;
+        return candidates.slice().sort((a, b) => b.joinedAt - a.joinedAt)[0];
+    }, [tickets]);
+    const latestConfirmationCode = latestTicketWithCode?.confirmationCode?.trim() ?? '';
+    const confirmationCodeText = latestConfirmationCode
+        ? `#${latestConfirmationCode}`
+        : ticketsStoreLoading
+            ? '読み込み中...'
+            : '未発行';
+
+    useFocusEffect(
+        useCallback(() => {
+            loadTickets().catch(() => { });
+        }, [loadTickets])
+    );
 
     useEffect(() => {
         if (activeTab !== 'history') return;
@@ -101,6 +124,25 @@ export const ProfileScreen: React.FC = () => {
                                 <AppText variant="body" style={styles.value}>
                                     {authDisplayName ?? '未設定'}
                                 </AppText>
+                            </View>
+                            <View style={styles.divider} />
+                            <View style={styles.row}>
+                                <AppText variant="caption" style={styles.label}>
+                                    確認コード（管理者提示用）
+                                </AppText>
+                                <View style={styles.confirmationCodeBox}>
+                                    <AppText variant="body" style={styles.confirmationCodeValue}>
+                                        {confirmationCodeText}
+                                    </AppText>
+                                    <AppText variant="small" style={styles.codeHelper}>
+                                        {latestTicketWithCode
+                                            ? `最新イベント: ${latestTicketWithCode.eventName}`
+                                            : 'イベント参加後に表示されます'}
+                                    </AppText>
+                                    <AppText variant="small" style={styles.codeHelper}>
+                                        このコードとアカウント名を管理者に提示してください
+                                    </AppText>
+                                </View>
                             </View>
                             <View style={styles.divider} />
                             <View style={styles.row}>
@@ -196,6 +238,23 @@ const styles = StyleSheet.create({
     value: {
         fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
         fontWeight: '500',
+    },
+    confirmationCodeBox: {
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        borderRadius: theme.radius.sm,
+        backgroundColor: theme.colors.gray50,
+        padding: theme.spacing.sm,
+    },
+    confirmationCodeValue: {
+        fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+        fontWeight: '700',
+        letterSpacing: 0.6,
+        color: theme.colors.text,
+    },
+    codeHelper: {
+        marginTop: theme.spacing.xs,
+        color: theme.colors.textSecondary,
     },
     logoutButton: {
         marginTop: theme.spacing.xl,

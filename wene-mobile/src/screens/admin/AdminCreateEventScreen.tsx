@@ -760,7 +760,7 @@ const styles = StyleSheet.create({
         marginTop: adminTheme.spacing.xs,
     },
     runtimeOkText: {
-        color: '#00c853',
+        color: adminTheme.colors.text,
     },
     walletRow: {
         flexDirection: 'row',
@@ -806,7 +806,7 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     errorText: {
-        color: '#ff6b6b',
+        color: adminTheme.colors.text,
         marginTop: adminTheme.spacing.sm,
     },
     noticeText: {
@@ -836,7 +836,7 @@ const styles = StyleSheet.create({
         marginBottom: adminTheme.spacing.md,
     },
     successText: {
-        color: '#00c853',
+        color: adminTheme.colors.text,
         fontWeight: '700',
     },
     qrBox: {
@@ -844,7 +844,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         marginTop: adminTheme.spacing.lg,
         padding: adminTheme.spacing.md,
-        backgroundColor: '#ffffff',
+        backgroundColor: adminTheme.colors.background,
         borderRadius: adminTheme.radius.md,
         minHeight: 300,
     },

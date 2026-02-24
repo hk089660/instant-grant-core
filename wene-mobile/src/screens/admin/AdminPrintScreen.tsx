@@ -72,6 +72,9 @@ export const AdminPrintScreen: React.FC = () => {
         @page { size: A4 portrait; margin: 16mm; }
         body { background: #ffffff !important; margin: 0; }
         [data-print-hidden="true"] { display: none !important; }
+        [data-print-card="true"], [data-print-card="true"] * {
+          color: #000000 !important;
+        }
         [data-print-card="true"] {
           border: none !important;
           box-shadow: none !important;
@@ -163,7 +166,7 @@ export const AdminPrintScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: adminTheme.colors.background,
   },
   content: {
     flex: 1,
@@ -183,7 +186,7 @@ const styles = StyleSheet.create({
     marginBottom: adminTheme.spacing.xs,
   },
   title: {
-    color: '#000000',
+    color: adminTheme.colors.text,
   },
   card: {
     backgroundColor: adminTheme.colors.surface,
@@ -191,10 +194,10 @@ const styles = StyleSheet.create({
     marginBottom: adminTheme.spacing.lg,
   },
   cardText: {
-    color: '#000000',
+    color: adminTheme.colors.text,
   },
   cardMuted: {
-    color: '#666666',
+    color: adminTheme.colors.textSecondary,
   },
   qrBox: {
     height: 220,

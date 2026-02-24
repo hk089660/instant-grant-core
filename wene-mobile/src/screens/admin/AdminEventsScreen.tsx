@@ -202,7 +202,7 @@ export const AdminEventsScreen: React.FC = () => {
         <View style={styles.list}>
           {loading ? (
             <View style={styles.stateContainer}>
-              <Loading message="イベントを読み込み中です..." size="large" />
+              <Loading message="イベントを読み込み中です..." size="large" mode="admin" />
             </View>
           ) : error ? (
             <View style={styles.stateContainer}>
@@ -217,7 +217,7 @@ export const AdminEventsScreen: React.FC = () => {
             </View>
           ) : events.length === 0 ? (
             <View style={styles.stateContainer}>
-              <AppText>表示できるイベントがありません。</AppText>
+              <AppText style={styles.emptyText}>表示できるイベントがありません。</AppText>
             </View>
           ) : (
             events.map((event) => {
@@ -317,11 +317,11 @@ const styles = StyleSheet.create({
     minWidth: 100,
   },
   popOkText: {
-    color: '#00c853',
+    color: adminTheme.colors.text,
     marginBottom: adminTheme.spacing.xs,
   },
   popWarnText: {
-    color: '#ffb300',
+    color: adminTheme.colors.text,
     marginBottom: adminTheme.spacing.xs,
   },
   popMuted: {
@@ -376,5 +376,8 @@ const styles = StyleSheet.create({
   note: {
     color: adminTheme.colors.textTertiary,
     marginTop: adminTheme.spacing.sm,
+  },
+  emptyText: {
+    color: adminTheme.colors.text,
   },
 });
