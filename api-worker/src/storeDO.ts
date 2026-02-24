@@ -693,11 +693,12 @@ export class SchoolStore implements DurableObject {
       }
 
       const eventId = typeof body?.eventId === 'string' ? body.eventId.trim() : '';
+      const confirmationCode = typeof body?.confirmationCode === 'string' ? body.confirmationCode.trim() : '';
       const grantRaw = typeof body?.grant === 'string' ? body.grant.trim() : '';
       const claimerRaw = typeof body?.claimer === 'string' ? body.claimer.trim() : '';
       const periodIndex = parsePeriodIndex(body?.periodIndex);
 
-      if (!eventId || !grantRaw || !claimerRaw || periodIndex === null || periodIndex < BigInt(0)) {
+      if (!eventId || !confirmationCode || !grantRaw || !claimerRaw || periodIndex === null || periodIndex < BigInt(0)) {
         throw new Error('invalid PoP proof request');
       }
       if (!MINT_BASE58_RE.test(grantRaw) || !MINT_BASE58_RE.test(claimerRaw)) {
@@ -716,6 +717,15 @@ export class SchoolStore implements DurableObject {
         throw new Error('event not available');
       }
 
+      const ticketReceipt = await this.getParticipationTicketReceipt(eventId, '', confirmationCode);
+      if (!ticketReceipt) {
+        throw new Error('off-chain ticket receipt not found');
+      }
+      const receiptVerification = await this.verifyParticipationTicketReceipt(ticketReceipt);
+      if (!receiptVerification.ok) {
+        throw new Error('off-chain ticket receipt verification failed');
+      }
+
       const grant = bs58.decode(grantRaw);
       const claimer = bs58.decode(claimerRaw);
       if (grant.length !== 32 || claimer.length !== 32) {
@@ -729,13 +739,19 @@ export class SchoolStore implements DurableObject {
       const prevHash = hexToBytes(prevHashHex);
       const streamPrevHash = hexToBytes(streamPrevHashHex);
       const issuedAt = BigInt(Math.floor(Date.now() / 1000));
+      const auditHashHex = readHashHex(ticketReceipt.receiptHash);
+      const auditHash = hexToBytes(auditHashHex);
 
-      // Bind PoP proof to the immutable API audit chain with an anchor hash.
+      // Bind PoP proof issuance to a verified off-chain participation receipt.
       const auditAnchor = await this.appendAuditLog(
         'POP_CLAIM_PROOF_ANCHOR',
         { type: 'wallet', id: this.maskActorId(claimerRaw) },
         {
           eventId,
+          confirmationCode,
+          receiptId: ticketReceipt.receiptId,
+          receiptHash: ticketReceipt.receiptHash,
+          receiptVerifiedAt: receiptVerification.checkedAt,
           grant: grantRaw,
           claimer: claimerRaw,
           periodIndex: periodIndex.toString(),
@@ -744,8 +760,6 @@ export class SchoolStore implements DurableObject {
         },
         `pop:${eventId}`
       );
-      const auditHashHex = readHashHex(auditAnchor.entry_hash);
-      const auditHash = hexToBytes(auditHashHex);
 
       const entryHash = await this.buildPopEntryHash({
         prevHash,
@@ -762,6 +776,10 @@ export class SchoolStore implements DurableObject {
       await this.ctx.storage.put(streamKey, entryHashHex);
       await this.ctx.storage.put(`pop_chain:history:${new Date().toISOString()}:${entryHashHex}`, {
         eventId,
+        confirmationCode,
+        receiptId: ticketReceipt.receiptId,
+        receiptHash: ticketReceipt.receiptHash,
+        anchorEntryHash: auditAnchor.entry_hash,
         grant: grantRaw,
         claimer: claimerRaw,
         periodIndex: periodIndex.toString(),
@@ -4026,8 +4044,9 @@ export class SchoolStore implements DurableObject {
         const status =
           message.includes('not configured') ? 500 :
             message.includes('not found') ? 404 :
-              message.includes('not available') ? 400 :
-                message.includes('invalid') || message.includes('out of range') ? 400 : 500;
+              message.includes('verification failed') ? 409 :
+                message.includes('not available') ? 400 :
+                  message.includes('invalid') || message.includes('out of range') ? 400 : 500;
         return Response.json({ error: message }, { status });
       }
     }
@@ -4333,27 +4352,31 @@ export class SchoolStore implements DurableObject {
       if (event.state && event.state !== 'published') {
         return Response.json({ error: 'event not available' }, { status: 400 });
       }
-      if (this.isOnchainPopEnforced() && this.isEventOnchainConfigured(event)) {
-        const proofFields = this.getOnchainProofFields(body);
-        const hasOnchainProof = this.hasAnyOnchainProofField(proofFields);
-        if (hasOnchainProof) {
-          let signerConfigured = false;
-          try {
-            signerConfigured = this.getPopSigner() !== null;
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            return Response.json({ error: `PoP configuration error: ${message}` }, { status: 500 });
-          }
-          if (!signerConfigured) {
-            return Response.json({ error: 'PoP signer is not configured' }, { status: 500 });
-          }
-          const invalidReason = this.validateOnchainProofFields(proofFields);
-          if (invalidReason) {
-            return Response.json({ error: `on-chain claim proof required: ${invalidReason}` }, { status: 400 });
-          }
+      const proofFields = this.getOnchainProofFields(body);
+      const hasOnchainProof = this.hasAnyOnchainProofField(proofFields);
+      if (this.isOnchainPopEnforced() && this.isEventOnchainConfigured(event) && hasOnchainProof) {
+        let signerConfigured = false;
+        try {
+          signerConfigured = this.getPopSigner() !== null;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return Response.json({ error: `PoP configuration error: ${message}` }, { status: 500 });
+        }
+        if (!signerConfigured) {
+          return Response.json({ error: 'PoP signer is not configured' }, { status: 500 });
+        }
+        const invalidReason = this.validateOnchainProofFields(proofFields);
+        if (invalidReason) {
+          return Response.json({ error: `on-chain claim proof required: ${invalidReason}` }, { status: 400 });
         }
       }
       const already = await this.store.hasClaimed(eventId, userId, event);
+      if (!already && hasOnchainProof) {
+        return Response.json({
+          error: 'on-chain claim requires off-chain receipt verification first',
+          code: 'offchain_receipt_required',
+        }, { status: 409 });
+      }
       if (already) {
         const rec = await this.store.getClaimRecord(eventId, userId);
         let confirmationCode = rec?.confirmationCode;
@@ -4367,6 +4390,49 @@ export class SchoolStore implements DurableObject {
         }
         await this.ensureConfirmationCodeIndexed(eventId, userId, confirmationCode);
         const ticketReceipt = await this.getParticipationTicketReceipt(eventId, userId, confirmationCode);
+        if (hasOnchainProof) {
+          if (!ticketReceipt) {
+            return Response.json({
+              error: 'off-chain receipt not found for this participation',
+              code: 'offchain_receipt_not_found',
+            }, { status: 409 });
+          }
+          const verification = await this.verifyParticipationTicketReceipt(ticketReceipt);
+          if (!verification.ok) {
+            return Response.json({
+              error: 'off-chain receipt verification failed',
+              code: 'offchain_receipt_invalid',
+              verification,
+            }, { status: 409 });
+          }
+        }
+        if (hasOnchainProof) {
+          const displayName = this.normalizeStringField((userRaw as { displayName?: unknown }).displayName);
+          const recipient: TransferParty = proofFields.walletAddress
+            ? { type: 'wallet', id: proofFields.walletAddress }
+            : { type: 'user', id: userId };
+          const pii: Record<string, string> = { userId };
+          if (proofFields.walletAddress) pii.walletAddress = proofFields.walletAddress;
+          if (displayName) pii.displayName = displayName;
+          await this.appendAuditLog(
+            'USER_CLAIM',
+            { type: 'user', id: userId },
+            {
+              eventId,
+              status: 'already',
+              confirmationCode,
+              transfer: this.buildClaimTransferPayload({
+                eventId,
+                event,
+                recipient,
+                txSignature: proofFields.txSignature,
+                receiptPubkey: proofFields.receiptPubkey,
+              }),
+              pii,
+            },
+            eventId
+          );
+        }
         return Response.json({
           status: 'already',
           confirmationCode,
@@ -4390,7 +4456,9 @@ export class SchoolStore implements DurableObject {
 
       // Audit Log
       const displayName = this.normalizeStringField((userRaw as { displayName?: unknown }).displayName);
-      const walletAddress = this.normalizeStringField(body.walletAddress);
+      const walletAddress = hasOnchainProof
+        ? proofFields.walletAddress
+        : this.normalizeStringField(body.walletAddress);
       const recipient: TransferParty = walletAddress
         ? { type: 'wallet', id: walletAddress }
         : { type: 'user', id: userId };
@@ -4409,8 +4477,8 @@ export class SchoolStore implements DurableObject {
             eventId,
             event,
             recipient,
-            txSignature: body.txSignature,
-            receiptPubkey: body.receiptPubkey,
+            txSignature: hasOnchainProof ? proofFields.txSignature : body.txSignature,
+            receiptPubkey: hasOnchainProof ? proofFields.receiptPubkey : body.receiptPubkey,
           }),
           pii,
         },

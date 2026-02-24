@@ -58,4 +58,80 @@ describe('school API', () => {
     expect(second.body.success).toBe(true);
     expect(second.body.alreadyJoined).toBe(true);
   });
+
+  it('POST /api/events/:eventId/claim already with proof updates sync tx/receipt', async () => {
+    const registerRes = await request(app)
+      .post('/api/users/register')
+      .send({ userId: 'student_001', displayName: 'Student', pin: '1234' });
+    expect(registerRes.status).toBe(200);
+
+    const firstClaim = await request(app)
+      .post('/api/events/evt-001/claim')
+      .send({ userId: 'student_001', pin: '1234' });
+    expect(firstClaim.status).toBe(200);
+    expect(firstClaim.body.status).toBe('created');
+
+    const secondClaim = await request(app)
+      .post('/api/events/evt-001/claim')
+      .send({
+        userId: 'student_001',
+        pin: '1234',
+        walletAddress: 'wallet_001',
+        txSignature: 'txsig_001',
+        receiptPubkey: 'receipt_001',
+      });
+    expect(secondClaim.status).toBe(200);
+    expect(secondClaim.body.status).toBe('already');
+
+    const syncRes = await request(app)
+      .post('/api/users/tickets/sync')
+      .send({ userId: 'student_001', pin: '1234' });
+    expect(syncRes.status).toBe(200);
+    expect(Array.isArray(syncRes.body.tickets)).toBe(true);
+    expect(syncRes.body.tickets.length).toBeGreaterThanOrEqual(1);
+    const ticket = syncRes.body.tickets.find((t: { eventId: string }) => t.eventId === 'evt-001');
+    expect(ticket).toBeDefined();
+    expect(ticket.txSignature).toBe('txsig_001');
+    expect(ticket.receiptPubkey).toBe('receipt_001');
+  });
+
+  it('POST /api/events/:eventId/claim rejects on-chain proof before off-chain receipt', async () => {
+    const registerRes = await request(app)
+      .post('/api/users/register')
+      .send({ userId: 'student_002', displayName: 'Student2', pin: '1234' });
+    expect(registerRes.status).toBe(200);
+
+    const claimRes = await request(app)
+      .post('/api/events/evt-001/claim')
+      .send({
+        userId: 'student_002',
+        pin: '1234',
+        walletAddress: 'wallet_002',
+        txSignature: 'txsig_002',
+        receiptPubkey: 'receipt_002',
+      });
+    expect(claimRes.status).toBe(409);
+    expect(claimRes.body.code).toBe('offchain_receipt_required');
+  });
+
+  it('POST /api/audit/receipts/verify-code returns ok for issued confirmation code', async () => {
+    const registerRes = await request(app)
+      .post('/api/users/register')
+      .send({ userId: 'student_003', displayName: 'Student3', pin: '1234' });
+    expect(registerRes.status).toBe(200);
+
+    const claimRes = await request(app)
+      .post('/api/events/evt-001/claim')
+      .send({ userId: 'student_003', pin: '1234' });
+    expect(claimRes.status).toBe(200);
+    const confirmationCode = claimRes.body?.confirmationCode as string | undefined;
+    expect(typeof confirmationCode).toBe('string');
+
+    const verifyRes = await request(app)
+      .post('/api/audit/receipts/verify-code')
+      .send({ eventId: 'evt-001', confirmationCode });
+    expect(verifyRes.status).toBe(200);
+    expect(verifyRes.body.ok).toBe(true);
+    expect(verifyRes.body.verification?.ok).toBe(true);
+  });
 });

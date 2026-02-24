@@ -661,6 +661,11 @@ fn verify_and_record_pop_proof<'info>(
     );
 
     let message = parse_pop_message(&message_bytes)?;
+    // オフチェーン参加レシートのコミット（audit_hash）を含む v2 形式のみ受け付ける。
+    require!(
+        message.version == POP_MESSAGE_VERSION_V2,
+        ErrorCode::PopReceiptCommitmentRequired
+    );
     require!(message.grant == accounts.grant.key(), ErrorCode::PopProofGrantMismatch);
     require!(
         message.claimer == accounts.claimer.key(),
@@ -671,12 +676,10 @@ fn verify_and_record_pop_proof<'info>(
         ErrorCode::PopProofPeriodMismatch
     );
 
-    if message.version == POP_MESSAGE_VERSION_V2 {
-        require!(
-            message.audit_hash != [0u8; 32],
-            ErrorCode::PopAuditHashMissing
-        );
-    }
+    require!(
+        message.audit_hash != [0u8; 32],
+        ErrorCode::PopAuditHashMissing
+    );
 
     let expected_entry_hash = pop_entry_hash(
         message.version,
@@ -1005,6 +1008,8 @@ pub enum ErrorCode {
     PopGenesisMismatch,
     #[msg("PoP state grant mismatch")]
     PopStateGrantMismatch,
+    #[msg("PoP proof must include off-chain receipt commitment (v2)")]
+    PopReceiptCommitmentRequired,
     #[msg("PoP audit hash is missing")]
     PopAuditHashMissing,
 }

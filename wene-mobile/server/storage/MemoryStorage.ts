@@ -17,6 +17,8 @@ export interface ClaimRecord {
   joinToken?: string;
   userId?: string;
   confirmationCode?: string;
+  txSignature?: string;
+  receiptPubkey?: string;
   joinedAt: number;
 }
 
@@ -50,7 +52,25 @@ export interface SchoolStorage {
   addUser(user: UserRecord): void;
   hasUser(userId: string): boolean;
   getUser(userId: string): UserRecord | null;
-  addUserClaim(eventId: string, userId: string, confirmationCode: string): void;
+  addUserClaim(
+    eventId: string,
+    userId: string,
+    confirmationCode: string,
+    proof?: {
+      walletAddress?: string;
+      txSignature?: string;
+      receiptPubkey?: string;
+    }
+  ): void;
+  updateUserClaimOnchainProof(
+    eventId: string,
+    userId: string,
+    proof: {
+      walletAddress: string;
+      txSignature: string;
+      receiptPubkey: string;
+    }
+  ): boolean;
   hasClaimed(eventId: string, userId: string, claimIntervalDays?: number, maxClaimsPerInterval?: number | null): boolean;
   getUserClaims(userId: string): ClaimRecord[];
 }
@@ -94,13 +114,27 @@ export function createMemoryStorage(): SchoolStorage {
     getUser(userId: string) {
       return users.find((u) => u.id === userId) ?? null;
     },
-    addUserClaim(eventId: string, userId: string, confirmationCode: string) {
+    addUserClaim(eventId: string, userId: string, confirmationCode: string, proof) {
       claims.push({
         eventId,
         userId,
         confirmationCode,
+        walletAddress: proof?.walletAddress,
+        txSignature: proof?.txSignature,
+        receiptPubkey: proof?.receiptPubkey,
         joinedAt: Date.now(),
       });
+    },
+    updateUserClaimOnchainProof(eventId: string, userId: string, proof) {
+      for (let i = claims.length - 1; i >= 0; i -= 1) {
+        const claim = claims[i];
+        if (claim.eventId !== eventId || claim.userId !== userId) continue;
+        claim.walletAddress = proof.walletAddress;
+        claim.txSignature = proof.txSignature;
+        claim.receiptPubkey = proof.receiptPubkey;
+        return true;
+      }
+      return false;
     },
     hasClaimed(eventId: string, userId: string, claimIntervalDays: number = 30, maxClaimsPerInterval: number | null = 1): boolean {
       if (maxClaimsPerInterval === null) {

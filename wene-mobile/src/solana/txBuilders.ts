@@ -29,7 +29,7 @@ import { DEVNET_GRANT_CONFIG } from './devnetConfig';
 import { RPC_URL } from './singleton';
 
 const CLAIM_GRANT_DISCRIMINATOR = Buffer.from([125, 134, 233, 135, 82, 18, 177, 8]);
-const SUPPORTED_POP_PROOF_MESSAGE_VERSIONS = new Set<number>([1, 2]);
+const SUPPORTED_POP_PROOF_MESSAGE_VERSIONS = new Set<number>([2]);
 
 interface PopClaimProofResponse {
   signerPubkey: string;
@@ -70,6 +70,7 @@ function getApiBaseUrl(): string {
 
 async function fetchPopClaimProof(params: {
   eventId: string;
+  confirmationCode: string;
   grant: PublicKey;
   claimer: PublicKey;
   periodIndex: bigint;
@@ -80,6 +81,7 @@ async function fetchPopClaimProof(params: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       eventId: params.eventId,
+      confirmationCode: params.confirmationCode,
       grant: params.grant.toBase58(),
       claimer: params.claimer.toBase58(),
       periodIndex: params.periodIndex.toString(),
@@ -380,8 +382,13 @@ export async function buildClaimTx(
   let messageBytes: Buffer | null = null;
   let signatureBytes: Buffer | null = null;
   if (usePopProof) {
+    const confirmationCode = typeof params.code === 'string' ? params.code.trim() : '';
+    if (!confirmationCode) {
+      throw new Error('オンチェーン受け取りにはオフチェーン確認コードが必要です');
+    }
     popProof = await fetchPopClaimProof({
       eventId: campaignId,
+      confirmationCode,
       grant: grantPda,
       claimer: recipientPubkey,
       periodIndex,

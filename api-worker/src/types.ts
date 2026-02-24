@@ -69,6 +69,7 @@ export interface ClaimBody {
 
 export interface PopProofBody {
   eventId?: string;
+  confirmationCode?: string;
   grant?: string;
   claimer?: string;
   periodIndex?: string | number;

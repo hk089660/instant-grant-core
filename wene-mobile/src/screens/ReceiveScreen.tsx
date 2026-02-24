@@ -986,13 +986,6 @@ ${st.balanceLamports ?? 'null'}
               </Card>
             ) : null}
 
-            {Platform.OS === 'web' && (
-              <Card style={styles.pcNoticeCard}>
-                <AppText variant="caption" style={styles.pcNoticeText}>
-                  生徒用は専用アプリ（iOS TestFlight / Android APK）をご利用ください。{'\n'}Webは管理者・補助用です。
-                </AppText>
-              </Card>
-            )}
             {(!walletPubkey || !phantomSession || !phantomEncryptionPublicKey) && !(isClaimed || state === 'Claimed') ? (
               <Card style={styles.debugCard}>
                 <AppText variant="caption" style={styles.debugLabel}>
@@ -1227,14 +1220,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: theme.colors.textTertiary,
     marginBottom: theme.spacing.xs,
-  },
-  pcNoticeCard: {
-    backgroundColor: theme.colors.gray50,
-    marginBottom: theme.spacing.md,
-  },
-  pcNoticeText: {
-    color: theme.colors.textSecondary,
-    textAlign: 'center',
   },
   claimedActions: {
     marginTop: theme.spacing.md,

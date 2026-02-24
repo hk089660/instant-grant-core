@@ -9,6 +9,7 @@ import { setCompleted } from '../../data/participationStore';
 import { schoolRoutes } from '../../lib/schoolRoutes';
 import { useEventIdFromParams } from '../../hooks/useEventIdFromParams';
 import { useRecipientTicketStore } from '../../store/recipientTicketStore';
+import { useRecipientStore } from '../../store/recipientStore';
 import { useAuth } from '../../contexts/AuthContext';
 import { getSchoolDeps } from '../../api/createSchoolDeps';
 import type { SchoolEvent } from '../../types/school';
@@ -24,6 +25,7 @@ function shortenCode(value: string, head = 8, tail = 8): string {
 export const UserSuccessScreen: React.FC = () => {
   const router = useRouter();
   const { userId } = useAuth();
+  const walletPubkey = useRecipientStore((s) => s.walletPubkey);
   const { eventId: targetEventId, isValid } = useEventIdFromParams({ redirectOnInvalid: true });
   const {
     tx,
@@ -81,6 +83,7 @@ export const UserSuccessScreen: React.FC = () => {
   const resolvedPopEntryHash = popEntryHash ?? storedTicket?.popEntryHash;
   const resolvedPopAuditHash = popAuditHash ?? storedTicket?.popAuditHash;
   const resolvedPopSigner = popSigner ?? storedTicket?.popSigner;
+  const isWalletConnected = Boolean(walletPubkey);
   const checkScale = useRef(new Animated.Value(0.7)).current;
   const checkOpacity = useRef(new Animated.Value(0)).current;
   const ringScale = useRef(new Animated.Value(0.75)).current;
@@ -199,6 +202,19 @@ export const UserSuccessScreen: React.FC = () => {
   const explorerTxUrl = resolvedTx ? `https://explorer.solana.com/tx/${resolvedTx}?cluster=devnet` : null;
   const explorerReceiptUrl = resolvedReceipt ? `https://explorer.solana.com/address/${resolvedReceipt}?cluster=devnet` : null;
   const explorerMintUrl = resolvedMintAddress ? `https://explorer.solana.com/address/${resolvedMintAddress}?cluster=devnet` : null;
+  const hasOffchainReceipt = Boolean(
+    resolvedConfirmationCode || resolvedAuditReceiptId || resolvedAuditReceiptHash
+  );
+  const hasOnchainReceipt = Boolean(resolvedTx && resolvedReceipt);
+  const eventSupportsOnchainReceive = Boolean(
+    event?.solanaMint && event?.solanaAuthority && event?.solanaGrantId
+  );
+  const showOnchainReceiveCard = Boolean(
+    targetEventId &&
+    hasOffchainReceipt &&
+    !hasOnchainReceipt &&
+    eventSupportsOnchainReceive
+  );
 
   const handleCopyPopProof = useCallback(async () => {
     const payload = [
@@ -228,6 +244,15 @@ export const UserSuccessScreen: React.FC = () => {
       successMessage: '監査レシート情報をコピーしました',
     });
   }, [targetEventId, resolvedConfirmationCode, resolvedAuditReceiptId, resolvedAuditReceiptHash]);
+
+  const handleNavigateOnchainReceive = useCallback(() => {
+    if (!targetEventId) return;
+    router.push(schoolRoutes.confirm(targetEventId) as any);
+  }, [targetEventId, router]);
+
+  const handleConnectWallet = useCallback(() => {
+    router.push('/wallet' as any);
+  }, [router]);
 
   if (!isValid) return null;
 
@@ -277,6 +302,28 @@ export const UserSuccessScreen: React.FC = () => {
             <AppText variant="h3">{event.title}</AppText>
             <AppText variant="caption" style={styles.eventMeta}>{event.datetime}</AppText>
             <AppText variant="caption" style={styles.eventMeta}>主催: {event.host}</AppText>
+          </Card>
+        )}
+
+        {showOnchainReceiveCard && (
+          <Card style={styles.card}>
+            <AppText variant="caption" style={styles.label}>
+              オンチェーン受け取り
+            </AppText>
+            <AppText variant="small" style={styles.codeHint}>
+              この参加券はオフチェーン記録済みです。ウォレット受け取りを実行するとオンチェーンにも反映されます。
+            </AppText>
+            <Button
+              title={isWalletConnected ? 'オンチェーンで受け取る' : 'Walletを接続する'}
+              onPress={isWalletConnected ? handleNavigateOnchainReceive : handleConnectWallet}
+              variant={isWalletConnected ? 'primary' : 'secondary'}
+              style={styles.onchainReceiveButton}
+            />
+            {isWalletConnected ? (
+              <AppText variant="small" style={styles.codeHint}>
+                次の画面でPINを入力して受け取りを確定してください。
+              </AppText>
+            ) : null}
           </Card>
         )}
 
@@ -560,5 +607,9 @@ const styles = StyleSheet.create({
   copyButton: {
     marginTop: theme.spacing.sm,
     minWidth: 160,
+  },
+  onchainReceiveButton: {
+    marginTop: theme.spacing.sm,
+    minWidth: 220,
   },
 });

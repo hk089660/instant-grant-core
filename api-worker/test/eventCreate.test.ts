@@ -244,12 +244,46 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     expect(createRes.status).toBe(201);
     const created = (await createRes.json()) as { id: string };
 
+    const registerRes = await store.fetch(
+      new Request('https://example.com/api/users/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: 'pop-user',
+          displayName: 'PoP User',
+          pin: '1234',
+        }),
+      })
+    );
+    expect(registerRes.status).toBe(200);
+    const registered = (await registerRes.json()) as { userId?: string };
+    expect(typeof registered.userId).toBe('string');
+
+    const claimRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(created.id)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: registered.userId,
+          pin: '1234',
+        }),
+      })
+    );
+    expect(claimRes.status).toBe(200);
+    const claimBody = (await claimRes.json()) as {
+      confirmationCode?: string;
+      ticketReceipt?: { receiptHash?: string };
+    };
+    expect(typeof claimBody.confirmationCode).toBe('string');
+    expect(claimBody.ticketReceipt?.receiptHash).toMatch(/^[0-9a-f]{64}$/);
+
     const proofRes = await store.fetch(
       new Request('https://example.com/v1/school/pop-proof', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           eventId: created.id,
+          confirmationCode: claimBody.confirmationCode,
           grant: 'So11111111111111111111111111111111111111112',
           claimer: '11111111111111111111111111111111',
           periodIndex: '0',
@@ -271,6 +305,7 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     expect(typeof proof.messageBase64).toBe('string');
     expect(typeof proof.signatureBase64).toBe('string');
     expect(proof.auditHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(proof.auditHash).toBe(claimBody.ticketReceipt?.receiptHash);
     expect(proof.entryHash).toMatch(/^[0-9a-f]{64}$/);
     expect(proof.prevHash).toMatch(/^[0-9a-f]{64}$/);
     expect(proof.streamPrevHash).toMatch(/^[0-9a-f]{64}$/);

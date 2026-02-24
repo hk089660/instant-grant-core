@@ -58,6 +58,23 @@ export interface UserTicketSyncResponse {
   tickets: UserTicketSyncItem[];
 }
 
+export interface VerifyTicketReceiptByCodeResponse {
+  ok: boolean;
+  checkedAt?: string;
+  eventId?: string;
+  confirmationCode?: string;
+  receipt?: ParticipationTicketReceipt;
+  verification?: {
+    ok: boolean;
+    checkedAt?: string;
+    errors?: Array<{
+      code?: string;
+      message?: string;
+      field?: string;
+    }>;
+  };
+}
+
 export async function registerUser(userId: string, displayName: string, pin: string): Promise<RegisterResponse> {
   const base = getBaseUrl();
   const url = `${base}/api/users/register`;
@@ -91,4 +108,13 @@ export async function claimEventWithUser(
     txSignature: proof?.txSignature,
     receiptPubkey: proof?.receiptPubkey,
   });
+}
+
+export async function verifyTicketReceiptByCode(
+  eventId: string,
+  confirmationCode: string
+): Promise<VerifyTicketReceiptByCodeResponse> {
+  const base = getBaseUrl();
+  const url = `${base}/api/audit/receipts/verify-code`;
+  return httpPost<VerifyTicketReceiptByCodeResponse>(url, { eventId, confirmationCode });
 }

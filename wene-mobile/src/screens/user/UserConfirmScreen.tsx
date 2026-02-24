@@ -9,7 +9,7 @@ import { setStarted } from '../../data/participationStore';
 import { schoolRoutes } from '../../lib/schoolRoutes';
 import { useEventIdFromParams } from '../../hooks/useEventIdFromParams';
 import { useAuth } from '../../contexts/AuthContext';
-import { claimEventWithUser, verifyUserPin } from '../../api/userApi';
+import { claimEventWithUser, verifyTicketReceiptByCode, verifyUserPin } from '../../api/userApi';
 import { HttpError } from '../../api/http/httpClient';
 import { getSchoolDeps } from '../../api/createSchoolDeps';
 import { useRecipientStore } from '../../store/recipientStore';
@@ -129,7 +129,7 @@ export const UserConfirmScreen: React.FC = () => {
     }
   }, []);
 
-  const runOnchainClaim = useCallback(async (): Promise<{
+  const runOnchainClaim = useCallback(async (confirmationCode: string): Promise<{
     txSignature: string;
     receiptPubkey: string;
     mint: string;
@@ -148,6 +148,7 @@ export const UserConfirmScreen: React.FC = () => {
     let forceLegacyClaim = false;
     let built = await buildClaimTx({
       campaignId: targetEventId,
+      code: confirmationCode,
       recipientPubkey,
       solanaMint: event.solanaMint,
       solanaAuthority: event.solanaAuthority,
@@ -205,6 +206,7 @@ export const UserConfirmScreen: React.FC = () => {
           retriedForBlockhash = true;
           built = await buildClaimTx({
             campaignId: targetEventId,
+            code: confirmationCode,
             recipientPubkey,
             solanaMint: event.solanaMint,
             solanaAuthority: event.solanaAuthority,
@@ -220,6 +222,7 @@ export const UserConfirmScreen: React.FC = () => {
           }
           built = await buildClaimTx({
             campaignId: targetEventId,
+            code: confirmationCode,
             recipientPubkey,
             solanaMint: event.solanaMint,
             solanaAuthority: event.solanaAuthority,
@@ -309,7 +312,28 @@ export const UserConfirmScreen: React.FC = () => {
       // 1) PIN 検証だけ先に行う（off-chain claim の副作用を先に発生させない）
       await verifyUserPin(userId, pinVal);
 
-      // 2) on-chain claim（失敗時は off-chain 判定へフォールバック）
+      // 2) 先に off-chain で参加券レシートを確定し、verify-code で検証する
+      let result: Awaited<ReturnType<typeof claimEventWithUser>> | null = null;
+      result = await claimEventWithUser(targetEventId, userId, pinVal);
+
+      const confirmationCode = result.confirmationCode?.trim();
+      if (!confirmationCode) {
+        throw new Error('参加レシートの確認コードが取得できませんでした');
+      }
+
+      const receiptCheck = await verifyTicketReceiptByCode(targetEventId, confirmationCode);
+      const receiptCheckOk = receiptCheck.ok && (receiptCheck.verification?.ok ?? true);
+      if (!receiptCheckOk) {
+        throw new Error('オフチェーン参加レシートの検証に失敗しました');
+      }
+      if (!result.ticketReceipt && receiptCheck.receipt) {
+        result = {
+          ...result,
+          ticketReceipt: receiptCheck.receipt,
+        };
+      }
+
+      // 3) on-chain claim（レシート検証済みの場合のみ許可）
       let txSignature: string | undefined;
       let receiptPubkey: string | undefined;
       let distributedMint: string | undefined;
@@ -318,8 +342,8 @@ export const UserConfirmScreen: React.FC = () => {
       let popSigner: string | undefined;
       let tokenReflectedInWallet = false;
       let onchainBlockedByPeriod = false;
-      let result: Awaited<ReturnType<typeof claimEventWithUser>> | null = null;
       const shouldAttemptOnchain = Boolean(
+        receiptCheckOk &&
         walletReady &&
         walletPubkey &&
         eventHasOnchainConfig &&
@@ -332,7 +356,7 @@ export const UserConfirmScreen: React.FC = () => {
           throw new Error('Phantomウォレットを接続してください');
         }
         try {
-          const onchain = await runOnchainClaim();
+          const onchain = await runOnchainClaim(confirmationCode);
           txSignature = onchain.txSignature;
           receiptPubkey = onchain.receiptPubkey;
           distributedMint = onchain.mint;
@@ -340,6 +364,19 @@ export const UserConfirmScreen: React.FC = () => {
           popAuditHash = onchain.popAuditHash;
           popSigner = onchain.popSigner;
           tokenReflectedInWallet = await waitForMintReflection(onchain.mint, ownerWallet);
+
+          try {
+            result = await claimEventWithUser(targetEventId, userId, pinVal, {
+              walletAddress: ownerWallet,
+              txSignature: onchain.txSignature,
+              receiptPubkey: onchain.receiptPubkey,
+            });
+          } catch (syncError) {
+            if (syncError instanceof HttpError && syncError.status === 401) {
+              throw syncError;
+            }
+            console.warn('[UserConfirmScreen] on-chain proof sync failed:', syncError);
+          }
         } catch (onchainError) {
           const storedTicket = getTicketByEventId(targetEventId);
           const onchainMsg = onchainError instanceof Error ? onchainError.message : String(onchainError);
@@ -373,8 +410,9 @@ export const UserConfirmScreen: React.FC = () => {
           }
         }
       } else if (__DEV__) {
-        console.log('[UserConfirmScreen] on-chain claim skipped (off-chain only mode)', {
+        console.log('[UserConfirmScreen] on-chain claim skipped (off-chain receipt gate / off-chain only mode)', {
           eventId: targetEventId,
+          receiptCheckOk,
           walletReady,
           hasWalletPubkey: Boolean(walletPubkey),
           hasOnchainConfig: Boolean(event.solanaMint && event.solanaAuthority && event.solanaGrantId),
@@ -385,25 +423,6 @@ export const UserConfirmScreen: React.FC = () => {
           claimIntervalDays,
           maxClaimsPerInterval,
         });
-      }
-
-      // 3) off-chain claim 記録（on-chain 成功時のみ一時障害を許容）
-      if (!result) {
-        try {
-          result = await claimEventWithUser(targetEventId, userId, pinVal, {
-            walletAddress: walletPubkey ?? undefined,
-            txSignature,
-            receiptPubkey,
-          });
-        } catch (syncError) {
-          if (syncError instanceof HttpError && syncError.status === 401) {
-            throw syncError;
-          }
-          if (!txSignature) {
-            throw syncError;
-          }
-          console.warn('[UserConfirmScreen] off-chain claim sync failed after on-chain success:', syncError);
-        }
       }
 
       // 標準ルール時は on-chain 側 already と off-chain 判定の不整合を許容しない
@@ -449,6 +468,21 @@ export const UserConfirmScreen: React.FC = () => {
           return;
         }
       }
+      if (e instanceof HttpError) {
+        const body = e.body as any;
+        if (e.status === 404 && typeof body?.error === 'string' && body.error.includes('ticket receipt')) {
+          setError('オフチェーン参加レシートが見つかりません。先に参加登録を完了してから再試行してください');
+          return;
+        }
+        if (e.status === 409 && body?.code === 'offchain_receipt_required') {
+          setError('オフチェーン参加レシートの検証が完了してからオンチェーン受け取りを実行してください');
+          return;
+        }
+        if (e.status === 409 && body?.code === 'offchain_receipt_invalid') {
+          setError('オフチェーン参加レシートの検証に失敗したため、オンチェーン配布は許可されません');
+          return;
+        }
+      }
 
       if (e && typeof e === 'object' && 'message' in e) {
         const msg = String((e as { message: string }).message);
@@ -470,6 +504,8 @@ export const UserConfirmScreen: React.FC = () => {
           setError('Phantom署名がキャンセルされました');
         } else if (msg.includes('タイムアウト')) {
           setError('Phantom署名がタイムアウトしました。Phantomからこのアプリに戻って再試行してください。');
+        } else if (msg.includes('レシート') || msg.toLowerCase().includes('receipt')) {
+          setError('オフチェーン参加レシートの検証に失敗したため、オンチェーン配布は実行できませんでした');
         } else {
           setError(msg);
         }

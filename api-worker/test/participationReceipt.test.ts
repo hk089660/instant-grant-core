@@ -129,6 +129,18 @@ describe('participation audit receipt', () => {
   it('syncs user tickets on login with off-chain and on-chain proof fields', async () => {
     const { eventId, userId } = await prepareEventAndUser();
 
+    const offchainClaimRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(eventId)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          pin: '1234',
+        }),
+      })
+    );
+    expect(offchainClaimRes.status).toBe(200);
+
     const claimRes = await store.fetch(
       new Request(`https://example.com/api/events/${encodeURIComponent(eventId)}/claim`, {
         method: 'POST',
@@ -136,8 +148,9 @@ describe('participation audit receipt', () => {
         body: JSON.stringify({
           userId,
           pin: '1234',
-          txSignature: 'tx-sync-001',
-          receiptPubkey: 'receipt-sync-001',
+          walletAddress: '4'.repeat(32),
+          txSignature: '5'.repeat(64),
+          receiptPubkey: '6'.repeat(32),
         }),
       })
     );
@@ -146,6 +159,7 @@ describe('participation audit receipt', () => {
       confirmationCode: string;
       ticketReceipt?: ParticipationTicketReceipt;
     };
+    expect(claimBody.confirmationCode).toBeDefined();
 
     const syncRes = await store.fetch(
       new Request('https://example.com/api/users/tickets/sync', {
@@ -179,8 +193,29 @@ describe('participation audit receipt', () => {
     expect(syncedTicket?.confirmationCode).toBe(claimBody.confirmationCode);
     expect(syncedTicket?.auditReceiptId).toBe(claimBody.ticketReceipt?.receiptId);
     expect(syncedTicket?.auditReceiptHash).toBe(claimBody.ticketReceipt?.receiptHash);
-    expect(syncedTicket?.txSignature).toBe('tx-sync-001');
-    expect(syncedTicket?.receiptPubkey).toBe('receipt-sync-001');
+    expect(syncedTicket?.txSignature).toBe('5'.repeat(64));
+    expect(syncedTicket?.receiptPubkey).toBe('6'.repeat(32));
+  });
+
+  it('rejects on-chain proof before off-chain receipt is issued', async () => {
+    const { eventId, userId } = await prepareEventAndUser();
+
+    const claimRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(eventId)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          pin: '1234',
+          walletAddress: '4'.repeat(32),
+          txSignature: '5'.repeat(64),
+          receiptPubkey: '6'.repeat(32),
+        }),
+      })
+    );
+    expect(claimRes.status).toBe(409);
+    const body = (await claimRes.json()) as { code?: string };
+    expect(body.code).toBe('offchain_receipt_required');
   });
 
   it('returns ticket receipt on /v1/school/claims and supports verify-by-code', async () => {

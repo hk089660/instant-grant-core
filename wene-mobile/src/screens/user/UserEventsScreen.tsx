@@ -3,7 +3,7 @@ import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
-import { AppText, Button, EventRow, StatusDot } from '../../ui/components';
+import { AppText, Button, EventRow, Loading, StatusDot } from '../../ui/components';
 import { theme } from '../../ui/theme';
 import { useRecipientTicketStore } from '../../store/recipientTicketStore';
 import { getSchoolDeps } from '../../api/createSchoolDeps';
@@ -14,27 +14,26 @@ export const UserEventsScreen: React.FC = () => {
   const router = useRouter();
   const [events, setEvents] = useState<SchoolEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
+  const [manualLoading, setManualLoading] = useState(false);
   const { tickets, loadTickets } = useRecipientTicketStore();
+  const isLoading = eventsLoading || manualLoading;
+
+  const loadEventList = useCallback(async () => {
+    setEventsLoading(true);
+    try {
+      const items = await getSchoolDeps().eventProvider.getAll();
+      setEvents(items);
+    } catch {
+      setEvents([]);
+    } finally {
+      setEventsLoading(false);
+    }
+  }, []);
 
   // イベント一覧を API から取得
   useEffect(() => {
-    let cancelled = false;
-    setEventsLoading(true);
-    getSchoolDeps()
-      .eventProvider.getAll()
-      .then((items) => {
-        if (!cancelled) setEvents(items);
-      })
-      .catch(() => {
-        if (!cancelled) setEvents([]);
-      })
-      .finally(() => {
-        if (!cancelled) setEventsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    loadEventList().catch(() => { });
+  }, [loadEventList]);
 
   // フォーカス時にローカルチケットを再読み込み
   useFocusEffect(
@@ -42,6 +41,19 @@ export const UserEventsScreen: React.FC = () => {
       loadTickets().catch(() => { });
     }, [loadTickets])
   );
+
+  const handleReloadTickets = useCallback(async () => {
+    if (isLoading) return;
+    setManualLoading(true);
+    try {
+      await Promise.all([
+        loadEventList(),
+        loadTickets(),
+      ]);
+    } finally {
+      setManualLoading(false);
+    }
+  }, [isLoading, loadEventList, loadTickets]);
 
   const joinedEvents = tickets.map((ticket) => {
     const event = events.find((item) => item.id === ticket.eventId);
@@ -94,15 +106,28 @@ export const UserEventsScreen: React.FC = () => {
           variant="primary"
           style={styles.mainButton}
         />
+        <Button
+          title={isLoading ? '参加券を読み込み中…' : '参加券を再読み込み'}
+          onPress={handleReloadTickets}
+          variant="secondary"
+          loading={isLoading}
+          disabled={isLoading}
+          style={styles.reloadButton}
+        />
+        {isLoading ? (
+          <View style={styles.loadingWrap}>
+            <Loading message="参加券一覧を更新しています…" />
+          </View>
+        ) : null}
 
         {/* 参加履歴 */}
         <View style={styles.section}>
           <AppText variant="h3">参加済み（{joinedEvents.length}件）</AppText>
           {joinedEvents.length === 0 ? (
-            eventsLoading ? (
-              <AppText variant="caption" style={styles.emptyText}>
-                読み込み中…
-              </AppText>
+            isLoading ? (
+              <View style={styles.inlineLoadingWrap}>
+                <Loading message="読み込み中…" />
+              </View>
             ) : (
               <AppText variant="caption" style={styles.emptyText}>
                 参加済みのイベントはありません
@@ -147,7 +172,16 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.lg,
   },
   mainButton: {
-    marginBottom: theme.spacing.lg,
+    marginBottom: theme.spacing.sm,
+  },
+  reloadButton: {
+    marginBottom: theme.spacing.sm,
+  },
+  loadingWrap: {
+    marginBottom: theme.spacing.md,
+  },
+  inlineLoadingWrap: {
+    marginTop: theme.spacing.sm,
   },
   section: {
     marginBottom: theme.spacing.lg,

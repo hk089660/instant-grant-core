@@ -151,6 +151,8 @@ export function createApiRouter(deps: ApiDeps): Router {
                     claimedAt: claim.joinedAt,
                     confirmationCode: claim.confirmationCode,
                     mint: event?.solanaMint,
+                    txSignature: claim.txSignature,
+                    receiptPubkey: claim.receiptPubkey,
                 };
             });
 
@@ -160,15 +162,54 @@ export function createApiRouter(deps: ApiDeps): Router {
         });
     });
 
+    // POST /api/audit/receipts/verify-code
+    router.post('/audit/receipts/verify-code', async (req: Request, res: Response) => {
+        const body = req.body as { eventId?: unknown; confirmationCode?: unknown };
+        const eventId = typeof body?.eventId === 'string' ? body.eventId.trim() : '';
+        const confirmationCode = typeof body?.confirmationCode === 'string' ? body.confirmationCode.trim() : '';
+        if (!eventId || !confirmationCode) {
+            res.status(400).json({ error: 'eventId and confirmationCode are required' });
+            return;
+        }
+
+        const claim = storage
+            .getClaims(eventId)
+            .find((item) => item.confirmationCode === confirmationCode);
+        if (!claim) {
+            res.status(404).json({ error: 'ticket receipt not found' });
+            return;
+        }
+
+        res.json({
+            ok: true,
+            checkedAt: new Date().toISOString(),
+            eventId,
+            confirmationCode,
+            verification: {
+                ok: true,
+                checkedAt: new Date().toISOString(),
+                errors: [],
+            },
+        });
+    });
+
     // POST /api/events/:eventId/claim
     router.post('/events/:eventId/claim', async (req: Request, res: Response) => {
         const eventId = req.params.eventId;
         const body = req.body;
         const userId = normalizeUserId(body?.userId);
         const pin = typeof body?.pin === 'string' ? body.pin : '';
+        const walletAddress = typeof body?.walletAddress === 'string' ? body.walletAddress.trim() : '';
+        const txSignature = typeof body?.txSignature === 'string' ? body.txSignature.trim() : '';
+        const receiptPubkey = typeof body?.receiptPubkey === 'string' ? body.receiptPubkey.trim() : '';
+        const hasOnchainProof = Boolean(walletAddress || txSignature || receiptPubkey);
 
         if (!userId || !pin) {
             res.status(400).json({ error: 'missing params' });
+            return;
+        }
+        if (hasOnchainProof && (!walletAddress || !txSignature || !receiptPubkey)) {
+            res.status(400).json({ error: 'on-chain claim proof required' });
             return;
         }
 
@@ -200,17 +241,42 @@ export function createApiRouter(deps: ApiDeps): Router {
             ? null
             : (event.maxClaimsPerInterval ?? 1);
         const already = storage.hasClaimed(eventId, userId, claimIntervalDays, maxClaimsPerInterval);
+        if (!already && hasOnchainProof) {
+            res.status(409).json({
+                error: 'on-chain claim requires off-chain receipt verification first',
+                code: 'offchain_receipt_required',
+            });
+            return;
+        }
         if (already) {
             // 既存のレコードから confirmationCode を探す
             const claims = storage.getUserClaims(userId);
             const rec = claims.find((c) => c.eventId === eventId);
             const confirmationCode = rec?.confirmationCode ?? genConfirmationCode();
+            if (hasOnchainProof) {
+                storage.updateUserClaimOnchainProof(eventId, userId, {
+                    walletAddress,
+                    txSignature,
+                    receiptPubkey,
+                });
+            }
             res.json({ status: 'already', confirmationCode });
             return;
         }
 
         const confirmationCode = genConfirmationCode();
-        storage.addUserClaim(eventId, userId, confirmationCode);
+        storage.addUserClaim(
+            eventId,
+            userId,
+            confirmationCode,
+            hasOnchainProof
+                ? {
+                    walletAddress,
+                    txSignature,
+                    receiptPubkey,
+                }
+                : undefined
+        );
         res.json({ status: 'created', confirmationCode });
     });
 
