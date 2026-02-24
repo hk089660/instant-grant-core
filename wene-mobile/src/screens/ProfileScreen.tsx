@@ -8,7 +8,6 @@ import { AppText, Button, Card, CategoryTabs, BalanceList } from '../ui/componen
 import { theme } from '../ui/theme';
 import { useRecipientStore } from '../store/recipientStore';
 import { useRecipientTicketStore } from '../store/recipientTicketStore';
-import { usePhantomStore } from '../store/phantomStore';
 import { useAuth } from '../contexts/AuthContext';
 import { getConnection } from '../solana/singleton';
 import { formatMintShort, getTokenBalances } from '../solana/wallet';
@@ -23,7 +22,6 @@ export const ProfileScreen: React.FC = () => {
     const router = useRouter();
     const { walletPubkey } = useRecipientStore();
     const { tickets, isLoading: ticketsStoreLoading, loadTickets } = useRecipientTicketStore();
-    const { clearPhantomKeys } = usePhantomStore();
     const { displayName: authDisplayName, clearUser } = useAuth();
     const [activeTab, setActiveTab] = useState('profile');
     const [ticketItems, setTicketItems] = useState<BalanceItem[]>([]);
@@ -93,8 +91,7 @@ export const ProfileScreen: React.FC = () => {
     }, [activeTab, walletPubkey]);
 
     const handleLogout = async () => {
-        await clearPhantomKeys();
-        clearUser();
+        await clearUser();
         router.replace('/');
     };
 

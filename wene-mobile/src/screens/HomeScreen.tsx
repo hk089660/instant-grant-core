@@ -28,7 +28,7 @@ export const HomeScreen: React.FC = () => {
   };
 
   const handleLogout = () => {
-    clearUser();
+    void clearUser();
   };
 
   return (

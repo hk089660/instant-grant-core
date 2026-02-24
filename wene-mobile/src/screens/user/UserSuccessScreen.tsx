@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, StyleSheet, Linking, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { View, StyleSheet, Linking, TouchableOpacity, Animated, Easing } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { AppText, Button, Card } from '../../ui/components';
@@ -9,6 +9,7 @@ import { setCompleted } from '../../data/participationStore';
 import { schoolRoutes } from '../../lib/schoolRoutes';
 import { useEventIdFromParams } from '../../hooks/useEventIdFromParams';
 import { useRecipientTicketStore } from '../../store/recipientTicketStore';
+import { useAuth } from '../../contexts/AuthContext';
 import { getSchoolDeps } from '../../api/createSchoolDeps';
 import type { SchoolEvent } from '../../types/school';
 import { copyTextWithFeedback } from '../../utils/copyText';
@@ -22,6 +23,7 @@ function shortenCode(value: string, head = 8, tail = 8): string {
 
 export const UserSuccessScreen: React.FC = () => {
   const router = useRouter();
+  const { userId } = useAuth();
   const { eventId: targetEventId, isValid } = useEventIdFromParams({ redirectOnInvalid: true });
   const {
     tx,
@@ -79,11 +81,77 @@ export const UserSuccessScreen: React.FC = () => {
   const resolvedPopEntryHash = popEntryHash ?? storedTicket?.popEntryHash;
   const resolvedPopAuditHash = popAuditHash ?? storedTicket?.popAuditHash;
   const resolvedPopSigner = popSigner ?? storedTicket?.popSigner;
+  const checkScale = useRef(new Animated.Value(0.7)).current;
+  const checkOpacity = useRef(new Animated.Value(0)).current;
+  const ringScale = useRef(new Animated.Value(0.75)).current;
+  const ringOpacity = useRef(new Animated.Value(0)).current;
+  const glowOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (!targetEventId) return;
-    setCompleted(targetEventId).catch(() => { });
-  }, [targetEventId]);
+    setCompleted(targetEventId, userId).catch(() => { });
+  }, [targetEventId, userId]);
+
+  useEffect(() => {
+    checkScale.setValue(0.7);
+    checkOpacity.setValue(0);
+    ringScale.setValue(0.75);
+    ringOpacity.setValue(0);
+    glowOpacity.setValue(0);
+
+    const animation = Animated.parallel([
+      Animated.timing(checkOpacity, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.spring(checkScale, {
+        toValue: 1,
+        friction: 6,
+        tension: 140,
+        useNativeDriver: true,
+      }),
+      Animated.sequence([
+        Animated.delay(90),
+        Animated.timing(ringOpacity, {
+          toValue: 0.45,
+          duration: 120,
+          useNativeDriver: true,
+        }),
+        Animated.parallel([
+          Animated.timing(ringScale, {
+            toValue: 1.38,
+            duration: 620,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.timing(ringOpacity, {
+            toValue: 0,
+            duration: 620,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ]),
+      ]),
+      Animated.sequence([
+        Animated.timing(glowOpacity, {
+          toValue: 0.2,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowOpacity, {
+          toValue: 0.04,
+          duration: 500,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    ]);
+
+    animation.start();
+    return () => animation.stop();
+  }, [checkScale, checkOpacity, ringScale, ringOpacity, glowOpacity]);
 
   // イベント情報を取得して表示 & ストアに追加
   useEffect(() => {
@@ -167,7 +235,33 @@ export const UserSuccessScreen: React.FC = () => {
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.content}>
         <View style={styles.iconWrap}>
-          <AppText variant="h1" style={styles.checkmark}>✓</AppText>
+          <View style={styles.checkAnimFrame}>
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.checkRing,
+                {
+                  opacity: ringOpacity,
+                  transform: [{ scale: ringScale }],
+                },
+              ]}
+            />
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.checkGlow, { opacity: glowOpacity }]}
+            />
+            <Animated.View
+              style={[
+                styles.checkBadge,
+                {
+                  opacity: checkOpacity,
+                  transform: [{ scale: checkScale }],
+                },
+              ]}
+            >
+              <Ionicons name="checkmark" size={34} color="#ffffff" />
+            </Animated.View>
+          </View>
         </View>
 
         <AppText variant="h2" style={styles.title}>
@@ -371,9 +465,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: theme.spacing.md,
   },
-  checkmark: {
-    fontSize: 48,
-    color: '#38b000',
+  checkAnimFrame: {
+    width: 96,
+    height: 96,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  checkRing: {
+    position: 'absolute',
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    borderWidth: 2,
+    borderColor: '#74d892',
+  },
+  checkGlow: {
+    position: 'absolute',
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#7bdc95',
+  },
+  checkBadge: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#2fb15a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#2fb15a',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.32,
+    shadowRadius: 18,
+    elevation: 6,
   },
   title: {
     marginBottom: theme.spacing.xs,

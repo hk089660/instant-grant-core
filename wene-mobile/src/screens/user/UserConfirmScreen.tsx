@@ -99,8 +99,8 @@ export const UserConfirmScreen: React.FC = () => {
 
   useEffect(() => {
     if (!targetEventId) return;
-    setStarted(targetEventId).catch(() => { });
-  }, [targetEventId]);
+    setStarted(targetEventId, userId).catch(() => { });
+  }, [targetEventId, userId]);
 
   const buildSignRedirectContext = useCallback((): { redirectLink: string; appUrl: string } => {
     if (Platform.OS === 'web' && typeof window !== 'undefined' && !!window.location?.origin) {
@@ -438,7 +438,7 @@ export const UserConfirmScreen: React.FC = () => {
             {
               text: 'OK',
               onPress: () => {
-                clearUser();
+                void clearUser();
               },
             },
           ]);

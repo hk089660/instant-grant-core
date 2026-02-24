@@ -15,6 +15,8 @@ interface PhantomConnectResult {
 }
 
 interface PhantomStore {
+  activeUserId: string | null;
+
   // 暗号化キーペア
   encryptionKeyPair: nacl.BoxKeyPair | null;
   dappEncryptionPublicKey: string | null;
@@ -22,6 +24,7 @@ interface PhantomStore {
   phantomEncryptionPublicKey: string | null;
 
   // アクション
+  setActiveUser: (userId: string | null) => void;
   initializeKeyPair: () => nacl.BoxKeyPair;
   getOrCreateKeyPair: () => nacl.BoxKeyPair;
   saveKeyPair: (keyPair: nacl.BoxKeyPair) => Promise<void>;
@@ -35,14 +38,39 @@ interface PhantomStore {
   clearPhantomKeys: () => Promise<void>;
 }
 
-const STORAGE_KEY = 'phantom_encryption_keypair';
-const STORAGE_KEY_CONNECT_RESULT = 'phantom_connect_result';
+const STORAGE_KEY_PREFIX = 'phantom_encryption_keypair:v2';
+const STORAGE_KEY_CONNECT_RESULT_PREFIX = 'phantom_connect_result:v2';
+
+function normalizeActiveUserId(userId?: string | null): string | null {
+  const normalized = typeof userId === 'string' ? userId.trim().toLowerCase() : '';
+  return normalized || null;
+}
+
+function normalizeUserScope(userId?: string | null): string {
+  return normalizeActiveUserId(userId) ?? 'guest';
+}
+
+function getScopedStorageKey(prefix: string, userId?: string | null): string {
+  return `${prefix}:${normalizeUserScope(userId)}`;
+}
 
 export const usePhantomStore = create<PhantomStore>((set, get) => ({
+  activeUserId: null,
   encryptionKeyPair: null,
   dappEncryptionPublicKey: null,
   dappSecretKey: null,
   phantomEncryptionPublicKey: null,
+
+  setActiveUser: (userId) => {
+    const normalized = normalizeActiveUserId(userId);
+    set({
+      activeUserId: normalized,
+      encryptionKeyPair: null,
+      dappEncryptionPublicKey: null,
+      dappSecretKey: null,
+      phantomEncryptionPublicKey: null,
+    });
+  },
   
   initializeKeyPair: () => {
     const keyPair = nacl.box.keyPair();
@@ -63,11 +91,13 @@ export const usePhantomStore = create<PhantomStore>((set, get) => ({
   },
   
   saveKeyPair: async (keyPair) => {
+    const { activeUserId } = get();
     const data = {
       publicKey: Array.from(keyPair.publicKey),
       secretKey: Array.from(keyPair.secretKey),
     };
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    await AsyncStorage.setItem(getScopedStorageKey(STORAGE_KEY_PREFIX, activeUserId), JSON.stringify(data));
+    if (get().activeUserId !== activeUserId) return;
     set({
       encryptionKeyPair: keyPair,
       dappEncryptionPublicKey: base64Encode(keyPair.publicKey),
@@ -76,9 +106,17 @@ export const usePhantomStore = create<PhantomStore>((set, get) => ({
   },
   
   loadKeyPair: async () => {
+    const { activeUserId } = get();
     try {
-      const stored = await AsyncStorage.getItem(STORAGE_KEY);
+      const stored = await AsyncStorage.getItem(getScopedStorageKey(STORAGE_KEY_PREFIX, activeUserId));
       if (!stored) {
+        if (get().activeUserId === activeUserId) {
+          set({
+            encryptionKeyPair: null,
+            dappEncryptionPublicKey: null,
+            dappSecretKey: null,
+          });
+        }
         return null;
       }
       const data = JSON.parse(stored);
@@ -86,6 +124,7 @@ export const usePhantomStore = create<PhantomStore>((set, get) => ({
         publicKey: Uint8Array.from(data.publicKey),
         secretKey: Uint8Array.from(data.secretKey),
       };
+      if (get().activeUserId !== activeUserId) return null;
       set({
         encryptionKeyPair: keyPair,
         dappEncryptionPublicKey: base64Encode(keyPair.publicKey),
@@ -100,18 +139,25 @@ export const usePhantomStore = create<PhantomStore>((set, get) => ({
   setPhantomEncryptionPublicKey: (pk) => set({ phantomEncryptionPublicKey: pk }),
 
   savePhantomConnectResult: async (publicKey, session, phantomPublicKey) => {
+    const { activeUserId } = get();
     const data: PhantomConnectResult = {
       publicKey,
       session,
       phantomPublicKey,
     };
-    await AsyncStorage.setItem(STORAGE_KEY_CONNECT_RESULT, JSON.stringify(data));
+    await AsyncStorage.setItem(
+      getScopedStorageKey(STORAGE_KEY_CONNECT_RESULT_PREFIX, activeUserId),
+      JSON.stringify(data)
+    );
     console.log('[phantomStore] savePhantomConnectResult success:', publicKey.substring(0, 8) + '...');
   },
 
   loadPhantomConnectResult: async () => {
+    const { activeUserId } = get();
     try {
-      const stored = await AsyncStorage.getItem(STORAGE_KEY_CONNECT_RESULT);
+      const stored = await AsyncStorage.getItem(
+        getScopedStorageKey(STORAGE_KEY_CONNECT_RESULT_PREFIX, activeUserId)
+      );
       if (!stored) {
         return null;
       }
@@ -128,20 +174,26 @@ export const usePhantomStore = create<PhantomStore>((set, get) => ({
   },
 
   clearConnectResult: async () => {
-    await AsyncStorage.removeItem(STORAGE_KEY_CONNECT_RESULT);
-    set({ phantomEncryptionPublicKey: null });
+    const { activeUserId } = get();
+    await AsyncStorage.removeItem(getScopedStorageKey(STORAGE_KEY_CONNECT_RESULT_PREFIX, activeUserId));
+    if (get().activeUserId === activeUserId) {
+      set({ phantomEncryptionPublicKey: null });
+    }
     console.log('[phantomStore] clearConnectResult done');
   },
 
   clearPhantomKeys: async () => {
-    await AsyncStorage.removeItem(STORAGE_KEY);
-    await AsyncStorage.removeItem(STORAGE_KEY_CONNECT_RESULT);
-    set({
-      encryptionKeyPair: null,
-      dappEncryptionPublicKey: null,
-      dappSecretKey: null,
-      phantomEncryptionPublicKey: null,
-    });
+    const { activeUserId } = get();
+    await AsyncStorage.removeItem(getScopedStorageKey(STORAGE_KEY_PREFIX, activeUserId));
+    await AsyncStorage.removeItem(getScopedStorageKey(STORAGE_KEY_CONNECT_RESULT_PREFIX, activeUserId));
+    if (get().activeUserId === activeUserId) {
+      set({
+        encryptionKeyPair: null,
+        dappEncryptionPublicKey: null,
+        dappSecretKey: null,
+        phantomEncryptionPublicKey: null,
+      });
+    }
     console.log('[phantomStore] clearPhantomKeys done');
   },
 }));

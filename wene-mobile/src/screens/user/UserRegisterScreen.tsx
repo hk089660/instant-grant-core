@@ -25,7 +25,7 @@ const PIN_REGEX = /^\d{4,6}$/;
 
 export const UserRegisterScreen: React.FC = () => {
   const router = useRouter();
-  const { setUserId, setDisplayName } = useAuth();
+  const { clearUser, setUserId, setDisplayName } = useAuth();
   const [userId, setUserIdLocal] = useState('');
   const [displayName, setDisplayNameLocal] = useState('');
   const [pin, setPinLocal] = useState('');
@@ -54,7 +54,8 @@ export const UserRegisterScreen: React.FC = () => {
     setLoading(true);
     try {
       const res = await registerUser(normalizedUserId, name, pinVal);
-      setUserId(res.userId);
+      await clearUser();
+      await setUserId(res.userId);
       setDisplayName(name);
       router.replace(schoolRoutes.scan as any);
     } catch (e: unknown) {
@@ -74,7 +75,7 @@ export const UserRegisterScreen: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [userId, displayName, pin, setUserId, setDisplayName, router]);
+  }, [userId, displayName, pin, clearUser, setUserId, setDisplayName, router]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>

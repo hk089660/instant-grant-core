@@ -7,11 +7,20 @@ export interface ClaimedRecord {
   walletPubkey?: string;
 }
 
+function normalizeUserScope(userId?: string | null): string {
+  const normalized = typeof userId === 'string' ? userId.trim().toLowerCase() : '';
+  return normalized || 'guest';
+}
+
 /**
  * 受給状態の保存キーを生成
  */
-export const getClaimedKey = (campaignId: string, walletPubkey?: string | null): string => {
-  return `claimed:${campaignId}:${walletPubkey || 'anonymous'}`;
+export const getClaimedKey = (
+  campaignId: string,
+  walletPubkey?: string | null,
+  userId?: string | null
+): string => {
+  return `claimed:${normalizeUserScope(userId)}:${campaignId}:${walletPubkey || 'anonymous'}`;
 };
 
 /**
@@ -19,9 +28,10 @@ export const getClaimedKey = (campaignId: string, walletPubkey?: string | null):
  */
 export const saveClaimed = async (
   campaignId: string,
-  walletPubkey?: string | null
+  walletPubkey?: string | null,
+  userId?: string | null
 ): Promise<void> => {
-  const key = getClaimedKey(campaignId, walletPubkey);
+  const key = getClaimedKey(campaignId, walletPubkey, userId);
   const record: ClaimedRecord = {
     status: 'claimed',
     claimedAt: Math.floor(Date.now() / 1000),
@@ -36,9 +46,10 @@ export const saveClaimed = async (
  */
 export const loadClaimed = async (
   campaignId: string,
-  walletPubkey?: string | null
+  walletPubkey?: string | null,
+  userId?: string | null
 ): Promise<ClaimedRecord | null> => {
-  const key = getClaimedKey(campaignId, walletPubkey);
+  const key = getClaimedKey(campaignId, walletPubkey, userId);
   const value = await AsyncStorage.getItem(key);
   if (!value) {
     return null;
@@ -56,16 +67,17 @@ export const loadClaimed = async (
  */
 export const migrateToWalletKey = async (
   campaignId: string,
-  walletPubkey: string
+  walletPubkey: string,
+  userId?: string | null
 ): Promise<void> => {
-  const anonymousKey = getClaimedKey(campaignId, null);
+  const anonymousKey = getClaimedKey(campaignId, null, userId);
   const anonymousValue = await AsyncStorage.getItem(anonymousKey);
   
   if (anonymousValue) {
     // 匿名キーのデータをウォレットキーにも保存
     const record: ClaimedRecord = JSON.parse(anonymousValue);
     record.walletPubkey = walletPubkey;
-    const walletKey = getClaimedKey(campaignId, walletPubkey);
+    const walletKey = getClaimedKey(campaignId, walletPubkey, userId);
     await AsyncStorage.setItem(walletKey, JSON.stringify(record));
   }
 };
@@ -84,8 +96,12 @@ export interface UsedRecord {
 /**
  * 使用済み状態の保存キーを生成
  */
-export const getUsedKey = (campaignId: string, walletPubkey?: string | null): string => {
-  return `used:${campaignId}:${walletPubkey || 'anonymous'}`;
+export const getUsedKey = (
+  campaignId: string,
+  walletPubkey?: string | null,
+  userId?: string | null
+): string => {
+  return `used:${normalizeUserScope(userId)}:${campaignId}:${walletPubkey || 'anonymous'}`;
 };
 
 /**
@@ -95,9 +111,10 @@ export const saveUsed = async (
   campaignId: string,
   walletPubkey: string | null,
   txSig: string,
-  amount?: number
+  amount?: number,
+  userId?: string | null
 ): Promise<void> => {
-  const key = getUsedKey(campaignId, walletPubkey);
+  const key = getUsedKey(campaignId, walletPubkey, userId);
   const record: UsedRecord = {
     status: 'used',
     usedAt: Math.floor(Date.now() / 1000),
@@ -114,9 +131,10 @@ export const saveUsed = async (
  */
 export const loadUsed = async (
   campaignId: string,
-  walletPubkey?: string | null
+  walletPubkey?: string | null,
+  userId?: string | null
 ): Promise<UsedRecord | null> => {
-  const key = getUsedKey(campaignId, walletPubkey);
+  const key = getUsedKey(campaignId, walletPubkey, userId);
   const value = await AsyncStorage.getItem(key);
   if (!value) {
     return null;
@@ -126,4 +144,16 @@ export const loadUsed = async (
   } catch {
     return null;
   }
+};
+
+export const clearUserClaimUsageCache = async (userId?: string | null): Promise<void> => {
+  const userScope = normalizeUserScope(userId);
+  const claimedPrefix = `claimed:${userScope}:`;
+  const usedPrefix = `used:${userScope}:`;
+  const keys = await AsyncStorage.getAllKeys();
+  const targetKeys = keys.filter(
+    (key) => key.startsWith(claimedPrefix) || key.startsWith(usedPrefix)
+  );
+  if (targetKeys.length === 0) return;
+  await AsyncStorage.multiRemove(targetKeys);
 };

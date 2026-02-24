@@ -1,7 +1,20 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const STORAGE_KEY = 'wene:recipient_tickets';
+const STORAGE_KEY_PREFIX = 'wene:recipient_tickets:v2';
+
+function normalizeActiveUserId(userId?: string | null): string | null {
+  const normalized = typeof userId === 'string' ? userId.trim().toLowerCase() : '';
+  return normalized || null;
+}
+
+function normalizeUserScope(userId?: string | null): string {
+  return normalizeActiveUserId(userId) ?? 'guest';
+}
+
+function getStorageKey(userId?: string | null): string {
+  return `${STORAGE_KEY_PREFIX}:${normalizeUserScope(userId)}`;
+}
 
 export interface RecipientTicket {
   eventId: string;
@@ -19,8 +32,11 @@ export interface RecipientTicket {
 }
 
 interface RecipientTicketStore {
+  activeUserId: string | null;
   tickets: RecipientTicket[];
   isLoading: boolean;
+  setActiveUser: (userId: string | null) => Promise<void>;
+  clearUserTickets: (userId?: string | null) => Promise<void>;
   loadTickets: () => Promise<void>;
   replaceTickets: (tickets: RecipientTicket[]) => Promise<void>;
   addTicket: (ticket: RecipientTicket) => Promise<void>;
@@ -28,8 +44,8 @@ interface RecipientTicketStore {
   getTicketByEventId: (eventId: string) => RecipientTicket | undefined;
 }
 
-const loadFromStorage = async (): Promise<RecipientTicket[]> => {
-  const value = await AsyncStorage.getItem(STORAGE_KEY);
+const loadFromStorage = async (userId?: string | null): Promise<RecipientTicket[]> => {
+  const value = await AsyncStorage.getItem(getStorageKey(userId));
   if (!value) return [];
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -63,8 +79,8 @@ const loadFromStorage = async (): Promise<RecipientTicket[]> => {
   }
 };
 
-const saveToStorage = async (tickets: RecipientTicket[]): Promise<void> => {
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(tickets));
+const saveToStorage = async (tickets: RecipientTicket[], userId?: string | null): Promise<void> => {
+  await AsyncStorage.setItem(getStorageKey(userId), JSON.stringify(tickets));
 };
 
 function mergeTicket(existing: RecipientTicket, incoming: RecipientTicket): RecipientTicket {
@@ -85,20 +101,50 @@ function mergeTicket(existing: RecipientTicket, incoming: RecipientTicket): Reci
 }
 
 export const useRecipientTicketStore = create<RecipientTicketStore>((set, get) => ({
+  activeUserId: null,
   tickets: [],
   isLoading: false,
 
-  loadTickets: async () => {
-    set({ isLoading: true });
+  setActiveUser: async (userId) => {
+    const normalized = normalizeActiveUserId(userId);
+    set({
+      activeUserId: normalized,
+      tickets: [],
+      isLoading: true,
+    });
     try {
-      const tickets = await loadFromStorage();
+      const tickets = await loadFromStorage(normalized);
+      if (get().activeUserId !== normalized) return;
       set({ tickets, isLoading: false });
     } catch {
+      if (get().activeUserId !== normalized) return;
+      set({ tickets: [], isLoading: false });
+    }
+  },
+
+  clearUserTickets: async (userId) => {
+    const normalized = normalizeActiveUserId(userId);
+    await AsyncStorage.removeItem(getStorageKey(normalized));
+    if (get().activeUserId === normalized) {
+      set({ tickets: [] });
+    }
+  },
+
+  loadTickets: async () => {
+    const { activeUserId } = get();
+    set({ isLoading: true });
+    try {
+      const tickets = await loadFromStorage(activeUserId);
+      if (get().activeUserId !== activeUserId) return;
+      set({ tickets, isLoading: false });
+    } catch {
+      if (get().activeUserId !== activeUserId) return;
       set({ isLoading: false });
     }
   },
 
   replaceTickets: async (incomingTickets: RecipientTicket[]) => {
+    const { activeUserId } = get();
     const deduped: RecipientTicket[] = [];
     for (const incoming of incomingTickets) {
       const eventId = incoming.eventId.trim();
@@ -117,18 +163,20 @@ export const useRecipientTicketStore = create<RecipientTicketStore>((set, get) =
         deduped[existingIndex] = mergeTicket(deduped[existingIndex], normalized);
       }
     }
-    await saveToStorage(deduped);
+    await saveToStorage(deduped, activeUserId);
+    if (get().activeUserId !== activeUserId) return;
     set({ tickets: deduped });
   },
 
   addTicket: async (ticket: RecipientTicket) => {
-    const { tickets } = get();
+    const { tickets, activeUserId } = get();
     const idx = tickets.findIndex((t) => t.eventId === ticket.eventId);
     const next =
       idx === -1
         ? [...tickets, ticket]
         : tickets.map((current, i) => (i === idx ? mergeTicket(current, ticket) : current));
-    await saveToStorage(next);
+    await saveToStorage(next, activeUserId);
+    if (get().activeUserId !== activeUserId) return;
     set({ tickets: next });
   },
 

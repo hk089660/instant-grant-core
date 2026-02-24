@@ -16,6 +16,7 @@ export type RecipientState =
 interface RecipientStore {
   // 状態
   state: RecipientState;
+  activeUserId: string | null;
   
   // データ
   publicKey: string | null;
@@ -45,6 +46,7 @@ interface RecipientStore {
   setSimulationFailed: (err: string, logs: string[] | null, unitsConsumed?: number) => void;
   clearSimulationResult: () => void;
   setPublicKey: (publicKey: string | null) => void;
+  setActiveUserId: (userId: string | null) => void;
   setWalletPubkey: (walletPubkey: string | null) => void;
   setPhantomSession: (session: string | null) => void;
   setCampaign: (campaignId: string, code?: string) => void;
@@ -59,6 +61,7 @@ interface RecipientStore {
 
 const initialState = {
   state: 'Idle' as RecipientState,
+  activeUserId: null,
   publicKey: null,
   walletPubkey: null,
   phantomSession: null,
@@ -81,15 +84,17 @@ export const useRecipientStore = create<RecipientStore>((set, get) => ({
   ...initialState,
   
   setState: (state) => set({ state }),
+
+  setActiveUserId: (userId) => set({ activeUserId: userId }),
   
   setPublicKey: (publicKey) => set({ publicKey }),
   
   setWalletPubkey: async (walletPubkey) => {
     set({ walletPubkey });
     // ウォレット接続時に匿名キーから移行
-    const { campaignId } = get();
+    const { campaignId, activeUserId } = get();
     if (campaignId && walletPubkey) {
-      await migrateToWalletKey(campaignId, walletPubkey);
+      await migrateToWalletKey(campaignId, walletPubkey, activeUserId);
       // 移行後、受給状態を再チェック
       await get().checkClaimed(campaignId, walletPubkey);
     }
@@ -125,7 +130,8 @@ export const useRecipientStore = create<RecipientStore>((set, get) => ({
     }),
 
   checkClaimed: async (campaignId, walletPubkey) => {
-    const claimed = await loadClaimed(campaignId, walletPubkey);
+    const { activeUserId } = get();
+    const claimed = await loadClaimed(campaignId, walletPubkey, activeUserId);
     if (claimed) {
       set({ state: 'Claimed', isClaimed: true });
     } else {
@@ -134,12 +140,14 @@ export const useRecipientStore = create<RecipientStore>((set, get) => ({
   },
   
   markAsClaimed: async (campaignId, walletPubkey) => {
-    await saveClaimed(campaignId, walletPubkey);
+    const { activeUserId } = get();
+    await saveClaimed(campaignId, walletPubkey, activeUserId);
     set({ state: 'Claimed', isClaimed: true });
   },
 
   checkUsed: async (campaignId, walletPubkey) => {
-    const used = await loadUsed(campaignId, walletPubkey);
+    const { activeUserId } = get();
+    const used = await loadUsed(campaignId, walletPubkey, activeUserId);
     if (used) {
       set({ isUsed: true, lastUsedSignature: used.txSig });
     } else {
@@ -148,7 +156,8 @@ export const useRecipientStore = create<RecipientStore>((set, get) => ({
   },
 
   markAsUsed: async (campaignId, walletPubkey, txSig, amount) => {
-    await saveUsed(campaignId, walletPubkey, txSig, amount);
+    const { activeUserId } = get();
+    await saveUsed(campaignId, walletPubkey, txSig, amount, activeUserId);
     set({ isUsed: true, lastUsedSignature: txSig });
   },
   

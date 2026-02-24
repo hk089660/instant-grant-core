@@ -8,10 +8,19 @@ export interface ParticipationRecord {
   completedAt?: number;
 }
 
-const STORAGE_KEY = 'wene:participations';
+const STORAGE_KEY_PREFIX = 'wene:participations:v2';
 
-const loadRecords = async (): Promise<ParticipationRecord[]> => {
-  const value = await AsyncStorage.getItem(STORAGE_KEY);
+function normalizeUserScope(userId?: string | null): string {
+  const normalized = typeof userId === 'string' ? userId.trim().toLowerCase() : '';
+  return normalized || 'guest';
+}
+
+function getStorageKey(userId?: string | null): string {
+  return `${STORAGE_KEY_PREFIX}:${normalizeUserScope(userId)}`;
+}
+
+const loadRecords = async (userId?: string | null): Promise<ParticipationRecord[]> => {
+  const value = await AsyncStorage.getItem(getStorageKey(userId));
   if (!value) return [];
   try {
     const parsed = JSON.parse(value) as ParticipationRecord[];
@@ -21,29 +30,29 @@ const loadRecords = async (): Promise<ParticipationRecord[]> => {
   }
 };
 
-const saveRecords = async (records: ParticipationRecord[]): Promise<void> => {
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+const saveRecords = async (records: ParticipationRecord[], userId?: string | null): Promise<void> => {
+  await AsyncStorage.setItem(getStorageKey(userId), JSON.stringify(records));
 };
 
-export const getParticipations = async (): Promise<ParticipationRecord[]> => {
-  return loadRecords();
+export const getParticipations = async (userId?: string | null): Promise<ParticipationRecord[]> => {
+  return loadRecords(userId);
 };
 
-export const setStarted = async (eventId: string): Promise<void> => {
-  const records = await loadRecords();
+export const setStarted = async (eventId: string, userId?: string | null): Promise<void> => {
+  const records = await loadRecords(userId);
   const existing = records.find((record) => record.eventId === eventId);
   if (existing) {
     if (existing.state === 'completed') return;
-    await saveRecords(records);
+    await saveRecords(records, userId);
     return;
   }
   const now = Date.now();
   records.push({ eventId, state: 'started', startedAt: now });
-  await saveRecords(records);
+  await saveRecords(records, userId);
 };
 
-export const setCompleted = async (eventId: string): Promise<void> => {
-  const records = await loadRecords();
+export const setCompleted = async (eventId: string, userId?: string | null): Promise<void> => {
+  const records = await loadRecords(userId);
   const existing = records.find((record) => record.eventId === eventId);
   const now = Date.now();
   if (existing) {
@@ -52,9 +61,13 @@ export const setCompleted = async (eventId: string): Promise<void> => {
     if (!existing.startedAt) {
       existing.startedAt = now;
     }
-    await saveRecords(records);
+    await saveRecords(records, userId);
     return;
   }
   records.push({ eventId, state: 'completed', startedAt: now, completedAt: now });
-  await saveRecords(records);
+  await saveRecords(records, userId);
+};
+
+export const clearParticipations = async (userId?: string | null): Promise<void> => {
+  await AsyncStorage.removeItem(getStorageKey(userId));
 };

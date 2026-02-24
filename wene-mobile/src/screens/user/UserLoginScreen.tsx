@@ -42,6 +42,8 @@ export const UserLoginScreen: React.FC = () => {
     setLoading(true);
     try {
       const syncResult = await syncUserTickets(userIdVal, pinVal);
+      await clearUser();
+      await setUserId(userIdVal);
       await replaceTickets(
         syncResult.tickets.map((ticket) => ({
           eventId: ticket.eventId,
@@ -55,8 +57,6 @@ export const UserLoginScreen: React.FC = () => {
           auditReceiptHash: ticket.auditReceiptHash,
         }))
       );
-      clearUser();
-      setUserId(userIdVal);
       router.replace(schoolRoutes.scan as any);
     } catch (e: unknown) {
       if (e instanceof HttpError) {
