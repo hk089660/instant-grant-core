@@ -75,10 +75,15 @@ export interface VerifyTicketReceiptByCodeResponse {
   };
 }
 
-export async function registerUser(userId: string, displayName: string, pin: string): Promise<RegisterResponse> {
+export async function registerUser(
+  userId: string,
+  displayName: string,
+  pin: string,
+  fairscaleToken?: string
+): Promise<RegisterResponse> {
   const base = getBaseUrl();
   const url = `${base}/api/users/register`;
-  return httpPost<RegisterResponse>(url, { userId, displayName, pin });
+  return httpPost<RegisterResponse>(url, { userId, displayName, pin, fairscaleToken });
 }
 
 export async function verifyUserPin(userId: string, pin: string): Promise<VerifyUserResponse> {
@@ -97,7 +102,8 @@ export async function claimEventWithUser(
   eventId: string,
   userId: string,
   pin: string,
-  proof?: UserClaimOnchainProof
+  proof?: UserClaimOnchainProof,
+  fairscaleToken?: string
 ): Promise<UserClaimResponse> {
   const base = getBaseUrl();
   const url = `${base}/api/events/${encodeURIComponent(eventId)}/claim`;
@@ -107,6 +113,7 @@ export async function claimEventWithUser(
     walletAddress: proof?.walletAddress,
     txSignature: proof?.txSignature,
     receiptPubkey: proof?.receiptPubkey,
+    fairscaleToken,
   });
 }
 

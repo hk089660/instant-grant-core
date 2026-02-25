@@ -8,7 +8,7 @@ Public prototype for auditable school/public participation and grant operations 
 - User: `https://instant-grant-core.pages.dev/`
 - Admin: `https://instant-grant-core.pages.dev/admin/login` (Demo login code: `83284ab4d9874e54b301dcf7ea6a6056`)
 
-**Status (as of February 22, 2026 / 2026-02-22)**
+**Status (as of February 25, 2026 / 2026-02-25)**
 
 ## 💡 Technical Approach in Implementation
 
@@ -62,6 +62,8 @@ This prototype adopts the following architecture to solve practical challenges i
 - [Implemented] User evidence UI is available on success screen: `confirmationCode`, participation audit receipt (`receipt_id`, `receipt_hash`), and optional PoP proof copy actions.
 - [Implemented] Admin event issuance requires authenticated operator + connected Phantom wallet + runtime readiness checks.
 - [Implemented] Verifiability endpoints include `/v1/school/pop-status`, `/v1/school/runtime-status`, `/v1/school/audit-status`, and `/api/audit/receipts/verify-code`.
+- [Implemented] API-level anti-bot/DDoS guardrails are active: endpoint/global rate limits, escalating temporary blocks, and payload size limits (`429` with `Retry-After`, `413` on oversized payloads).
+- [Implemented] FairScale risk-gated sybil checks are integrated for register/claim paths (configurable fail-closed/fail-open), and admin abuse controls include daily issuance limits for events and admin invite codes.
 - [Implemented] CI runs localnet `anchor test --skip-build --provider.cluster localnet` in addition to `anchor build`, so minimal contract integration tests are automatically verified.
 - [Implemented] Node dependencies are standardized on `npm`, and `npm ci` is the canonical install path. Canonical lockfiles are `package-lock.json` at root / `grant_program` / `api-worker` / `wene-mobile`.
 - [Implemented] CI fails on `yarn.lock` / `pnpm-lock.yaml` / non-canonical lockfile names (for example `package-lock 2.json`) to prevent reproducibility drift.
@@ -157,7 +159,8 @@ flowchart LR
 > - [Implemented] Off-chain Attend issues a participation ticket (`confirmationCode` + `ticketReceipt`) without requiring a wallet when policy allows.
 > - [Implemented] On-chain redeem/proof is implemented. Route enforcement is policy-gated, but PoP verification inside on-chain claim instructions is always required.
 > - [Implemented] PoP/runtime/audit operational checks are exposed via public endpoints and shown in admin UI.
-> - [Planned] Advanced anti-sybil eligibility modules, federation-ready operations, and chain-agnostic adapter design are roadmap items.
+> - [Implemented] FairScale risk-gated anti-sybil checks and API abuse guardrails (rate-limit/DDOS mitigation + admin issuance limits) are available in the current backend.
+> - [Planned] Federation-ready operations and chain-agnostic adapter design remain roadmap items.
 
 ## Why This Matters
 Public grants and school participation often expose only final outcomes, leaving process decisions opaque; this project addresses that by making operator actions, audit-chain integrity, and settlement-linked evidence independently verifiable.
@@ -194,7 +197,9 @@ Public grants and school participation often expose only final outcomes, leaving
 | Admin transfer audit split (`onchain` vs `offchain`) | `Implemented` | `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`, `/api/admin/transfers` |
 | Master strict disclosure (`master > admin`) | `Implemented` | `/api/master/transfers`, `/api/master/admin-disclosures`, `wene-mobile/app/master/index.tsx` |
 | Server-side indexed search with DO SQLite persistence | `Implemented` | `/api/master/search`, `api-worker/src/storeDO.ts` (`master_search_*` tables) |
-| FairScale/advanced anti-sybil identity layer | `Planned` | `docs/ROADMAP.md` |
+| FairScale risk-gated anti-sybil checks (`register/claim`, fail-open/fail-closed) | `Implemented` | `api-worker/src/storeDO.ts`, `api-worker/wrangler.toml`, `api-worker/test/fairscaleAndIssueLimit.test.ts` |
+| API anti-bot/DDOS guardrails (rate limits + payload limits) | `Implemented` | `api-worker/src/storeDO.ts`, `api-worker/test/securityGuardrails.test.ts` |
+| Admin abuse controls (daily issuance limits for events/invites) | `Implemented` | `api-worker/src/storeDO.ts`, `api-worker/test/fairscaleAndIssueLimit.test.ts` |
 | Administration-operable federation model (multi-institution ops) | `Planned` | roadmap/design direction (not implemented in this repo) |
 | Chain-agnostic settlement adapters (future public infrastructure) | `Planned` | roadmap direction; no independent chain launch in this grant/PoC stage |
 
@@ -241,10 +246,16 @@ Public grants and school participation often expose only final outcomes, leaving
   - API checks in `/v1/school/claims` and `/api/events/:eventId/claim`
 - `Implemented`: immutable audit fail-close mode (`AUDIT_IMMUTABLE_MODE=required`) blocks mutating APIs if sink is not operational.
   - Code: `api-worker/src/storeDO.ts`
+- `Implemented`: anti-bot/DDOS guardrails enforce endpoint/global rate limits + payload size limits (`429`/`413`) at API preflight.
+  - Code: `api-worker/src/storeDO.ts`, `api-worker/test/securityGuardrails.test.ts`
+- `Implemented`: FairScale risk-gated sybil checks are integrated for `/api/users/register`, `/api/events/:eventId/claim`, `/v1/school/claims` (configurable fail-closed/fail-open and min score).
+  - Code: `api-worker/src/storeDO.ts`, `api-worker/test/fairscaleAndIssueLimit.test.ts`
+- `Implemented`: admin abuse controls add daily issuance limits to `/v1/school/events` and `/api/admin/invite`.
+  - Code: `api-worker/src/storeDO.ts`, `api-worker/test/fairscaleAndIssueLimit.test.ts`
 - `Implemented`: strict disclosure levels:
   - admin can view transfer identifiers without PII (`strictLevel: admin_transfer_visible_no_pii`)
   - master can view full disclosure (`strictLevel: master_full`)
-- `Planned`: stronger anti-sybil/eligibility integration (e.g., FairScale-class gating).
+- `Planned`: privacy-preserving eligibility proofs and federation-scale deduplication hardening.
 
 ## Architecture
 

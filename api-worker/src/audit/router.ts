@@ -31,6 +31,15 @@ auditRouter.post('/v1/audit/log', async (c) => {
   const token = extractBearerToken(c.req.header('authorization') ?? null);
   const writeToken = c.env.AUDIT_LOG_WRITE_TOKEN?.trim() ?? '';
   const adminPassword = c.env.ADMIN_PASSWORD?.trim() ?? '';
+  const defaultMasterPasswordConfigured = adminPassword === 'change-this-in-dashboard';
+  if (!writeToken && defaultMasterPasswordConfigured) {
+    return c.json(
+      badRequest(
+        'insecure admin password configuration: replace ADMIN_PASSWORD placeholder or set AUDIT_LOG_WRITE_TOKEN'
+      ),
+      503
+    );
+  }
   const expectedToken =
     writeToken ||
     (adminPassword && adminPassword !== 'change-this-in-dashboard' ? adminPassword : '');

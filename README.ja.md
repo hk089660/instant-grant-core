@@ -8,7 +8,7 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 - 利用者: `https://instant-grant-core.pages.dev/`
 - 管理者: `https://instant-grant-core.pages.dev/admin/login`（デモログインコード: `83284ab4d9874e54b301dcf7ea6a6056`）
 
-**Status（2026-02-22 / February 22, 2026 時点）**
+**Status（2026-02-25 / February 25, 2026 時点）**
 
 ## 💡 実装における技術的アプローチ（Technical Highlights）
 
@@ -63,6 +63,8 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 - [Implemented] 利用者向け証跡UI: 成功画面で `confirmationCode`、監査レシート（`receipt_id`, `receipt_hash`）、PoP証跡コピー導線（条件付き）を表示します。
 - [Implemented] 管理者のイベント発行は、管理者認証に加えて Phantom 接続と runtime readiness を必須にしています。
 - [Implemented] 検証用 endpoint: `/v1/school/pop-status`、`/v1/school/runtime-status`、`/v1/school/audit-status`、`/api/audit/receipts/verify-code`。
+- [Implemented] APIレイヤーで bot/DDOS 対策を実装済みです。エンドポイント別/全体レート制限、違反時の段階的ブロック、リクエストサイズ制限（`429` + `Retry-After`、`413`）を適用します。
+- [Implemented] FairScale連携によるSybilリスク判定を登録/参加導線に統合し、fail-closed/fail-open を運用設定で切替可能です。あわせて管理者乱用対策としてイベント発行/管理者コード発行の日次上限を実装しています。
 - [Implemented] CI は `anchor build` に加えて localnet の `anchor test --skip-build --provider.cluster localnet` を実行し、コントラクトの最小統合テストを自動検証します。
 - [Implemented] Node依存は `npm` に統一し、インストールは `npm ci` を正とします。正本 lockfile は `package-lock.json`（root / `grant_program` / `api-worker` / `wene-mobile`）です。
 - [Implemented] CI は `yarn.lock` / `pnpm-lock.yaml` / 非正規名の lockfile（例: `package-lock 2.json`）混入を失敗扱いにし、依存再現性の逸脱を防止します。
@@ -91,7 +93,7 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 ## 審査向け補足（減点リスク対策）
 - Solana依存性: settlement と PoP 検証の実体は `grant_program` にあり、off-chain Attend は入口導線です。
 - 審査モード: Solana系レビューでは `enforceOnchainPop=true` + オンチェーン設定済みイベントで実行すると、tx/receipt/PoP 連鎖を必須確認できます。
-- 文書整合性: 実装状況の正本は本READMEと `docs/ROADMAP.md`（Status snapshot as of `2026-02-22`）です。
+- 文書整合性: 実装状況の正本は本READMEと `docs/ROADMAP.md`（Status snapshot as of `2026-02-25`）です。
 
 ## 検証の定義（運用監査 vs 独立暗号検証）
 - `運用監査（UI/API）`: 管理画面や `/v1/school/*`、`/api/*` の表示/応答で運用状態を確認する検証。可観測性には強い一方、`api-worker` と表示系の信頼を含みます。
@@ -163,7 +165,8 @@ flowchart LR
 > - [Implemented] Off-chain Attend は、方針が許すイベントで wallet なしでも参加券（`confirmationCode` + `ticketReceipt`）を発行します。
 > - [Implemented] On-chain redeem / PoP は実装済みです。経路の強制有無はイベント方針で制御しますが、オンチェーン claim 命令内の PoP 検証は常時必須です。
 > - [Implemented] PoP/runtime/audit の運用確認は公開 endpoint と管理者UIで確認できます。
-> - [Planned] 高度なSybil耐性、連合運用向け設計、chain-agnostic adapter 設計はロードマップ項目です。
+> - [Implemented] FairScale連携のSybil対策と、APIレイヤーの濫用対策（rate limit/DDOS緩和 + 管理者発行上限）は現行バックエンドに実装済みです。
+> - [Planned] 連合運用向け設計と chain-agnostic adapter 設計はロードマップ項目です。
 
 ## なぜ重要か（課題）
 給付や学校参加の運用は最終結果だけが公開されやすく、処理過程の透明性が不足しがちなため、誰が何を実行したか・監査チェーンが整合しているか・決済証跡とどう結び付くかを第三者が検証できる形で示すことが重要です。
@@ -200,7 +203,9 @@ flowchart LR
 | 管理者画面での送金監査（onchain/offchain分離） | `Implemented` | `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`、`/api/admin/transfers` |
 | 運営者優先の厳格開示（`master > admin`） | `Implemented` | `/api/master/transfers`、`/api/master/admin-disclosures`、`wene-mobile/app/master/index.tsx` |
 | サーバー側インデックス検索（DO SQLite永続化） | `Implemented` | `/api/master/search`、`api-worker/src/storeDO.ts`（`master_search_*`テーブル） |
-| FairScale等の高度なSybil耐性 | `Planned` | `docs/ROADMAP.md` |
+| FairScale連携のSybilリスク判定（`register/claim`, fail-open/fail-closed） | `Implemented` | `api-worker/src/storeDO.ts`、`api-worker/wrangler.toml`、`api-worker/test/fairscaleAndIssueLimit.test.ts` |
+| APIのbot/DDOS対策（レート制限 + サイズ制限） | `Implemented` | `api-worker/src/storeDO.ts`、`api-worker/test/securityGuardrails.test.ts` |
+| 管理者乱用対策（イベント/招待コード発行の日次上限） | `Implemented` | `api-worker/src/storeDO.ts`、`api-worker/test/fairscaleAndIssueLimit.test.ts` |
 | 連合運用モデル（複数機関の共同運用） | `Planned` | 設計/ロードマップ段階（このリポジトリには未実装） |
 | chain-agnostic な決済 adapter（将来の公共基盤） | `Planned` | 方向性のみ（この助成/PoC段階で独立チェーン立ち上げは行わない） |
 
@@ -247,10 +252,16 @@ flowchart LR
   - API: `/v1/school/claims`、`/api/events/:eventId/claim`
 - `Implemented`: `AUDIT_IMMUTABLE_MODE=required` で immutable sink が不調なら更新系APIを fail-close。
   - コード: `api-worker/src/storeDO.ts`
+- `Implemented`: APIプリフライトで bot/DDOS 対策（エンドポイント別/全体レート制限、段階的ブロック、payloadサイズ制限）を適用。
+  - コード: `api-worker/src/storeDO.ts`、`api-worker/test/securityGuardrails.test.ts`
+- `Implemented`: FairScale連携で `/api/users/register`、`/api/events/:eventId/claim`、`/v1/school/claims` のSybilリスク判定を実施（fail-closed/fail-open、最小スコアは設定可能）。
+  - コード: `api-worker/src/storeDO.ts`、`api-worker/test/fairscaleAndIssueLimit.test.ts`
+- `Implemented`: 管理者乱用対策として `/v1/school/events` と `/api/admin/invite` に日次発行上限制御を適用。
+  - コード: `api-worker/src/storeDO.ts`、`api-worker/test/fairscaleAndIssueLimit.test.ts`
 - `Implemented`: 厳格レベル分離:
   - admin: 識別子は見えるがPIIは非開示（`strictLevel: admin_transfer_visible_no_pii`）
   - master: 全開示（`strictLevel: master_full`）
-- `Planned`: FairScale等のより強いSybil耐性/資格判定連携。
+- `Planned`: プライバシー保護型の資格証明や連合運用前提の重複排除強化。
 
 ## アーキテクチャ
 

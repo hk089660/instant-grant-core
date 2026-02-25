@@ -137,7 +137,7 @@ describe('API coverage audit logs', () => {
     expect(log.data.status).toBe(401);
   });
 
-  it('returns server configuration error for master-only routes when default password is not replaced', async () => {
+  it('fails closed for master-only routes when default password placeholder is configured', async () => {
     const localState = new MockDurableObjectState();
     const insecureEnv: Env = { ADMIN_PASSWORD: 'change-this-in-dashboard', AUDIT_IMMUTABLE_MODE: 'off' };
     const insecureStore = new SchoolStore(localState as any, insecureEnv);
@@ -149,7 +149,10 @@ describe('API coverage audit logs', () => {
       })
     );
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(503);
+    const body = await res.json() as { code?: string; error?: string };
+    expect(body.code).toBe('insecure_admin_password');
+    expect(body.error).toContain('insecure admin password');
   });
 
   it('allows master admin-code control routes even when immutable audit fail-close is active', async () => {

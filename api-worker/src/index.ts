@@ -19,6 +19,26 @@ type Bindings = {
   AUDIT_IMMUTABLE_INGEST_URL?: string;
   AUDIT_IMMUTABLE_INGEST_TOKEN?: string;
   AUDIT_IMMUTABLE_FETCH_TIMEOUT_MS?: string;
+  SECURITY_RATE_LIMIT_ENABLED?: string;
+  SECURITY_RATE_LIMIT_READ_PER_MINUTE?: string;
+  SECURITY_RATE_LIMIT_MUTATION_PER_MINUTE?: string;
+  SECURITY_RATE_LIMIT_AUTH_PER_10_MINUTES?: string;
+  SECURITY_RATE_LIMIT_ADMIN_LOGIN_PER_10_MINUTES?: string;
+  SECURITY_RATE_LIMIT_VERIFY_PER_MINUTE?: string;
+  SECURITY_RATE_LIMIT_GLOBAL_PER_MINUTE?: string;
+  SECURITY_RATE_LIMIT_BLOCK_SECONDS?: string;
+  SECURITY_MAX_REQUEST_BODY_BYTES?: string;
+  SECURITY_ADMIN_EVENT_ISSUE_LIMIT_PER_DAY?: string;
+  SECURITY_ADMIN_INVITE_ISSUE_LIMIT_PER_DAY?: string;
+  FAIRSCALE_ENABLED?: string;
+  FAIRSCALE_FAIL_CLOSED?: string;
+  FAIRSCALE_BASE_URL?: string;
+  FAIRSCALE_VERIFY_PATH?: string;
+  FAIRSCALE_API_KEY?: string;
+  FAIRSCALE_TIMEOUT_MS?: string;
+  FAIRSCALE_MIN_SCORE?: string;
+  FAIRSCALE_ENFORCE_ON_REGISTER?: string;
+  FAIRSCALE_ENFORCE_ON_CLAIM?: string;
 };
 
 const DEFAULT_CORS = 'https://instant-grant-core.dev';
@@ -27,7 +47,7 @@ function addCorsHeaders(response: Response, origin: string): Response {
   const headers = new Headers(response.headers);
   headers.set('Access-Control-Allow-Origin', origin);
   headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  headers.set('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization');
+  headers.set('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization, X-Fairscale-Token');
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -45,7 +65,7 @@ app.use(
       return origin.endsWith('.pages.dev') || origin.includes('localhost') ? origin : (DEFAULT_CORS);
     },
     allowMethods: ['GET', 'POST', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Accept', 'Authorization'],
+    allowHeaders: ['Content-Type', 'Accept', 'Authorization', 'X-Fairscale-Token'],
   })
 );
 

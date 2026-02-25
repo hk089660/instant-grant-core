@@ -91,6 +91,26 @@ export interface Env {
   AUDIT_IMMUTABLE_INGEST_URL?: string;
   AUDIT_IMMUTABLE_INGEST_TOKEN?: string;
   AUDIT_IMMUTABLE_FETCH_TIMEOUT_MS?: string;
+  SECURITY_RATE_LIMIT_ENABLED?: string;
+  SECURITY_RATE_LIMIT_READ_PER_MINUTE?: string;
+  SECURITY_RATE_LIMIT_MUTATION_PER_MINUTE?: string;
+  SECURITY_RATE_LIMIT_AUTH_PER_10_MINUTES?: string;
+  SECURITY_RATE_LIMIT_ADMIN_LOGIN_PER_10_MINUTES?: string;
+  SECURITY_RATE_LIMIT_VERIFY_PER_MINUTE?: string;
+  SECURITY_RATE_LIMIT_GLOBAL_PER_MINUTE?: string;
+  SECURITY_RATE_LIMIT_BLOCK_SECONDS?: string;
+  SECURITY_MAX_REQUEST_BODY_BYTES?: string;
+  SECURITY_ADMIN_EVENT_ISSUE_LIMIT_PER_DAY?: string;
+  SECURITY_ADMIN_INVITE_ISSUE_LIMIT_PER_DAY?: string;
+  FAIRSCALE_ENABLED?: string;
+  FAIRSCALE_FAIL_CLOSED?: string;
+  FAIRSCALE_BASE_URL?: string;
+  FAIRSCALE_VERIFY_PATH?: string;
+  FAIRSCALE_API_KEY?: string;
+  FAIRSCALE_TIMEOUT_MS?: string;
+  FAIRSCALE_MIN_SCORE?: string;
+  FAIRSCALE_ENFORCE_ON_REGISTER?: string;
+  FAIRSCALE_ENFORCE_ON_CLAIM?: string;
 }
 
 const AUDIT_MAX_DEPTH = 4;
@@ -127,6 +147,83 @@ const PARTICIPATION_TICKET_VERIFY_ENDPOINT = '/api/audit/receipts/verify';
 const PARTICIPATION_TICKET_VERIFY_BY_CODE_ENDPOINT = '/api/audit/receipts/verify-code';
 const CONFIRMATION_CODE_MAX_ATTEMPTS = 128;
 const CONFIRMATION_CODE_LEGACY_SCAN_LIMIT = 20_000;
+const SECURITY_RATE_LIMIT_PREFIX = 'security_rate_limit:';
+const SECURITY_DEFAULT_BLOCK_SECONDS = 120;
+const SECURITY_DEFAULT_READ_PER_MINUTE = 300;
+const SECURITY_DEFAULT_MUTATION_PER_MINUTE = 120;
+const SECURITY_DEFAULT_AUTH_PER_10_MINUTES = 60;
+const SECURITY_DEFAULT_ADMIN_LOGIN_PER_10_MINUTES = 20;
+const SECURITY_DEFAULT_VERIFY_PER_MINUTE = 120;
+const SECURITY_DEFAULT_GLOBAL_PER_MINUTE = 2000;
+const SECURITY_DEFAULT_MAX_REQUEST_BODY_BYTES = 64 * 1024;
+const SECURITY_ISSUE_LIMIT_PREFIX = 'security_issue_limit:';
+const SECURITY_DEFAULT_ADMIN_EVENT_ISSUE_LIMIT_PER_DAY = 30;
+const SECURITY_DEFAULT_ADMIN_INVITE_ISSUE_LIMIT_PER_DAY = 50;
+const SECURITY_ISSUE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const FAIRSCALE_DEFAULT_TIMEOUT_MS = 2500;
+const FAIRSCALE_DEFAULT_MIN_SCORE = 70;
+const FAIRSCALE_DEFAULT_VERIFY_PATH = '/v1/risk/score';
+
+type SecurityRatePolicy = {
+  key: string;
+  windowMs: number;
+  maxRequests: number;
+  blockMs: number;
+};
+
+type SecurityRateState = {
+  windowStartMs: number;
+  count: number;
+  blockedUntilMs: number;
+  violations: number;
+  lastSeenMs: number;
+};
+
+type SecurityIssueLimitPolicy = {
+  key: string;
+  maxIssues: number;
+  windowMs: number;
+  code: string;
+  message: string;
+};
+
+type SecurityIssueLimitState = {
+  windowStartMs: number;
+  count: number;
+  lastIssuedAtMs: number;
+};
+
+type FairscaleAction = 'user_register' | 'user_claim' | 'wallet_claim';
+
+type FairscaleDecision = {
+  allow: boolean;
+  score: number | null;
+  reason: string | null;
+  decisionId: string | null;
+};
+
+type FairscaleEnforcementError = {
+  status: number;
+  code: 'fairscale_blocked' | 'fairscale_unavailable' | 'fairscale_not_configured';
+  action: FairscaleAction;
+  message: string;
+  score?: number | null;
+  minScore?: number;
+  reason?: string | null;
+  decisionId?: string | null;
+  detail?: string;
+};
+
+type FairscaleStatus = {
+  enabled: boolean;
+  failClosed: boolean;
+  enforceOnRegister: boolean;
+  enforceOnClaim: boolean;
+  minScore: number;
+  timeoutMs: number;
+  endpointConfigured: boolean;
+  operationalReady: boolean;
+};
 
 type AuditIntegrityIssue = {
   code: string;
@@ -161,6 +258,9 @@ type RuntimeStatusReport = {
     auditMode: 'off' | 'best_effort' | 'required';
     auditOperationalReady: boolean;
     auditPrimarySinkConfigured: boolean;
+    fairscaleEnabled: boolean;
+    fairscaleOperationalReady: boolean;
+    fairscaleFailClosed: boolean;
     corsOrigin: string | null;
   };
   blockingIssues: string[];
@@ -444,9 +544,26 @@ function parseBoundedInt(raw: string | null, fallback: number, min: number, max:
   return parsed;
 }
 
+function parseOptionalBoundedInt(raw: string | null, fallback: number, max: number): number | null {
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) return fallback;
+  if (parsed <= 0) return null;
+  return Math.min(parsed, max);
+}
+
 function parseBooleanQuery(raw: string | null, fallback: boolean): boolean {
   if (raw === null) return fallback;
   const normalized = raw.trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
+  return fallback;
+}
+
+function parseBooleanEnv(raw: string | undefined, fallback: boolean): boolean {
+  if (typeof raw !== 'string') return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return fallback;
   if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
   if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
   return fallback;
@@ -557,6 +674,700 @@ export class SchoolStore implements DurableObject {
 
   private getAuditImmutableMode() {
     return parseAuditImmutableMode(this.env.AUDIT_IMMUTABLE_MODE);
+  }
+
+  private getSecurityBodySizeLimitBytes(): number {
+    return parseBoundedInt(
+      this.env.SECURITY_MAX_REQUEST_BODY_BYTES ?? null,
+      SECURITY_DEFAULT_MAX_REQUEST_BODY_BYTES,
+      4 * 1024,
+      1024 * 1024
+    );
+  }
+
+  private isSecurityRateLimitEnabled(): boolean {
+    return parseBooleanEnv(this.env.SECURITY_RATE_LIMIT_ENABLED, true);
+  }
+
+  private getSecurityRateBlockMs(): number {
+    const blockSeconds = parseBoundedInt(
+      this.env.SECURITY_RATE_LIMIT_BLOCK_SECONDS ?? null,
+      SECURITY_DEFAULT_BLOCK_SECONDS,
+      10,
+      3600
+    );
+    return blockSeconds * 1000;
+  }
+
+  private getSecurityRatePolicy(path: string, method: string): SecurityRatePolicy | null {
+    const m = method.toUpperCase();
+    if (m === 'OPTIONS') return null;
+    if (!this.isApiPath(path)) return null;
+    if (path.startsWith('/metadata/')) return null;
+
+    const blockMs = this.getSecurityRateBlockMs();
+    const readPerMinute = parseBoundedInt(
+      this.env.SECURITY_RATE_LIMIT_READ_PER_MINUTE ?? null,
+      SECURITY_DEFAULT_READ_PER_MINUTE,
+      30,
+      5000
+    );
+    const mutationPerMinute = parseBoundedInt(
+      this.env.SECURITY_RATE_LIMIT_MUTATION_PER_MINUTE ?? null,
+      SECURITY_DEFAULT_MUTATION_PER_MINUTE,
+      10,
+      3000
+    );
+    const authPer10Minutes = parseBoundedInt(
+      this.env.SECURITY_RATE_LIMIT_AUTH_PER_10_MINUTES ?? null,
+      SECURITY_DEFAULT_AUTH_PER_10_MINUTES,
+      5,
+      3000
+    );
+    const adminLoginPer10Minutes = parseBoundedInt(
+      this.env.SECURITY_RATE_LIMIT_ADMIN_LOGIN_PER_10_MINUTES ?? null,
+      SECURITY_DEFAULT_ADMIN_LOGIN_PER_10_MINUTES,
+      3,
+      500
+    );
+    const verifyPerMinute = parseBoundedInt(
+      this.env.SECURITY_RATE_LIMIT_VERIFY_PER_MINUTE ?? null,
+      SECURITY_DEFAULT_VERIFY_PER_MINUTE,
+      10,
+      5000
+    );
+
+    if (path === '/api/admin/login') {
+      return {
+        key: 'admin_login',
+        windowMs: 10 * 60 * 1000,
+        maxRequests: adminLoginPer10Minutes,
+        blockMs: Math.max(blockMs, 5 * 60 * 1000),
+      };
+    }
+
+    if (
+      path === '/api/auth/verify' ||
+      path === '/api/users/tickets/sync' ||
+      path === '/api/users/register' ||
+      /^\/api\/events\/[^/]+\/claim$/.test(path)
+    ) {
+      return {
+        key: 'user_auth',
+        windowMs: 10 * 60 * 1000,
+        maxRequests: authPer10Minutes,
+        blockMs: Math.max(blockMs, 5 * 60 * 1000),
+      };
+    }
+
+    if (path === '/api/audit/receipts/verify' || path === '/api/audit/receipts/verify-code') {
+      return {
+        key: 'receipt_verify',
+        windowMs: 60 * 1000,
+        maxRequests: verifyPerMinute,
+        blockMs,
+      };
+    }
+
+    if (m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE') {
+      return {
+        key: 'mutating',
+        windowMs: 60 * 1000,
+        maxRequests: mutationPerMinute,
+        blockMs,
+      };
+    }
+
+    return {
+      key: 'read',
+      windowMs: 60 * 1000,
+      maxRequests: readPerMinute,
+      blockMs,
+    };
+  }
+
+  private parseSecurityRateState(raw: unknown): SecurityRateState | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const windowStartMs = Number(obj.windowStartMs);
+    const count = Number(obj.count);
+    const blockedUntilMs = Number(obj.blockedUntilMs);
+    const violations = Number(obj.violations);
+    const lastSeenMs = Number(obj.lastSeenMs);
+    if (
+      !Number.isFinite(windowStartMs) ||
+      !Number.isFinite(count) ||
+      !Number.isFinite(blockedUntilMs) ||
+      !Number.isFinite(violations) ||
+      !Number.isFinite(lastSeenMs)
+    ) {
+      return null;
+    }
+    return {
+      windowStartMs,
+      count,
+      blockedUntilMs,
+      violations,
+      lastSeenMs,
+    };
+  }
+
+  private getClientIpAddress(request: Request): string {
+    const cfIp = request.headers.get('CF-Connecting-IP')?.trim();
+    if (cfIp) return cfIp;
+    const xff = request.headers.get('X-Forwarded-For')?.trim();
+    if (xff) {
+      const first = xff.split(',')[0]?.trim();
+      if (first) return first;
+    }
+    return 'unknown';
+  }
+
+  private rateLimitExceededResponse(policy: SecurityRatePolicy, retryAfterSec: number): Response {
+    return Response.json(
+      {
+        error: 'too many requests',
+        code: 'rate_limited',
+        bucket: policy.key,
+        retryAfterSec,
+      },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(retryAfterSec),
+        },
+      }
+    );
+  }
+
+  private async consumeSecurityRateState(
+    stateKey: string,
+    now: number,
+    policy: SecurityRatePolicy
+  ): Promise<{ limited: boolean; retryAfterSec: number }> {
+    const parsed = this.parseSecurityRateState(await this.ctx.storage.get(stateKey));
+    const state: SecurityRateState = parsed ?? {
+      windowStartMs: now,
+      count: 0,
+      blockedUntilMs: 0,
+      violations: 0,
+      lastSeenMs: now,
+    };
+
+    if (state.blockedUntilMs > now) {
+      return {
+        limited: true,
+        retryAfterSec: Math.max(1, Math.ceil((state.blockedUntilMs - now) / 1000)),
+      };
+    }
+
+    if (now < state.windowStartMs || now - state.windowStartMs >= policy.windowMs) {
+      state.windowStartMs = now;
+      state.count = 0;
+    }
+
+    state.count += 1;
+    state.lastSeenMs = now;
+
+    if (state.count > policy.maxRequests) {
+      state.violations = Math.min(state.violations + 1, 12);
+      const scale = Math.min(2 ** (state.violations - 1), 16);
+      const blockMs = policy.blockMs * scale;
+      state.blockedUntilMs = now + blockMs;
+      await this.ctx.storage.put(stateKey, state);
+      return {
+        limited: true,
+        retryAfterSec: Math.max(1, Math.ceil(blockMs / 1000)),
+      };
+    }
+
+    await this.ctx.storage.put(stateKey, state);
+    return { limited: false, retryAfterSec: 0 };
+  }
+
+  private async enforceSecurityBodySizeLimit(request: Request, path: string): Promise<Response | null> {
+    const m = request.method.toUpperCase();
+    if (!this.isApiPath(path)) return null;
+    if (!(m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE')) return null;
+    const maxBytes = this.getSecurityBodySizeLimitBytes();
+
+    const contentLengthHeader = request.headers.get('Content-Length');
+    if (contentLengthHeader) {
+      const contentLength = Number.parseInt(contentLengthHeader, 10);
+      if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+        return Response.json(
+          {
+            error: 'payload too large',
+            code: 'payload_too_large',
+            maxBytes,
+          },
+          { status: 413 }
+        );
+      }
+      if (Number.isFinite(contentLength) && contentLength >= 0) {
+        return null;
+      }
+    }
+
+    const bodyStream = request.clone().body;
+    if (!bodyStream) return null;
+    const reader = bodyStream.getReader();
+    let totalBytes = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value?.byteLength ?? 0;
+      if (totalBytes > maxBytes) {
+        return Response.json(
+          {
+            error: 'payload too large',
+            code: 'payload_too_large',
+            maxBytes,
+          },
+          { status: 413 }
+        );
+      }
+    }
+    return null;
+  }
+
+  private async enforceSecurityRateLimit(request: Request, path: string): Promise<Response | null> {
+    if (!this.isSecurityRateLimitEnabled()) return null;
+    const policy = this.getSecurityRatePolicy(path, request.method);
+    if (!policy) return null;
+
+    const now = Date.now();
+    const clientIp = this.getClientIpAddress(request);
+    const clientHash = await hashString(`client:${clientIp}`);
+    const clientKey = `${SECURITY_RATE_LIMIT_PREFIX}${policy.key}:client:${clientHash}`;
+    const clientResult = await this.consumeSecurityRateState(clientKey, now, policy);
+    if (clientResult.limited) {
+      return this.rateLimitExceededResponse(policy, clientResult.retryAfterSec);
+    }
+
+    const globalPerMinute = parseBoundedInt(
+      this.env.SECURITY_RATE_LIMIT_GLOBAL_PER_MINUTE ?? null,
+      SECURITY_DEFAULT_GLOBAL_PER_MINUTE,
+      100,
+      50_000
+    );
+    const globalPolicy: SecurityRatePolicy = {
+      key: `${policy.key}_global`,
+      windowMs: 60 * 1000,
+      maxRequests: globalPerMinute,
+      blockMs: policy.blockMs,
+    };
+    const globalKey = `${SECURITY_RATE_LIMIT_PREFIX}${globalPolicy.key}`;
+    const globalResult = await this.consumeSecurityRateState(globalKey, now, globalPolicy);
+    if (globalResult.limited) {
+      return this.rateLimitExceededResponse(globalPolicy, globalResult.retryAfterSec);
+    }
+
+    return null;
+  }
+
+  private async enforceSecurityPreflight(request: Request, path: string): Promise<Response | null> {
+    const bodySizeError = await this.enforceSecurityBodySizeLimit(request, path);
+    if (bodySizeError) return bodySizeError;
+    return this.enforceSecurityRateLimit(request, path);
+  }
+
+  private parseSecurityIssueLimitState(raw: unknown): SecurityIssueLimitState | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const windowStartMs = Number(obj.windowStartMs);
+    const count = Number(obj.count);
+    const lastIssuedAtMs = Number(obj.lastIssuedAtMs);
+    if (!Number.isFinite(windowStartMs) || !Number.isFinite(count) || !Number.isFinite(lastIssuedAtMs)) {
+      return null;
+    }
+    return { windowStartMs, count, lastIssuedAtMs };
+  }
+
+  private issueLimitExceededResponse(
+    policy: SecurityIssueLimitPolicy,
+    retryAfterSec: number,
+    limitPerWindow: number
+  ): Response {
+    return Response.json(
+      {
+        error: policy.message,
+        code: policy.code,
+        limitPerWindow,
+        retryAfterSec,
+      },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(retryAfterSec),
+        },
+      }
+    );
+  }
+
+  private async consumeSecurityIssueLimit(
+    policy: SecurityIssueLimitPolicy,
+    actorKey: string
+  ): Promise<{ limited: boolean; retryAfterSec: number }> {
+    const now = Date.now();
+    const actorHash = await hashString(`issuer:${policy.key}:${actorKey}`);
+    const storageKey = `${SECURITY_ISSUE_LIMIT_PREFIX}${policy.key}:${actorHash}`;
+    const parsed = this.parseSecurityIssueLimitState(await this.ctx.storage.get(storageKey));
+    const state: SecurityIssueLimitState = parsed ?? {
+      windowStartMs: now,
+      count: 0,
+      lastIssuedAtMs: now,
+    };
+
+    if (now < state.windowStartMs || now - state.windowStartMs >= policy.windowMs) {
+      state.windowStartMs = now;
+      state.count = 0;
+    }
+
+    if (state.count >= policy.maxIssues) {
+      const retryAfterMs = Math.max(1000, policy.windowMs - (now - state.windowStartMs));
+      return {
+        limited: true,
+        retryAfterSec: Math.max(1, Math.ceil(retryAfterMs / 1000)),
+      };
+    }
+
+    state.count += 1;
+    state.lastIssuedAtMs = now;
+    await this.ctx.storage.put(storageKey, state);
+    return { limited: false, retryAfterSec: 0 };
+  }
+
+  private async enforceAdminEventIssueLimit(operator: OperatorIdentity): Promise<Response | null> {
+    const perDay = parseOptionalBoundedInt(
+      this.env.SECURITY_ADMIN_EVENT_ISSUE_LIMIT_PER_DAY ?? null,
+      SECURITY_DEFAULT_ADMIN_EVENT_ISSUE_LIMIT_PER_DAY,
+      5000
+    );
+    if (perDay === null) return null;
+    const policy: SecurityIssueLimitPolicy = {
+      key: 'event_issue',
+      maxIssues: perDay,
+      windowMs: SECURITY_ISSUE_LIMIT_WINDOW_MS,
+      code: 'event_issue_limit_exceeded',
+      message: 'event issuance limit exceeded',
+    };
+    const result = await this.consumeSecurityIssueLimit(policy, operator.adminId);
+    if (!result.limited) return null;
+    return this.issueLimitExceededResponse(policy, result.retryAfterSec, perDay);
+  }
+
+  private async enforceAdminInviteIssueLimit(): Promise<Response | null> {
+    const perDay = parseOptionalBoundedInt(
+      this.env.SECURITY_ADMIN_INVITE_ISSUE_LIMIT_PER_DAY ?? null,
+      SECURITY_DEFAULT_ADMIN_INVITE_ISSUE_LIMIT_PER_DAY,
+      5000
+    );
+    if (perDay === null) return null;
+    const policy: SecurityIssueLimitPolicy = {
+      key: 'admin_invite_issue',
+      maxIssues: perDay,
+      windowMs: SECURITY_ISSUE_LIMIT_WINDOW_MS,
+      code: 'admin_invite_issue_limit_exceeded',
+      message: 'admin invite issuance limit exceeded',
+    };
+    const result = await this.consumeSecurityIssueLimit(policy, 'master');
+    if (!result.limited) return null;
+    return this.issueLimitExceededResponse(policy, result.retryAfterSec, perDay);
+  }
+
+  private getFairscaleStatus(): FairscaleStatus {
+    const baseUrl = (this.env.FAIRSCALE_BASE_URL ?? '').trim().replace(/\/+$/, '');
+    const enabled = parseBooleanEnv(this.env.FAIRSCALE_ENABLED, Boolean(baseUrl));
+    const failClosed = parseBooleanEnv(this.env.FAIRSCALE_FAIL_CLOSED, true);
+    const enforceOnRegister = parseBooleanEnv(this.env.FAIRSCALE_ENFORCE_ON_REGISTER, true);
+    const enforceOnClaim = parseBooleanEnv(this.env.FAIRSCALE_ENFORCE_ON_CLAIM, true);
+    const minScore = parseBoundedInt(
+      this.env.FAIRSCALE_MIN_SCORE ?? null,
+      FAIRSCALE_DEFAULT_MIN_SCORE,
+      0,
+      100
+    );
+    const timeoutMs = parseBoundedInt(
+      this.env.FAIRSCALE_TIMEOUT_MS ?? null,
+      FAIRSCALE_DEFAULT_TIMEOUT_MS,
+      200,
+      10000
+    );
+    const endpointConfigured = Boolean(baseUrl);
+    return {
+      enabled,
+      failClosed,
+      enforceOnRegister,
+      enforceOnClaim,
+      minScore,
+      timeoutMs,
+      endpointConfigured,
+      operationalReady: !enabled || endpointConfigured,
+    };
+  }
+
+  private getFairscaleVerifyUrl(): string | null {
+    const baseUrl = (this.env.FAIRSCALE_BASE_URL ?? '').trim().replace(/\/+$/, '');
+    if (!baseUrl) return null;
+    const rawPath = (this.env.FAIRSCALE_VERIFY_PATH ?? '').trim();
+    if (rawPath && /^https?:\/\//i.test(rawPath)) {
+      return rawPath;
+    }
+    const path = rawPath || FAIRSCALE_DEFAULT_VERIFY_PATH;
+    return `${baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
+  }
+
+  private shouldEnforceFairscaleAction(action: FairscaleAction): boolean {
+    const status = this.getFairscaleStatus();
+    if (!status.enabled) return false;
+    if (action === 'user_register') return status.enforceOnRegister;
+    return status.enforceOnClaim;
+  }
+
+  private extractFairscaleToken(request: Request, body: unknown): string {
+    const headerToken = request.headers.get('X-Fairscale-Token')?.trim();
+    if (headerToken) return headerToken.slice(0, 2048);
+    if (body && typeof body === 'object' && 'fairscaleToken' in body) {
+      const raw = (body as { fairscaleToken?: unknown }).fairscaleToken;
+      if (typeof raw === 'string' && raw.trim()) {
+        return raw.trim().slice(0, 2048);
+      }
+    }
+    return '';
+  }
+
+  private parseFairscaleDecision(raw: unknown, minScore: number): FairscaleDecision {
+    const obj = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+    const riskRaw = obj.risk;
+    const risk = riskRaw && typeof riskRaw === 'object' ? riskRaw as Record<string, unknown> : null;
+    const scoreRaw =
+      this.normalizeNumberField(obj.score) ??
+      this.normalizeNumberField(obj.riskScore) ??
+      (risk ? this.normalizeNumberField(risk.score) : null);
+    const score = scoreRaw === null ? null : Math.max(0, Math.min(100, scoreRaw));
+
+    const decisionTextRaw =
+      typeof obj.decision === 'string'
+        ? obj.decision
+        : risk && typeof risk.decision === 'string'
+          ? risk.decision
+          : '';
+    const decisionText = decisionTextRaw.trim().toLowerCase();
+
+    let allow: boolean | null = null;
+    if (typeof obj.allow === 'boolean') {
+      allow = obj.allow;
+    } else if (risk && typeof risk.allow === 'boolean') {
+      allow = risk.allow;
+    } else if (decisionText) {
+      if (decisionText === 'allow' || decisionText === 'pass' || decisionText === 'approved' || decisionText === 'ok') {
+        allow = true;
+      } else if (
+        decisionText === 'deny' ||
+        decisionText === 'block' ||
+        decisionText === 'reject' ||
+        decisionText === 'challenge' ||
+        decisionText === 'review'
+      ) {
+        allow = false;
+      }
+    }
+
+    const challengeRequired =
+      obj.challengeRequired === true ||
+      (risk && risk.challengeRequired === true);
+    if (challengeRequired) {
+      allow = false;
+    }
+    if (score !== null && score < minScore) {
+      allow = false;
+    }
+    if (allow === null) {
+      allow = score === null ? true : score >= minScore;
+    }
+
+    const reason =
+      typeof obj.reason === 'string'
+        ? obj.reason.trim()
+        : typeof obj.message === 'string'
+          ? obj.message.trim()
+          : risk && typeof risk.reason === 'string'
+            ? risk.reason.trim()
+            : '';
+    const decisionIdRaw =
+      typeof obj.decisionId === 'string'
+        ? obj.decisionId
+        : typeof obj.id === 'string'
+          ? obj.id
+          : risk && typeof risk.decisionId === 'string'
+            ? risk.decisionId
+            : '';
+
+    return {
+      allow,
+      score,
+      reason: reason || null,
+      decisionId: decisionIdRaw.trim() || null,
+    };
+  }
+
+  private async evaluateFairscaleDecision(params: {
+    request: Request;
+    action: FairscaleAction;
+    eventId?: string;
+    userId?: string;
+    subject?: string;
+    fairscaleToken?: string;
+  }): Promise<FairscaleDecision> {
+    const status = this.getFairscaleStatus();
+    const verifyUrl = this.getFairscaleVerifyUrl();
+    if (!verifyUrl) {
+      throw new Error('fairscale_not_configured');
+    }
+
+    const apiKey = (this.env.FAIRSCALE_API_KEY ?? '').trim();
+    const ipAddress = this.getClientIpAddress(params.request);
+    const ipHash = await hashString(`ip:${ipAddress}`);
+    const subjectHash = params.subject ? await hashString(`subject:${params.subject}`) : null;
+    const userIdHash = params.userId ? await hashString(`user:${params.userId}`) : null;
+    const eventIdHash = params.eventId ? await hashString(`event:${params.eventId}`) : null;
+    const userAgentRaw = params.request.headers.get('User-Agent') ?? '';
+    const userAgent = userAgentRaw.trim().slice(0, 512);
+    const nowIso = new Date().toISOString();
+
+    const payload = {
+      version: 1,
+      source: 'instant-grant-core',
+      action: params.action,
+      checkedAt: nowIso,
+      subjectHash,
+      userIdHash,
+      eventIdHash,
+      ipAddress: ipAddress === 'unknown' ? null : ipAddress,
+      ipHash,
+      userAgent: userAgent || null,
+      attestationToken: params.fairscaleToken?.trim() || null,
+    };
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort('fairscale-timeout'), status.timeoutMs);
+    try {
+      const res = await fetch(verifyUrl, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'content-type': 'application/json',
+          ...(apiKey ? { authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        throw new Error(`fairscale_http_${res.status}`);
+      }
+      const json = await res.json().catch(() => ({}));
+      return this.parseFairscaleDecision(json, status.minScore);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error('fairscale_timeout');
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  private fairscaleErrorResponse(error: FairscaleEnforcementError): Response {
+    return Response.json(
+      {
+        error: error.message,
+        code: error.code,
+        action: error.action,
+        ...(typeof error.minScore === 'number' ? { minScore: error.minScore } : {}),
+        ...(typeof error.score === 'number' ? { score: error.score } : {}),
+        ...(error.reason ? { reason: error.reason } : {}),
+        ...(error.decisionId ? { decisionId: error.decisionId } : {}),
+        ...(error.detail ? { detail: error.detail } : {}),
+      },
+      { status: error.status }
+    );
+  }
+
+  private mapFairscaleErrorToSchoolClaimResult(error: FairscaleEnforcementError): SchoolClaimResult {
+    if (error.code === 'fairscale_blocked') {
+      const detail = error.reason ? ` (${error.reason})` : '';
+      return {
+        success: false,
+        error: {
+          code: 'eligibility',
+          message: `FairScale判定により参加条件を満たしていないため受け付けできません${detail}`,
+        },
+      };
+    }
+    return {
+      success: false,
+      error: {
+        code: 'retryable',
+        message: 'FairScale判定サービスが一時的に利用できないため、時間を置いて再試行してください。',
+      },
+    };
+  }
+
+  private async enforceFairscaleRisk(params: {
+    request: Request;
+    action: FairscaleAction;
+    eventId?: string;
+    userId?: string;
+    subject?: string;
+    fairscaleToken?: string;
+  }): Promise<FairscaleEnforcementError | null> {
+    const status = this.getFairscaleStatus();
+    if (!this.shouldEnforceFairscaleAction(params.action)) {
+      return null;
+    }
+    if (!status.operationalReady) {
+      if (!status.failClosed) {
+        return null;
+      }
+      return {
+        status: 503,
+        code: 'fairscale_not_configured',
+        action: params.action,
+        message: 'fairscale verification endpoint is not configured',
+      };
+    }
+
+    try {
+      const decision = await this.evaluateFairscaleDecision(params);
+      if (decision.allow) {
+        return null;
+      }
+      return {
+        status: 403,
+        code: 'fairscale_blocked',
+        action: params.action,
+        message: 'fairscale sybil check blocked this request',
+        minScore: status.minScore,
+        score: decision.score,
+        reason: decision.reason,
+        decisionId: decision.decisionId,
+      };
+    } catch (err) {
+      if (!status.failClosed) {
+        console.error('[fairscale] verification failed but allowed (fail-open mode)', err);
+        return null;
+      }
+      const detail = err instanceof Error ? err.message : String(err);
+      return {
+        status: 503,
+        code: 'fairscale_unavailable',
+        action: params.action,
+        message: 'fairscale verification is temporarily unavailable',
+        detail,
+      };
+    }
   }
 
   private isMutatingMethod(method: string): boolean {
@@ -902,6 +1713,11 @@ export class SchoolStore implements DurableObject {
     return password;
   }
 
+  private isDefaultMasterPasswordConfigured(): boolean {
+    const password = this.env.ADMIN_PASSWORD?.trim() ?? '';
+    return password === DEFAULT_ADMIN_PASSWORD;
+  }
+
   private getConfiguredDemoPassword(): string | null {
     const password = this.env.ADMIN_DEMO_PASSWORD?.trim() ?? '';
     return password || null;
@@ -913,6 +1729,17 @@ export class SchoolStore implements DurableObject {
 
   private serverConfigErrorResponse(): Response {
     return Response.json({ error: 'server configuration error' }, { status: 500 });
+  }
+
+  private insecureMasterPasswordResponse(): Response {
+    return Response.json(
+      {
+        error: 'insecure admin password configuration',
+        code: 'insecure_admin_password',
+        detail: 'Replace ADMIN_PASSWORD placeholder value before using master-protected APIs.',
+      },
+      { status: 503 }
+    );
   }
 
   private async authenticateOperator(
@@ -963,6 +1790,9 @@ export class SchoolStore implements DurableObject {
   }
 
   private requireMasterAuthorization(request: Request): Response | null {
+    if (this.isDefaultMasterPasswordConfigured()) {
+      return this.insecureMasterPasswordResponse();
+    }
     const masterPassword = this.getConfiguredMasterPassword();
     if (!masterPassword) {
       return this.serverConfigErrorResponse();
@@ -1073,6 +1903,7 @@ export class SchoolStore implements DurableObject {
 
   private getRuntimeStatus(): RuntimeStatusReport {
     const auditStatus = this.getAuditStatus();
+    const fairscaleStatus = this.getFairscaleStatus();
     const blockingIssues: string[] = [];
     const warnings: string[] = [];
 
@@ -1104,6 +1935,11 @@ export class SchoolStore implements DurableObject {
     if (auditStatus.failClosedForMutatingRequests && !auditStatus.operationalReady) {
       blockingIssues.push('Audit immutable sink is not operational while AUDIT_IMMUTABLE_MODE=required');
     }
+    if (fairscaleStatus.enabled && fairscaleStatus.failClosed && !fairscaleStatus.operationalReady) {
+      blockingIssues.push('FairScale is enabled in fail-closed mode but FAIRSCALE_BASE_URL is not configured');
+    } else if (fairscaleStatus.enabled && !fairscaleStatus.operationalReady) {
+      warnings.push('FairScale is enabled but FAIRSCALE_BASE_URL is not configured (fail-open mode)');
+    }
 
     const corsOrigin = this.env.CORS_ORIGIN?.trim() ?? '';
     if (!corsOrigin) {
@@ -1124,6 +1960,9 @@ export class SchoolStore implements DurableObject {
         auditMode: auditStatus.mode,
         auditOperationalReady: auditStatus.operationalReady,
         auditPrimarySinkConfigured: auditStatus.primaryImmutableSinkConfigured,
+        fairscaleEnabled: fairscaleStatus.enabled,
+        fairscaleOperationalReady: fairscaleStatus.operationalReady,
+        fairscaleFailClosed: fairscaleStatus.failClosed,
         corsOrigin: corsOrigin || null,
       },
       blockingIssues,
@@ -3618,6 +4457,11 @@ export class SchoolStore implements DurableObject {
         return Response.json({ error: 'name required' }, { status: 400 });
       }
 
+      const issueLimitError = await this.enforceAdminInviteIssueLimit();
+      if (issueLimitError) {
+        return issueLimitError;
+      }
+
       // Generate secure random code
       const code = crypto.randomUUID().replace(/-/g, '');
       const adminId = crypto.randomUUID();
@@ -3768,6 +4612,9 @@ export class SchoolStore implements DurableObject {
       }
 
       const password = typeof body?.password === 'string' ? body.password : '';
+      if (this.isDefaultMasterPasswordConfigured() && password === DEFAULT_ADMIN_PASSWORD) {
+        return this.insecureMasterPasswordResponse();
+      }
       const masterPassword = this.getConfiguredMasterPassword();
       const demoPassword = this.getConfiguredDemoPassword();
 
@@ -3925,6 +4772,10 @@ export class SchoolStore implements DurableObject {
           );
         }
       }
+      const issueLimitError = await this.enforceAdminEventIssueLimit(operator);
+      if (issueLimitError) {
+        return issueLimitError;
+      }
       const event = await this.store.createEvent({
         title, datetime, host, state: body.state,
         solanaMint: solanaMint ?? undefined,
@@ -4070,6 +4921,7 @@ export class SchoolStore implements DurableObject {
           error: { code: 'invalid', message: 'イベントIDが無効です' },
         } as SchoolClaimResult);
       }
+      const fairscaleToken = this.extractFairscaleToken(request, body);
       const eventId = typeof body?.eventId === 'string' ? body.eventId.trim() : '';
       const event = eventId ? await this.store.getEvent(eventId) : null;
       if (!event) {
@@ -4115,6 +4967,21 @@ export class SchoolStore implements DurableObject {
           success: false,
           error: { code: 'wallet_required', message: 'Phantomに接続してください' },
         } as SchoolClaimResult);
+      }
+      const alreadyClaimed = await this.store.hasClaimed(eventId, subject, event);
+      if (!alreadyClaimed) {
+        const fairscaleError = await this.enforceFairscaleRisk({
+          request,
+          action: 'wallet_claim',
+          eventId,
+          subject,
+          fairscaleToken: fairscaleToken || undefined,
+        });
+        if (fairscaleError) {
+          return Response.json(this.mapFairscaleErrorToSchoolClaimResult(fairscaleError), {
+            status: fairscaleError.status,
+          });
+        }
       }
 
       let issuedConfirmationCode: string;
@@ -4305,6 +5172,17 @@ export class SchoolStore implements DurableObject {
       if (!/^\d{4,6}$/.test(pin)) {
         return Response.json({ error: 'pin must be 4-6 digits' }, { status: 400 });
       }
+      const fairscaleToken = this.extractFairscaleToken(request, body);
+      const fairscaleError = await this.enforceFairscaleRisk({
+        request,
+        action: 'user_register',
+        userId,
+        subject: userId,
+        fairscaleToken: fairscaleToken || undefined,
+      });
+      if (fairscaleError) {
+        return this.fairscaleErrorResponse(fairscaleError);
+      }
       const pinHash = await hashPin(pin);
       const registerResult = await this.registerUserWithUniqueId({
         userId,
@@ -4341,6 +5219,7 @@ export class SchoolStore implements DurableObject {
       } catch {
         return Response.json({ error: 'missing params' }, { status: 400 });
       }
+      const fairscaleToken = this.extractFairscaleToken(request, body);
       const userId = this.normalizeUserId(body?.userId);
       const pin = typeof body?.pin === 'string' ? body.pin : '';
       if (!userId || !pin) {
@@ -4385,6 +5264,19 @@ export class SchoolStore implements DurableObject {
           error: 'on-chain claim requires off-chain receipt verification first',
           code: 'offchain_receipt_required',
         }, { status: 409 });
+      }
+      if (!already) {
+        const fairscaleError = await this.enforceFairscaleRisk({
+          request,
+          action: 'user_claim',
+          eventId,
+          userId,
+          subject: userId,
+          fairscaleToken: fairscaleToken || undefined,
+        });
+        if (fairscaleError) {
+          return this.fairscaleErrorResponse(fairscaleError);
+        }
       }
       if (already) {
         const rec = await this.store.getClaimRecord(eventId, userId);
@@ -4509,7 +5401,7 @@ export class SchoolStore implements DurableObject {
         headers: {
           'Access-Control-Allow-Origin': this.env.CORS_ORIGIN || '*',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Fairscale-Token',
         },
       });
     }
@@ -4520,6 +5412,11 @@ export class SchoolStore implements DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    const securityError = await this.enforceSecurityPreflight(request, path);
+    if (securityError) {
+      return securityError;
+    }
 
     // Fail closed before side-effects when immutable audit is required but not operational.
     // This avoids mutating state and then failing later during audit append.
