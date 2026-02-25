@@ -14,6 +14,8 @@ const sharp = require('sharp');
 
 const ASSETS_DIR = path.join(__dirname, '..', 'assets');
 const SIZE = 1024;
+const ICON_SAFE_RATIO = 0.9;
+const FAVICON_SIZE = 48;
 const SOURCE_NAMES = ['icon-source.png', 'icon-source.webp', 'icon-source.jpg', 'icon-source.jpeg'];
 
 // 幾何学的な "W" の SVG パス（フォントに依存しない・フォールバック用）
@@ -37,49 +39,46 @@ function findSourceImage() {
   return null;
 }
 
+async function renderCenteredWithPadding(sourcePath, outputPath, canvasSize, safeRatio) {
+  const innerSize = Math.max(1, Math.round(canvasSize * safeRatio));
+  const inner = await sharp(sourcePath)
+    .resize(innerSize, innerSize, {
+      fit: 'contain',
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
+    })
+    .png()
+    .toBuffer();
+
+  await sharp({
+    create: {
+      width: canvasSize,
+      height: canvasSize,
+      channels: 4,
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
+    },
+  })
+    .composite([{ input: inner, gravity: 'center' }])
+    .png()
+    .toFile(outputPath);
+}
+
 async function generateFromSource(sourcePath) {
   const basePath = path.join(ASSETS_DIR, 'icon.png');
   const adaptivePath = path.join(ASSETS_DIR, 'adaptive-icon.png');
   const faviconPath = path.join(ASSETS_DIR, 'favicon.png');
   const splashPath = path.join(ASSETS_DIR, 'splash.png');
 
-  const meta = await sharp(sourcePath).metadata();
-  const isExactSize = meta.width === SIZE && meta.height === SIZE;
-
-  // アイコン: 先ほど送った画像のデザインをそのまま使用
-  // 1024x1024 ならリサイズせず、それ以外は fit('contain') でアスペクト維持＋白余白
-  if (isExactSize) {
-    await sharp(sourcePath).png().toFile(basePath);
-  } else {
-    await sharp(sourcePath)
-      .resize(SIZE, SIZE, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-      .png()
-      .toFile(basePath);
-  }
+  // iOS/Android の角丸マスクで外周が欠けないように、白余白を確保して中央配置する。
+  await renderCenteredWithPadding(sourcePath, basePath, SIZE, ICON_SAFE_RATIO);
   console.log('Created:', basePath);
 
-  if (isExactSize) {
-    await sharp(sourcePath).png().toFile(adaptivePath);
-  } else {
-    await sharp(sourcePath)
-      .resize(SIZE, SIZE, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-      .png()
-      .toFile(adaptivePath);
-  }
+  await renderCenteredWithPadding(sourcePath, adaptivePath, SIZE, ICON_SAFE_RATIO);
   console.log('Created:', adaptivePath);
 
-  await sharp(sourcePath).resize(48, 48, { fit: 'contain' }).png().toFile(faviconPath);
+  await sharp(basePath).resize(FAVICON_SIZE, FAVICON_SIZE, { fit: 'contain' }).png().toFile(faviconPath);
   console.log('Created:', faviconPath);
 
-  // スプラッシュ: 同じデザインをそのまま使用（1024x1024）
-  if (isExactSize) {
-    await sharp(sourcePath).png().toFile(splashPath);
-  } else {
-    await sharp(sourcePath)
-      .resize(SIZE, SIZE, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-      .png()
-      .toFile(splashPath);
-  }
+  await renderCenteredWithPadding(sourcePath, splashPath, SIZE, ICON_SAFE_RATIO);
   console.log('Created:', splashPath);
 }
 
