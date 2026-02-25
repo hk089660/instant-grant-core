@@ -30,7 +30,8 @@ export function getDisplayName(): string | null {
   if (typeof window === 'undefined') return null;
   try {
     const v = window.localStorage.getItem(DISPLAY_NAME_KEY);
-    return v ? v.trim() : null;
+    const normalized = typeof v === 'string' ? v.trim() : '';
+    return normalized || null;
   } catch {
     return null;
   }
@@ -40,6 +41,15 @@ export function setDisplayName(displayName: string): void {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(DISPLAY_NAME_KEY, displayName.trim());
+  } catch {
+    // ignore
+  }
+}
+
+export function clearDisplayName(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(DISPLAY_NAME_KEY);
   } catch {
     // ignore
   }

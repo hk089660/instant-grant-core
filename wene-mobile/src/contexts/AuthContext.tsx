@@ -9,6 +9,7 @@ import {
   getDisplayName,
   setUserId as persistUserId,
   setDisplayName as persistDisplayName,
+  clearDisplayName as persistClearDisplayName,
   clearUser as persistClearUser,
 } from '../lib/userStorage';
 import { JOIN_TOKEN_STORAGE_KEY } from '../lib/joinToken';
@@ -154,7 +155,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const normalized = typeof displayName === 'string' ? displayName.trim() : '';
 
     if (!normalized) {
-      // Storage側に「displayName削除」APIがない前提なので、stateだけnullに戻す
+      persistClearDisplayName();
       setState((prev) => ({ ...prev, displayName: null }));
       return;
     }

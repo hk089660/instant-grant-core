@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, StyleSheet, TouchableOpacity, ScrollView, Image } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, StyleSheet, TouchableOpacity, ScrollView, Image, Animated, Easing } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,6 +12,73 @@ export const HomeScreen: React.FC = () => {
   const router = useRouter();
   const { userId, displayName, clearUser } = useAuth();
   const appIcon = require('../../assets/icon.png');
+  const logoReveal = useRef(new Animated.Value(0)).current;
+  const logoFloat = useRef(new Animated.Value(0)).current;
+  const floatLoopRef = useRef<Animated.CompositeAnimation | null>(null);
+
+  useEffect(() => {
+    const introAnimation = Animated.timing(logoReveal, {
+      toValue: 1,
+      duration: 760,
+      easing: Easing.out(Easing.back(2.3)),
+      useNativeDriver: true,
+    });
+
+    introAnimation.start(({ finished }) => {
+      if (!finished) return;
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(logoFloat, {
+            toValue: 1,
+            duration: 1450,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: true,
+          }),
+          Animated.timing(logoFloat, {
+            toValue: 0,
+            duration: 1450,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      floatLoopRef.current = loop;
+      loop.start();
+    });
+
+    return () => {
+      introAnimation.stop();
+      floatLoopRef.current?.stop();
+      logoReveal.stopAnimation();
+      logoFloat.stopAnimation();
+    };
+  }, [logoReveal, logoFloat]);
+
+  const logoScale = logoReveal.interpolate({
+    inputRange: [0, 0.42, 0.7, 1],
+    outputRange: [0.62, 1.08, 0.96, 1],
+  });
+  const logoRotate = logoReveal.interpolate({
+    inputRange: [0, 0.45, 0.7, 0.86, 1],
+    outputRange: ['-13deg', '7deg', '-3deg', '1.2deg', '0deg'],
+  });
+  const logoLiftIn = logoReveal.interpolate({
+    inputRange: [0, 1],
+    outputRange: [28, 0],
+  });
+  const logoFloatY = logoFloat.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -5],
+  });
+  const logoTranslateY = Animated.add(logoLiftIn, logoFloatY);
+  const popRingScale = logoReveal.interpolate({
+    inputRange: [0, 0.35, 1],
+    outputRange: [0.7, 1.36, 1],
+  });
+  const popRingOpacity = logoReveal.interpolate({
+    inputRange: [0, 0.18, 0.58, 1],
+    outputRange: [0, 0.28, 0.08, 0],
+  });
 
   const handleGoToEvents = () => {
     router.push(schoolRoutes.events as any);
@@ -41,9 +108,31 @@ export const HomeScreen: React.FC = () => {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.heroCard}>
-          <View style={styles.logoWrap}>
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.logoPing,
+              {
+                opacity: popRingOpacity,
+                transform: [{ scale: popRingScale }],
+              },
+            ]}
+          />
+          <Animated.View
+            style={[
+              styles.logoWrap,
+              {
+                opacity: logoReveal,
+                transform: [
+                  { translateY: logoTranslateY },
+                  { rotate: logoRotate },
+                  { scale: logoScale },
+                ],
+              },
+            ]}
+          >
             <Image source={appIcon} style={styles.logoImage} resizeMode="contain" />
-          </View>
+          </Animated.View>
           <AppText variant="h2" style={styles.title}>
             We-ne
           </AppText>
@@ -172,6 +261,16 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  logoPing: {
+    position: 'absolute',
+    top: theme.spacing.lg + theme.spacing.xs,
+    width: 176,
+    height: 176,
+    borderRadius: 999,
+    borderWidth: 1.2,
+    borderColor: theme.colors.gray300,
+    backgroundColor: 'transparent',
   },
   logoImage: {
     width: '100%',

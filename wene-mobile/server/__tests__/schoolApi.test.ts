@@ -37,6 +37,19 @@ describe('school API', () => {
     expect(res.status).toBe(404);
   });
 
+  it('POST /v1/school/events rejects invalid numeric fields', async () => {
+    const res = await request(app)
+      .post('/v1/school/events')
+      .send({
+        title: 'Invalid Event',
+        datetime: '2026/02/28 10:00-11:00',
+        host: 'Test Host',
+        ticketTokenAmount: 'abc',
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('ticketTokenAmount');
+  });
+
   it('POST /v1/school/claims evt-001 first time returns success', async () => {
     const res = await request(app)
       .post('/v1/school/claims')
@@ -57,6 +70,26 @@ describe('school API', () => {
     expect(second.status).toBe(200);
     expect(second.body.success).toBe(true);
     expect(second.body.alreadyJoined).toBe(true);
+  });
+
+  it('GET /v1/school/events/:eventId/claimants uses stable fallback confirmationCode', async () => {
+    const claimRes = await request(app)
+      .post('/v1/school/claims')
+      .send({ eventId: 'evt-001', walletAddress: 'stable_wallet_001' });
+    expect(claimRes.status).toBe(200);
+    expect(claimRes.body.success).toBe(true);
+
+    const first = await request(app).get('/v1/school/events/evt-001/claimants');
+    expect(first.status).toBe(200);
+    const firstItem = first.body.items.find((item: { subject: string }) => item.subject === 'stable_wallet_001');
+    expect(firstItem).toBeDefined();
+    expect(firstItem.confirmationCode).toMatch(/^[A-F0-9]{6}$/);
+
+    const second = await request(app).get('/v1/school/events/evt-001/claimants');
+    expect(second.status).toBe(200);
+    const secondItem = second.body.items.find((item: { subject: string }) => item.subject === 'stable_wallet_001');
+    expect(secondItem).toBeDefined();
+    expect(secondItem.confirmationCode).toBe(firstItem.confirmationCode);
   });
 
   it('POST /api/events/:eventId/claim already with proof updates sync tx/receipt', async () => {
