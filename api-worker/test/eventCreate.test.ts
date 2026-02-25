@@ -206,7 +206,7 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     };
     expect(body.name).toBe(title);
     expect(body.symbol).toBe('METADATAEV');
-    expect(body.image).toContain('/ticket-token.png');
+    expect(body.image).toContain('/ticket-token-v2.png');
     const mintAttr = body.attributes?.find((attr) => attr.trait_type === 'mint');
     expect(mintAttr?.value).toBe(mint);
   });
