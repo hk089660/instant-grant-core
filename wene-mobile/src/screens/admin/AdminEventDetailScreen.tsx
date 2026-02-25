@@ -4,7 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as QRCode from 'qrcode';
 import { AppText, Button, Card, AdminShell, Loading } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
-import { fetchAdminEvent, fetchAdminTransferLogs, fetchClaimants, type Claimant, type TransferLogEntry } from '../../api/adminApi';
+import { closeAdminEvent, fetchAdminEvent, fetchAdminTransferLogs, fetchClaimants, type Claimant, type TransferLogEntry } from '../../api/adminApi';
 import type { SchoolEvent } from '../../types/school';
 
 function isOnchainTransfer(item: TransferLogEntry): boolean {
@@ -29,6 +29,7 @@ export const AdminEventDetailScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [closingEvent, setClosingEvent] = useState(false);
 
   useEffect(() => {
     if (!eventId) return;
@@ -117,6 +118,20 @@ export const AdminEventDetailScreen: React.FC = () => {
       .finally(() => setTransferLoading(false));
   };
 
+  const handleCloseEvent = async () => {
+    if (!eventId || !event || event.state === 'ended' || closingEvent) return;
+    setClosingEvent(true);
+    setError(null);
+    try {
+      const updated = await closeAdminEvent(eventId);
+      setEvent(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'イベントのクローズに失敗しました');
+    } finally {
+      setClosingEvent(false);
+    }
+  };
+
   const formatTime = (iso?: string) => {
     if (!iso) return '-';
     try {
@@ -181,6 +196,16 @@ export const AdminEventDetailScreen: React.FC = () => {
             イベント詳細
           </AppText>
           <View style={{ flexDirection: 'row', gap: 8 }}>
+            {event.state !== 'ended' && (
+              <Button
+                title="イベントをクローズ"
+                variant="secondary"
+                dark
+                onPress={() => void handleCloseEvent()}
+                loading={closingEvent}
+                style={styles.closeEventHeaderButton}
+              />
+            )}
             <Button title="更新" variant="secondary" dark onPress={handleRefresh} />
             <Button title="戻る" variant="secondary" dark onPress={() => router.back()} />
           </View>
@@ -200,6 +225,15 @@ export const AdminEventDetailScreen: React.FC = () => {
           <AppText variant="caption" style={styles.cardMuted}>{event.datetime}</AppText>
           <AppText variant="caption" style={styles.cardMuted}>主催: {event.host}</AppText>
           <AppText variant="small" style={styles.cardDim}>ID: {event.id}</AppText>
+          {event.state !== 'ended' ? (
+            <AppText variant="small" style={styles.cardDim}>
+              このイベントをクローズすると受付は停止されます
+            </AppText>
+          ) : (
+            <AppText variant="small" style={styles.cardDim}>
+              このイベントはクローズ済みです
+            </AppText>
+          )}
         </Card>
 
         {/* 統計 */}
@@ -463,6 +497,9 @@ const styles = StyleSheet.create({
     marginBottom: adminTheme.spacing.md,
   },
   title: { color: adminTheme.colors.text },
+  closeEventHeaderButton: {
+    minWidth: 140,
+  },
   card: {
     backgroundColor: adminTheme.colors.surface,
     borderColor: adminTheme.colors.border,

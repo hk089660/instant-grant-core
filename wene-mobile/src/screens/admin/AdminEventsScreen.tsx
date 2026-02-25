@@ -3,7 +3,7 @@ import { View, StyleSheet, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AppText, Button, CountBadge, EventRow, AdminShell, StatusBadge, Loading } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
-import { fetchAdminEvents, fetchPopStatus, type PopStatusResponse } from '../../api/adminApi';
+import { closeAdminEvent, fetchAdminEvents, fetchPopStatus, type PopStatusResponse } from '../../api/adminApi';
 import type { SchoolEvent } from '../../types/school';
 import { copyTextWithFeedback } from '../../utils/copyText';
 
@@ -16,6 +16,7 @@ export const AdminEventsScreen: React.FC = () => {
   const [popStatusLoading, setPopStatusLoading] = useState(true);
   const [popStatusError, setPopStatusError] = useState<string | null>(null);
   const [popStatusCheckedAt, setPopStatusCheckedAt] = useState<string | null>(null);
+  const [closingEventId, setClosingEventId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,6 +108,30 @@ export const AdminEventsScreen: React.FC = () => {
       successMessage: 'PoP稼働情報をコピーしました',
     });
   }, [popStatus, popStatusCheckedAt]);
+
+  const handleCloseEvent = useCallback(async (eventId: string) => {
+    if (!eventId || closingEventId) return;
+    setClosingEventId(eventId);
+    setError(null);
+    try {
+      const updated = await closeAdminEvent(eventId);
+      setEvents((prev) =>
+        prev.map((event) =>
+          event.id === eventId
+            ? {
+              ...event,
+              ...updated,
+              state: updated.state ?? 'ended',
+            }
+            : event
+        )
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'イベントのクローズに失敗しました。');
+    } finally {
+      setClosingEventId(null);
+    }
+  }, [closingEventId]);
 
   return (
     <AdminShell title="イベント一覧" role="admin">
@@ -243,12 +268,24 @@ export const AdminEventsScreen: React.FC = () => {
                     <View style={styles.cardRight}>
                       <StatusBadge state={state} />
                       {isPublished ? (
-                        <Button
-                          title="印刷用PDF"
-                          variant="primary"
-                          onPress={() => router.push(`/admin/print/${event.id}` as any)}
-                          style={styles.printButton}
-                        />
+                        <>
+                          <Button
+                            title="印刷用PDF"
+                            variant="primary"
+                            onPress={() => router.push(`/admin/print/${event.id}` as any)}
+                            style={styles.printButton}
+                          />
+                          <Button
+                            title="イベントをクローズ"
+                            variant="secondary"
+                            dark
+                            size="medium"
+                            onPress={() => void handleCloseEvent(event.id)}
+                            loading={closingEventId === event.id}
+                            disabled={Boolean(closingEventId && closingEventId !== event.id)}
+                            style={styles.closeButton}
+                          />
+                        </>
                       ) : (
                         <AppText variant="small" style={styles.warningText}>
                           {isDraft
@@ -360,6 +397,10 @@ const styles = StyleSheet.create({
   },
   printButton: {
     marginTop: adminTheme.spacing.xs,
+  },
+  closeButton: {
+    marginTop: adminTheme.spacing.xs,
+    minWidth: 140,
   },
   warningText: {
     color: adminTheme.colors.textSecondary,

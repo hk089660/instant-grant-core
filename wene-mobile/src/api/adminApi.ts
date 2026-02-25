@@ -81,6 +81,19 @@ export async function createAdminEvent(data: {
   });
 }
 
+/** イベントを終了（クローズ） */
+export async function closeAdminEvent(eventId: string): Promise<SchoolEvent & { claimedCount: number }> {
+  const base = getBaseUrl();
+  return withAdminAuth(async () => {
+    const headers = await getAdminAuthHeaders();
+    return httpPost<SchoolEvent & { claimedCount: number }>(
+      `${base}/v1/school/events/${encodeURIComponent(eventId)}/close`,
+      {},
+      { headers }
+    );
+  });
+}
+
 /** 参加者一覧 */
 export interface Claimant {
   subject: string;

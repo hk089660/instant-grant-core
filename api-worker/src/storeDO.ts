@@ -1815,6 +1815,7 @@ export class SchoolStore implements DurableObject {
   private isAdminProtectedSchoolRoute(path: string, method: string): boolean {
     const normalizedMethod = method.toUpperCase();
     if (normalizedMethod === 'POST' && path === '/v1/school/events') return true;
+    if (normalizedMethod === 'POST' && /^\/v1\/school\/events\/[^/]+\/close$/.test(path)) return true;
     if (normalizedMethod === 'GET' && /^\/v1\/school\/events\/[^/]+\/claimants$/.test(path)) return true;
     return false;
   }
@@ -2929,6 +2930,7 @@ export class SchoolStore implements DurableObject {
   }
 
   private routeTemplate(path: string): string {
+    if (/^\/v1\/school\/events\/[^/]+\/close$/.test(path)) return '/v1/school/events/:eventId/close';
     if (/^\/v1\/school\/events\/[^/]+\/claimants$/.test(path)) return '/v1/school/events/:eventId/claimants';
     if (/^\/v1\/school\/events\/[^/]+$/.test(path)) return '/v1/school/events/:eventId';
     if (/^\/api\/events\/[^/]+\/claim$/.test(path)) return '/api/events/:eventId/claim';
@@ -4821,6 +4823,50 @@ export class SchoolStore implements DurableObject {
         );
       }
       return Response.json(event);
+    }
+
+    // POST /v1/school/events/:eventId/close — イベントを終了状態へ
+    const closeEventMatch = path.match(/^\/v1\/school\/events\/([^/]+)\/close$/);
+    if (closeEventMatch && request.method === 'POST') {
+      const authError = await this.requireAdminAuthorization(request);
+      if (authError) {
+        return authError;
+      }
+      const operator = await this.authenticateOperator(request);
+      if (!operator) {
+        return this.unauthorizedResponse();
+      }
+      const eventId = closeEventMatch[1];
+      const event = await this.store.getEvent(eventId);
+      if (!event) {
+        return Response.json({ error: 'event not found' }, { status: 404 });
+      }
+      const forbidden = await this.ensureOperatorCanAccessEvent(operator, eventId);
+      if (forbidden) {
+        return forbidden;
+      }
+      const previousState = event.state ?? 'published';
+      if (previousState === 'ended') {
+        return Response.json(event);
+      }
+      const updated = await this.store.updateEventState(eventId, 'ended');
+      if (!updated) {
+        return Response.json({ error: 'event not found' }, { status: 404 });
+      }
+      await this.appendAuditLog(
+        'EVENT_CLOSE',
+        { type: operator.role === 'master' ? 'master' : 'admin', id: operator.actorId },
+        {
+          eventId,
+          previousState,
+          nextState: 'ended',
+          closedByAdminId: operator.adminId,
+          closedByAdminName: operator.name,
+          closedBySource: operator.source,
+        },
+        eventId
+      );
+      return Response.json(updated);
     }
 
     // GET /v1/school/events/:eventId/claimants — 参加者一覧

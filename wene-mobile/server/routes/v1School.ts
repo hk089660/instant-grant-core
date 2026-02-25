@@ -164,6 +164,22 @@ export function createV1SchoolRouter(deps: V1SchoolDeps): Router {
     res.json(event);
   });
 
+  // POST /v1/school/events/:eventId/close
+  router.post('/events/:eventId/close', (req: Request, res: Response) => {
+    const event = resolveEvent(storage, res, req.params.eventId);
+    if (!event) return;
+    if (event.state === 'ended') {
+      res.json(event);
+      return;
+    }
+    const updated = storage.updateEventState(req.params.eventId, 'ended');
+    if (!updated) {
+      res.status(404).json({ code: 'not_found', message: 'イベントが見つかりません' });
+      return;
+    }
+    res.json(updated);
+  });
+
   // GET /v1/school/events/:eventId/claimants
   router.get('/events/:eventId/claimants', (req: Request, res: Response) => {
     const event = resolveEvent(storage, res, req.params.eventId);

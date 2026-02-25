@@ -37,6 +37,19 @@ describe('school API', () => {
     expect(res.status).toBe(404);
   });
 
+  it('POST /v1/school/events/:eventId/close marks event as ended and blocks claim', async () => {
+    const closeRes = await request(app).post('/v1/school/events/evt-001/close').send({});
+    expect(closeRes.status).toBe(200);
+    expect(closeRes.body.state).toBe('ended');
+
+    const claimRes = await request(app)
+      .post('/v1/school/claims')
+      .send({ eventId: 'evt-001', walletAddress: 'addr-close-test' });
+    expect(claimRes.status).toBe(403);
+    expect(claimRes.body.success).toBe(false);
+    expect(claimRes.body.error?.code).toBe('eligibility');
+  });
+
   it('POST /v1/school/events rejects invalid numeric fields', async () => {
     const res = await request(app)
       .post('/v1/school/events')

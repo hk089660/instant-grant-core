@@ -149,6 +149,17 @@ function resolveClaimPolicy(event?: SchoolEvent | null): ClaimPolicy {
 export class ClaimStore {
   constructor(private storage: IClaimStorage) { }
 
+  private mergeEventsById(storedEvents: SchoolEvent[]): SchoolEvent[] {
+    const byId = new Map<string, SchoolEvent>();
+    for (const seed of SEED_EVENTS) {
+      byId.set(seed.id, seed);
+    }
+    for (const stored of storedEvents) {
+      byId.set(stored.id, stored);
+    }
+    return Array.from(byId.values());
+  }
+
   async getClaimedCount(eventId: string): Promise<number> {
     const list = await this.storage.list(claimPrefix(eventId));
     return list.size;
@@ -315,7 +326,7 @@ export class ClaimStore {
   /** SEED + 動的イベントを統合 */
   async getEvents(): Promise<(SchoolEvent & { claimedCount: number })[]> {
     const stored = await this.getStoredEvents();
-    const all = [...SEED_EVENTS, ...stored];
+    const all = this.mergeEventsById(stored);
     const out: (SchoolEvent & { claimedCount: number })[] = [];
     for (const e of all) {
       const claimedCount = await this.getClaimedCount(e.id);
@@ -331,15 +342,21 @@ export class ClaimStore {
   }
 
   async getEvent(eventId: string): Promise<(SchoolEvent & { claimedCount: number }) | null> {
-    // まず SEED から
-    let event = SEED_EVENTS.find((e) => e.id === eventId) ?? null;
-    // なければ動的イベントから
-    if (!event) {
-      const stored = await this.storage.get(eventKey(eventId));
-      if (stored && typeof stored === 'object' && 'id' in (stored as any)) {
-        event = stored as SchoolEvent;
-      }
+    // 動的イベントを優先（SEED上書きを許可）
+    const stored = await this.storage.get(eventKey(eventId));
+    if (stored && typeof stored === 'object' && 'id' in (stored as any)) {
+      const claimedCount = await this.getClaimedCount(eventId);
+      const policy = resolveClaimPolicy(stored as SchoolEvent);
+      return {
+        ...(stored as SchoolEvent),
+        claimIntervalDays: policy.claimIntervalDays,
+        maxClaimsPerInterval: policy.maxClaimsPerInterval,
+        claimedCount,
+      };
     }
+
+    // SEED をフォールバックとして扱う
+    const event = SEED_EVENTS.find((e) => e.id === eventId) ?? null;
     if (!event) return null;
     const claimedCount = await this.getClaimedCount(eventId);
     const policy = resolveClaimPolicy(event);
@@ -349,6 +366,19 @@ export class ClaimStore {
       maxClaimsPerInterval: policy.maxClaimsPerInterval,
       claimedCount,
     };
+  }
+
+  /** イベント状態更新（公開中/下書き/終了） */
+  async updateEventState(eventId: string, state: SchoolEvent['state']): Promise<(SchoolEvent & { claimedCount: number }) | null> {
+    const current = await this.getEvent(eventId);
+    if (!current) return null;
+    const { claimedCount, ...rest } = current;
+    const next: SchoolEvent = {
+      ...rest,
+      state,
+    };
+    await this.storage.put(eventKey(eventId), next);
+    return this.getEvent(eventId);
   }
 
   /** イベント作成（admin 用） */

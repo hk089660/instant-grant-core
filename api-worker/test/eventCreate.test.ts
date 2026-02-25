@@ -228,6 +228,50 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     expect(res.status).toBe(401);
   });
 
+  it('closes event via admin endpoint and rejects new claims', async () => {
+    const createRes = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'closable event',
+          datetime: '2026/02/20 16:00',
+          host: 'admin',
+          ticketTokenAmount: 1,
+        }),
+      })
+    );
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as { id: string };
+    expect(typeof created.id).toBe('string');
+
+    const closeRes = await store.fetch(
+      new Request(`https://example.com/v1/school/events/${encodeURIComponent(created.id)}/close`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({}),
+      })
+    );
+    expect(closeRes.status).toBe(200);
+    const closed = (await closeRes.json()) as { state?: string };
+    expect(closed.state).toBe('ended');
+
+    const claimRes = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: created.id,
+          walletAddress: 'wallet_close_test',
+        }),
+      })
+    );
+    expect(claimRes.status).toBe(200);
+    const claimBody = (await claimRes.json()) as { success?: boolean; error?: { code?: string } };
+    expect(claimBody.success).toBe(false);
+    expect(claimBody.error?.code).toBe('eligibility');
+  });
+
   it('issues signed PoP claim proof for on-chain verification', async () => {
     const createRes = await store.fetch(
       new Request('https://example.com/v1/school/events', {

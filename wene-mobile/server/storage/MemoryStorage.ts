@@ -43,6 +43,7 @@ export interface SchoolStorage {
   getEvents(): SchoolEvent[];
   getEvent(eventId: string): SchoolEvent | null;
   addEvent(event: SchoolEvent): void;
+  updateEventState(eventId: string, state: SchoolEvent['state']): SchoolEvent | null;
 
   // Claims
   getClaims(eventId: string): ClaimRecord[];
@@ -89,6 +90,15 @@ export function createMemoryStorage(): SchoolStorage {
     },
     addEvent(event: SchoolEvent) {
       events.push(event);
+    },
+    updateEventState(eventId: string, state: SchoolEvent['state']) {
+      const index = events.findIndex((e) => e.id === eventId);
+      if (index < 0) return null;
+      events[index] = {
+        ...events[index],
+        state,
+      };
+      return events[index];
     },
     getClaims(eventId: string) {
       return claims.filter((c) => c.eventId === eventId);
