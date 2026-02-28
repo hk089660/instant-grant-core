@@ -111,6 +111,8 @@ export interface Env {
   COST_OF_FORGERY_MIN_SCORE?: string;
   COST_OF_FORGERY_ENFORCE_ON_REGISTER?: string;
   COST_OF_FORGERY_ENFORCE_ON_CLAIM?: string;
+  AUDIT_RANDOM_ANCHOR_ENABLED?: string;
+  AUDIT_RANDOM_ANCHOR_PERIOD_MINUTES?: string;
 }
 
 const AUDIT_MAX_DEPTH = 4;
@@ -163,6 +165,11 @@ const SECURITY_ISSUE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const COST_OF_FORGERY_DEFAULT_TIMEOUT_MS = 2500;
 const COST_OF_FORGERY_DEFAULT_MIN_SCORE = 70;
 const COST_OF_FORGERY_DEFAULT_VERIFY_PATH = '/v1/risk/score';
+const RANDOM_ANCHOR_STATE_KEY = 'audit:random_anchor:state';
+const RANDOM_ANCHOR_DEFAULT_PERIOD_MINUTES = 60;
+const RANDOM_ANCHOR_MIN_PERIOD_MINUTES = 15;
+const RANDOM_ANCHOR_MAX_PERIOD_MINUTES = 24 * 60;
+const RANDOM_ANCHOR_EVENT = 'RANDOM_PERIODIC_ANCHOR';
 
 type SecurityRatePolicy = {
   key: string;
@@ -223,6 +230,24 @@ type CostOfForgeryStatus = {
   timeoutMs: number;
   endpointConfigured: boolean;
   operationalReady: boolean;
+};
+
+type RandomPeriodicAnchorState = {
+  windowStartMs: number;
+  targetTsMs: number;
+  anchoredAtMs: number | null;
+  lastEntryHash: string | null;
+};
+
+type RandomPeriodicAnchorResult = {
+  enabled: boolean;
+  anchored: boolean;
+  reason: 'disabled' | 'not_due' | 'already_anchored' | 'anchored';
+  periodMinutes: number;
+  windowStartMs: number | null;
+  targetTsMs: number | null;
+  latestHead: string | null;
+  entryHash: string | null;
 };
 
 type AuditIntegrityIssue = {
@@ -674,6 +699,149 @@ export class SchoolStore implements DurableObject {
 
   private getAuditImmutableMode() {
     return parseAuditImmutableMode(this.env.AUDIT_IMMUTABLE_MODE);
+  }
+
+  private isRandomPeriodicAnchorEnabled(): boolean {
+    return parseBooleanEnv(this.env.AUDIT_RANDOM_ANCHOR_ENABLED, true);
+  }
+
+  private getRandomPeriodicAnchorPeriodMs(): number {
+    const periodMinutes = parseBoundedInt(
+      this.env.AUDIT_RANDOM_ANCHOR_PERIOD_MINUTES ?? null,
+      RANDOM_ANCHOR_DEFAULT_PERIOD_MINUTES,
+      RANDOM_ANCHOR_MIN_PERIOD_MINUTES,
+      RANDOM_ANCHOR_MAX_PERIOD_MINUTES
+    );
+    return periodMinutes * 60 * 1000;
+  }
+
+  private parseRandomPeriodicAnchorState(raw: unknown): RandomPeriodicAnchorState | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const windowStartMs = Number(obj.windowStartMs);
+    const targetTsMs = Number(obj.targetTsMs);
+    const anchoredRaw = obj.anchoredAtMs;
+    const lastEntryHashRaw = obj.lastEntryHash;
+
+    const anchoredAtMs = anchoredRaw === null || anchoredRaw === undefined
+      ? null
+      : Number(anchoredRaw);
+    const lastEntryHash = typeof lastEntryHashRaw === 'string' && isHashHex(lastEntryHashRaw)
+      ? lastEntryHashRaw.trim().toLowerCase()
+      : null;
+
+    if (!Number.isFinite(windowStartMs) || !Number.isFinite(targetTsMs)) return null;
+    if (!(anchoredAtMs === null || Number.isFinite(anchoredAtMs))) return null;
+    if (targetTsMs < windowStartMs) return null;
+    return {
+      windowStartMs,
+      targetTsMs,
+      anchoredAtMs,
+      lastEntryHash,
+    };
+  }
+
+  private buildRandomPeriodicAnchorState(windowStartMs: number, periodMs: number): RandomPeriodicAnchorState {
+    const random = new Uint32Array(1);
+    crypto.getRandomValues(random);
+    const offsetMs = Number(random[0] % Math.max(1, periodMs));
+    return {
+      windowStartMs,
+      targetTsMs: windowStartMs + offsetMs,
+      anchoredAtMs: null,
+      lastEntryHash: null,
+    };
+  }
+
+  private async maybeAppendRandomPeriodicAnchor(nowMs: number): Promise<RandomPeriodicAnchorResult> {
+    const periodMs = this.getRandomPeriodicAnchorPeriodMs();
+    const periodMinutes = Math.floor(periodMs / (60 * 1000));
+
+    if (!this.isRandomPeriodicAnchorEnabled()) {
+      return {
+        enabled: false,
+        anchored: false,
+        reason: 'disabled',
+        periodMinutes,
+        windowStartMs: null,
+        targetTsMs: null,
+        latestHead: null,
+        entryHash: null,
+      };
+    }
+
+    const windowStartMs = Math.floor(nowMs / periodMs) * periodMs;
+    const windowEndMs = windowStartMs + periodMs;
+    let state = this.parseRandomPeriodicAnchorState(await this.ctx.storage.get(RANDOM_ANCHOR_STATE_KEY));
+    const isStateForCurrentWindow =
+      state &&
+      state.windowStartMs === windowStartMs &&
+      state.targetTsMs >= windowStartMs &&
+      state.targetTsMs < windowEndMs;
+
+    if (!isStateForCurrentWindow) {
+      state = this.buildRandomPeriodicAnchorState(windowStartMs, periodMs);
+      await this.ctx.storage.put(RANDOM_ANCHOR_STATE_KEY, state);
+    }
+
+    const latestHead = readHashHex(await this.ctx.storage.get<string>(AUDIT_LAST_HASH_GLOBAL_KEY));
+    if (state.anchoredAtMs !== null) {
+      return {
+        enabled: true,
+        anchored: false,
+        reason: 'already_anchored',
+        periodMinutes,
+        windowStartMs: state.windowStartMs,
+        targetTsMs: state.targetTsMs,
+        latestHead,
+        entryHash: state.lastEntryHash,
+      };
+    }
+
+    if (nowMs < state.targetTsMs) {
+      return {
+        enabled: true,
+        anchored: false,
+        reason: 'not_due',
+        periodMinutes,
+        windowStartMs: state.windowStartMs,
+        targetTsMs: state.targetTsMs,
+        latestHead,
+        entryHash: null,
+      };
+    }
+
+    const entry = await this.appendAuditLog(
+      RANDOM_ANCHOR_EVENT,
+      { type: 'system', id: 'scheduler' },
+      {
+        mode: 'random_periodic',
+        windowStartMs: state.windowStartMs,
+        windowEndMs,
+        targetTsMs: state.targetTsMs,
+        triggeredAtMs: nowMs,
+        latestHeadBeforeAnchor: latestHead,
+      },
+      'system'
+    );
+
+    const anchoredState: RandomPeriodicAnchorState = {
+      ...state,
+      anchoredAtMs: nowMs,
+      lastEntryHash: entry.entry_hash,
+    };
+    await this.ctx.storage.put(RANDOM_ANCHOR_STATE_KEY, anchoredState);
+
+    return {
+      enabled: true,
+      anchored: true,
+      reason: 'anchored',
+      periodMinutes,
+      windowStartMs: anchoredState.windowStartMs,
+      targetTsMs: anchoredState.targetTsMs,
+      latestHead,
+      entryHash: entry.entry_hash,
+    };
   }
 
   private getSecurityBodySizeLimitBytes(): number {
@@ -4176,6 +4344,24 @@ export class SchoolStore implements DurableObject {
   }
 
   private async handleRequest(request: Request, path: string): Promise<Response> {
+    if (path === '/_internal/audit/random-anchor' && request.method === 'POST') {
+      let body: { scheduledTime?: unknown } | null = null;
+      try {
+        body = (await request.json()) as { scheduledTime?: unknown };
+      } catch {
+        body = null;
+      }
+      const scheduledTime = Number(body?.scheduledTime);
+      const nowMs = Number.isFinite(scheduledTime) && scheduledTime > 0
+        ? Math.floor(scheduledTime)
+        : Date.now();
+      const result = await this.maybeAppendRandomPeriodicAnchor(nowMs);
+      return Response.json({
+        ok: true,
+        checkedAt: new Date(nowMs).toISOString(),
+        ...result,
+      });
+    }
 
     const metadataMatch = path.match(/^\/metadata\/([^/]+)\.json$/);
     if (metadataMatch && request.method === 'GET') {

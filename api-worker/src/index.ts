@@ -39,6 +39,13 @@ type Bindings = {
   COST_OF_FORGERY_MIN_SCORE?: string;
   COST_OF_FORGERY_ENFORCE_ON_REGISTER?: string;
   COST_OF_FORGERY_ENFORCE_ON_CLAIM?: string;
+  AUDIT_RANDOM_ANCHOR_ENABLED?: string;
+  AUDIT_RANDOM_ANCHOR_PERIOD_MINUTES?: string;
+};
+
+type CronController = {
+  scheduledTime: number;
+  cron: string;
 };
 
 const DEFAULT_CORS = 'https://instant-grant-core.dev';
@@ -84,6 +91,34 @@ async function forwardToDo(c: any): Promise<Response> {
   return addCorsHeaders(res, allowedOrigin);
 }
 
+function parseBooleanEnv(raw: string | undefined, fallback: boolean): boolean {
+  if (typeof raw !== 'string') return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
+  return fallback;
+}
+
+async function triggerRandomPeriodicAnchor(
+  env: Bindings,
+  scheduledTime: number,
+  cron: string
+): Promise<void> {
+  if (!parseBooleanEnv(env.AUDIT_RANDOM_ANCHOR_ENABLED, true)) return;
+  const id = env.SCHOOL_STORE.idFromName('default');
+  const stub = env.SCHOOL_STORE.get(id);
+  const res = await stub.fetch(new Request('https://internal/_internal/audit/random-anchor', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ scheduledTime, cron }),
+  }));
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    console.error('[random-anchor] scheduled trigger failed', { status: res.status, cron, detail });
+  }
+}
+
 app.all('/v1/school/*', forwardToDo);
 app.all('/api/*', forwardToDo);
 app.all('/metadata/*', forwardToDo);
@@ -99,5 +134,8 @@ export { SchoolStore };
 export default {
   fetch(request: Request, env: Bindings, ctx: ExecutionContext) {
     return app.fetch(request, env, ctx);
+  },
+  scheduled(controller: CronController, env: Bindings, ctx: ExecutionContext) {
+    ctx.waitUntil(triggerRandomPeriodicAnchor(env, controller.scheduledTime, controller.cron));
   },
 };

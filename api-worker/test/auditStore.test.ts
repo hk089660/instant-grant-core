@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SchoolStore, type Env } from '../src/storeDO';
 
 class MockStorage {
@@ -48,8 +48,16 @@ describe('SchoolStore Audit Log', () => {
 
   beforeEach(() => {
     mockState = new MockDurableObjectState();
-    mockEnv = { AUDIT_IMMUTABLE_MODE: 'off' };
+    mockEnv = {
+      AUDIT_IMMUTABLE_MODE: 'off',
+      AUDIT_RANDOM_ANCHOR_ENABLED: 'true',
+      AUDIT_RANDOM_ANCHOR_PERIOD_MINUTES: '60',
+    };
     store = new SchoolStore(mockState, mockEnv);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('creates a genesis log entry for both global and event stream chains', async () => {
@@ -124,5 +132,60 @@ describe('SchoolStore Audit Log', () => {
 
     const globalHash = await mockState.storage.get('audit:lastHash:global');
     expect(globalHash).toBe(entryA2.entry_hash);
+  });
+
+  it('anchors latest hash once when random periodic target is reached', async () => {
+    const baseNow = Date.UTC(2026, 1, 28, 10, 0, 0);
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(baseNow);
+    const periodMs = 60 * 60 * 1000;
+    const windowStartMs = Math.floor(baseNow / periodMs) * periodMs;
+    const targetTsMs = windowStartMs + 45 * 60 * 1000;
+
+    await mockState.storage.put('audit:random_anchor:state', {
+      windowStartMs,
+      targetTsMs,
+      anchoredAtMs: null,
+      lastEntryHash: null,
+    });
+
+    const earlyRes = await store.fetch(
+      new Request('https://example.com/_internal/audit/random-anchor', { method: 'POST' })
+    );
+    const earlyBody = await earlyRes.json() as { anchored?: boolean; reason?: string };
+    expect(earlyRes.status).toBe(200);
+    expect(earlyBody.anchored).toBe(false);
+    expect(earlyBody.reason).toBe('not_due');
+    expect(await mockState.storage.get('audit:lastHash:global')).toBeUndefined();
+
+    nowSpy.mockReturnValue(targetTsMs + 1);
+    const anchorRes = await store.fetch(
+      new Request('https://example.com/_internal/audit/random-anchor', { method: 'POST' })
+    );
+    const anchorBody = await anchorRes.json() as {
+      anchored?: boolean;
+      reason?: string;
+      entryHash?: string | null;
+    };
+    expect(anchorRes.status).toBe(200);
+    expect(anchorBody.anchored).toBe(true);
+    expect(anchorBody.reason).toBe('anchored');
+    expect(anchorBody.entryHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(await mockState.storage.get('audit:lastHash:global')).toBe(anchorBody.entryHash);
+
+    const duplicateRes = await store.fetch(
+      new Request('https://example.com/_internal/audit/random-anchor', { method: 'POST' })
+    );
+    const duplicateBody = await duplicateRes.json() as {
+      anchored?: boolean;
+      reason?: string;
+      entryHash?: string | null;
+    };
+    expect(duplicateRes.status).toBe(200);
+    expect(duplicateBody.anchored).toBe(false);
+    expect(duplicateBody.reason).toBe('already_anchored');
+    expect(duplicateBody.entryHash).toBe(anchorBody.entryHash);
+
+    const history = await mockState.storage.list({ prefix: 'audit_history:' });
+    expect(history.size).toBe(1);
   });
 });

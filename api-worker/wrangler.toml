@@ -2,6 +2,9 @@ name = "instant-grant-core"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
 
+[triggers]
+crons = ["*/5 * * * *"]
+
 [[durable_objects.bindings]]
 name = "SCHOOL_STORE"
 class_name = "SchoolStore"
@@ -16,6 +19,8 @@ new_sqlite_classes = ["SchoolStore"]
 CORS_ORIGIN = "https://instant-grant-core.pages.dev"
 AUDIT_IMMUTABLE_MODE = "required"
 AUDIT_IMMUTABLE_FETCH_TIMEOUT_MS = "5000"
+AUDIT_RANDOM_ANCHOR_ENABLED = "true"
+AUDIT_RANDOM_ANCHOR_PERIOD_MINUTES = "60"
 SECURITY_RATE_LIMIT_ENABLED = "true"
 SECURITY_RATE_LIMIT_READ_PER_MINUTE = "300"
 SECURITY_RATE_LIMIT_MUTATION_PER_MINUTE = "120"

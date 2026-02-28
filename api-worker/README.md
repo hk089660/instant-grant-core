@@ -120,6 +120,8 @@ L1 で PoP 検証を行うため、以下の Worker 変数を設定する:
 - `AUDIT_IMMUTABLE_MODE`: `required`（推奨） / `best_effort` / `off`
 - `AUDIT_IMMUTABLE_FETCH_TIMEOUT_MS`: immutable ingest 送信タイムアウト（ms、既定 5000）
 - `AUDIT_IMMUTABLE_INGEST_URL`: 任意。R2 に加えて外部 immutable sink に二重固定化したい場合に設定
+- `AUDIT_RANDOM_ANCHOR_ENABLED`: 定期ランダムアンカーの有効/無効（既定 `true`）
+- `AUDIT_RANDOM_ANCHOR_PERIOD_MINUTES`: latest hash を 1 回ランダム固定化する期間（分、既定 60）
 - `AUDIT_LOG_WRITE_TOKEN`: 任意。`POST /v1/audit/log` を有効化する場合の専用トークン
 
 ### Anti-Bot / DDoS ガードレール
@@ -190,6 +192,7 @@ Cost of Forgery 互換のリスク判定 API を登録/参加導線に組み込�
 ### 監査ログの不変保存（運用要件）
 
 - 監査エントリは DO 内ハッシュチェーンに加えて、DO 外の不変シンクに固定化される。
+- Cron（既定 `*/5 * * * *`）で `/_internal/audit/random-anchor` を実行し、各 period 内のランダム時刻で latest hash を追加固定化する。
 - `AUDIT_IMMUTABLE_MODE=required` の場合、更新系 API（POST/PUT/PATCH/DELETE）は監査固定化が失敗すると 503 で fail-close する。
 - `AUDIT_IMMUTABLE_MODE=required` かつ immutable sink が未設定/未準備のときは、更新系 API を**実処理前に 503 で遮断**する（状態変更の先行を防止）。
 - production では `AUDIT_LOGS`（R2 バインディング）を必ず設定すること。
