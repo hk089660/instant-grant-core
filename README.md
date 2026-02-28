@@ -63,7 +63,7 @@ This prototype adopts the following architecture to solve practical challenges i
 - [Implemented] Admin event issuance requires authenticated operator + connected Phantom wallet + runtime readiness checks.
 - [Implemented] Verifiability endpoints include `/v1/school/pop-status`, `/v1/school/runtime-status`, `/v1/school/audit-status`, and `/api/audit/receipts/verify-code`.
 - [Implemented] API-level anti-bot/DDoS guardrails are active: endpoint/global rate limits, escalating temporary blocks, and payload size limits (`429` with `Retry-After`, `413` on oversized payloads).
-- [Implemented] Cost of Forgery risk-gated sybil checks are integrated for register/claim paths (configurable fail-closed/fail-open), and admin abuse controls include daily issuance limits for events and admin invite codes.
+- [Implemented] Cost of Forgery risk-gated sybil checks are integrated with endpoint-specific policy (`register`/`claim`), event risk profile thresholds (`school_internal`/`public`), wallet decision TTL cache, and a remediation flow (`request -> admin approve/reject -> temporary override`). Admin abuse controls include daily issuance limits for events and admin invite codes.
 - [Implemented] CI runs localnet `anchor test --skip-build --provider.cluster localnet` in addition to `anchor build`, so minimal contract integration tests are automatically verified.
 - [Implemented] Node dependencies are standardized on `npm`, and `npm ci` is the canonical install path. Canonical lockfiles are `package-lock.json` at root / `grant_program` / `api-worker` / `wene-mobile`.
 - [Implemented] CI fails on `yarn.lock` / `pnpm-lock.yaml` / non-canonical lockfile names (for example `package-lock 2.json`) to prevent reproducibility drift.
@@ -159,7 +159,7 @@ flowchart LR
 > - [Implemented] Off-chain Attend issues a participation ticket (`confirmationCode` + `ticketReceipt`) without requiring a wallet when policy allows.
 > - [Implemented] On-chain redeem/proof is implemented. Route enforcement is policy-gated, but PoP verification inside on-chain claim instructions is always required.
 > - [Implemented] PoP/runtime/audit operational checks are exposed via public endpoints and shown in admin UI.
-> - [Implemented] Cost of Forgery risk-gated anti-sybil checks and API abuse guardrails (rate-limit/DDOS mitigation + admin issuance limits) are available in the current backend.
+> - [Implemented] Cost of Forgery risk-gated anti-sybil checks include endpoint-specific fail-open/fail-closed policy, event risk profile thresholds, wallet decision TTL cache, and remediation flow (request/approve/reject + temporary override). API abuse guardrails (rate-limit/DDOS mitigation + admin issuance limits) are also available.
 > - [Planned] Federation-ready operations and chain-agnostic adapter design remain roadmap items.
 
 ## Why This Matters
@@ -197,7 +197,7 @@ Public grants and school participation often expose only final outcomes, leaving
 | Admin transfer audit split (`onchain` vs `offchain`) | `Implemented` | `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`, `/api/admin/transfers` |
 | Master strict disclosure (`master > admin`) | `Implemented` | `/api/master/transfers`, `/api/master/admin-disclosures`, `wene-mobile/app/master/index.tsx` |
 | Server-side indexed search with DO SQLite persistence | `Implemented` | `/api/master/search`, `api-worker/src/storeDO.ts` (`master_search_*` tables) |
-| Cost of Forgery risk-gated anti-sybil checks (`register/claim`, fail-open/fail-closed) | `Implemented` | `api-worker/src/storeDO.ts`, `api-worker/wrangler.toml`, `api-worker/test/costOfForgeryAndIssueLimit.test.ts` |
+| Cost of Forgery risk-gated anti-sybil checks (endpoint-specific policy, event risk profile thresholds, remediation flow) | `Implemented` | `api-worker/src/storeDO.ts`, `api-worker/wrangler.toml`, `api-worker/test/costOfForgeryAndIssueLimit.test.ts` |
 | API anti-bot/DDOS guardrails (rate limits + payload limits) | `Implemented` | `api-worker/src/storeDO.ts`, `api-worker/test/securityGuardrails.test.ts` |
 | Admin abuse controls (daily issuance limits for events/invites) | `Implemented` | `api-worker/src/storeDO.ts`, `api-worker/test/costOfForgeryAndIssueLimit.test.ts` |
 | Administration-operable federation model (multi-institution ops) | `Planned` | roadmap/design direction (not implemented in this repo) |
@@ -248,8 +248,15 @@ Public grants and school participation often expose only final outcomes, leaving
   - Code: `api-worker/src/storeDO.ts`
 - `Implemented`: anti-bot/DDOS guardrails enforce endpoint/global rate limits + payload size limits (`429`/`413`) at API preflight.
   - Code: `api-worker/src/storeDO.ts`, `api-worker/test/securityGuardrails.test.ts`
-- `Implemented`: Cost of Forgery risk-gated sybil checks are integrated for `/api/users/register`, `/api/events/:eventId/claim`, `/v1/school/claims` (configurable fail-closed/fail-open and min score).
+- `Implemented`: Cost of Forgery risk-gated sybil checks are integrated for `/api/users/register`, `/api/events/:eventId/claim`, `/v1/school/claims`, with endpoint-specific fail-open/fail-closed overrides and event risk profile thresholds (`school_internal` / `public`).
+  - Code: `api-worker/src/storeDO.ts`, `api-worker/wrangler.toml`
+- `Implemented`: wallet-level CoF decision cache supports TTL and is scoped by `wallet + action + minScore` to avoid cross-policy reuse.
   - Code: `api-worker/src/storeDO.ts`, `api-worker/test/costOfForgeryAndIssueLimit.test.ts`
+- `Implemented`: CoF remediation flow is available for low-score false-positive handling:
+  - user request: `POST /api/cost-of-forgery/remediation/request`
+  - admin review: `POST /api/admin/cost-of-forgery/remediation/:requestId/approve` / `.../reject`
+  - approved requests grant temporary override by `subject + action (+event)` with configurable TTL (`COST_OF_FORGERY_REMEDIATION_OVERRIDE_TTL_MINUTES`)
+  - Code: `api-worker/src/storeDO.ts`, `api-worker/test/costOfForgeryAndIssueLimit.test.ts`, `api-worker/README.md`
 - `Implemented`: admin abuse controls add daily issuance limits to `/v1/school/events` and `/api/admin/invite`.
   - Code: `api-worker/src/storeDO.ts`, `api-worker/test/costOfForgeryAndIssueLimit.test.ts`
 - `Implemented`: strict disclosure levels:
@@ -302,6 +309,22 @@ L1: Settlement (Implemented, policy-gated route enforcement per event)
 Dev-only optional path:
   - `wene-mobile/server/*` is a local mock API for development tests.
 ```
+
+### Current Architecture Inventory (as implemented)
+- Presentation layer (`wene-mobile`):
+  - user routes: `/u/*`, `/r/school/:eventId`
+  - operator routes: `/admin/*`, `/master/*`
+  - local mock API for dev/testing: `wene-mobile/server/*`
+- Process proof and operations layer (`api-worker`):
+  - Cloudflare Worker + Durable Object (`SchoolStore`) as system-of-record
+  - append-only audit hash chain with immutable sinks and random periodic anchor
+  - participation ticket receipt issuance and verification APIs
+  - role-based operator APIs (admin/master disclosure, transfers, indexed search)
+  - CoF sybil engine with action policy, event risk profile thresholds, remediation flow, and wallet decision TTL cache
+  - abuse guardrails (rate limits, payload limits, issuance limits)
+- Settlement layer (`grant_program`):
+  - Solana Anchor program for claim settlement
+  - PoP-linked proof verification in claim instructions
 
 ## Reviewer Quickstart (10 Minutes)
 

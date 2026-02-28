@@ -387,6 +387,7 @@ export class ClaimStore {
     datetime: string;
     host: string;
     state?: SchoolEvent['state'];
+    riskProfile?: SchoolEvent['riskProfile'];
     solanaMint?: string;
     solanaAuthority?: string;
     solanaGrantId?: string;
@@ -406,6 +407,7 @@ export class ClaimStore {
       datetime: data.datetime,
       host: data.host,
       state: data.state ?? 'published',
+      riskProfile: data.riskProfile ?? 'school_internal',
       solanaMint: data.solanaMint,
       solanaAuthority: data.solanaAuthority,
       solanaGrantId: data.solanaGrantId,

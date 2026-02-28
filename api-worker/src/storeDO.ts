@@ -2,10 +2,12 @@ import bs58 from 'bs58';
 import nacl from 'tweetnacl';
 import type {
   ClaimBody,
+  CostOfForgeryRemediationFlow,
   PopProofBody,
   PopProofResponse,
   ParticipationTicketReceipt,
   RegisterBody,
+  SchoolEvent,
   SchoolClaimResult,
   SchoolClaimResultSuccess,
   UserClaimBody,
@@ -60,6 +62,10 @@ function auditEntryByHashKey(entryHash: string): string {
   return `${AUDIT_ENTRY_PREFIX}${entryHash}`;
 }
 
+function costOfForgeryRemediationRequestKey(requestId: string): string {
+  return `${COST_OF_FORGERY_REMEDIATION_REQUEST_PREFIX}${requestId}`;
+}
+
 async function hashString(input: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
   return Array.from(new Uint8Array(buf))
@@ -109,8 +115,14 @@ export interface Env {
   COST_OF_FORGERY_API_KEY?: string;
   COST_OF_FORGERY_TIMEOUT_MS?: string;
   COST_OF_FORGERY_MIN_SCORE?: string;
+  COST_OF_FORGERY_MIN_SCORE_SCHOOL_INTERNAL?: string;
+  COST_OF_FORGERY_MIN_SCORE_PUBLIC?: string;
   COST_OF_FORGERY_ENFORCE_ON_REGISTER?: string;
   COST_OF_FORGERY_ENFORCE_ON_CLAIM?: string;
+  COST_OF_FORGERY_FAIL_CLOSED_REGISTER?: string;
+  COST_OF_FORGERY_FAIL_CLOSED_CLAIM?: string;
+  COST_OF_FORGERY_CACHE_TTL_SECONDS?: string;
+  COST_OF_FORGERY_REMEDIATION_OVERRIDE_TTL_MINUTES?: string;
   AUDIT_RANDOM_ANCHOR_ENABLED?: string;
   AUDIT_RANDOM_ANCHOR_PERIOD_MINUTES?: string;
 }
@@ -165,6 +177,14 @@ const SECURITY_ISSUE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const COST_OF_FORGERY_DEFAULT_TIMEOUT_MS = 2500;
 const COST_OF_FORGERY_DEFAULT_MIN_SCORE = 70;
 const COST_OF_FORGERY_DEFAULT_VERIFY_PATH = '/v1/risk/score';
+const COST_OF_FORGERY_CACHE_PREFIX = 'cost_of_forgery_cache:wallet:';
+const COST_OF_FORGERY_DEFAULT_CACHE_TTL_SECONDS = 300;
+const COST_OF_FORGERY_MAX_CACHE_TTL_SECONDS = 24 * 60 * 60;
+const COST_OF_FORGERY_DEFAULT_PUBLIC_MIN_SCORE_OFFSET = 10;
+const COST_OF_FORGERY_REMEDIATION_REQUEST_PREFIX = 'cost_of_forgery_remediation:request:';
+const COST_OF_FORGERY_REMEDIATION_OVERRIDE_PREFIX = 'cost_of_forgery_remediation:override:';
+const COST_OF_FORGERY_DEFAULT_REMEDIATION_OVERRIDE_TTL_MINUTES = 24 * 60;
+const COST_OF_FORGERY_MAX_REMEDIATION_OVERRIDE_TTL_MINUTES = 30 * 24 * 60;
 const RANDOM_ANCHOR_STATE_KEY = 'audit:random_anchor:state';
 const RANDOM_ANCHOR_DEFAULT_PERIOD_MINUTES = 60;
 const RANDOM_ANCHOR_MIN_PERIOD_MINUTES = 15;
@@ -201,6 +221,8 @@ type SecurityIssueLimitState = {
 };
 
 type CostOfForgeryAction = 'user_register' | 'user_claim' | 'wallet_claim';
+type CostOfForgeryRemediationActionType = 'present_pop_receipt' | 'reissue_invite_code' | 'request_admin_review';
+type CostOfForgeryRemediationRequestStatus = 'pending' | 'approved' | 'rejected';
 
 type CostOfForgeryDecision = {
   allow: boolean;
@@ -219,6 +241,7 @@ type CostOfForgeryEnforcementError = {
   reason?: string | null;
   decisionId?: string | null;
   detail?: string;
+  remediation?: CostOfForgeryRemediationFlow;
 };
 
 type CostOfForgeryStatus = {
@@ -230,6 +253,52 @@ type CostOfForgeryStatus = {
   timeoutMs: number;
   endpointConfigured: boolean;
   operationalReady: boolean;
+};
+
+type CostOfForgeryWalletCacheRecord = {
+  wallet: string;
+  action: CostOfForgeryAction;
+  minScore: number;
+  cachedAtMs: number;
+  expiresAtMs: number;
+  decision: CostOfForgeryDecision;
+};
+
+type CostOfForgeryRemediationRequestRecord = {
+  requestId: string;
+  createdAt: string;
+  createdAtMs: number;
+  status: CostOfForgeryRemediationRequestStatus;
+  action: CostOfForgeryAction;
+  eventId: string | null;
+  subjectHash: string;
+  subjectMask: string;
+  subjectType: 'user' | 'wallet' | 'join_token';
+  evidenceType: 'pop_receipt' | 'invite_code_reissue' | 'admin_review';
+  evidenceNote: string | null;
+  confirmationCode: string | null;
+  popReceiptId: string | null;
+  inviteCodeHint: string | null;
+  requesterIpHash: string;
+  resolvedAt: string | null;
+  resolvedAtMs: number | null;
+  resolvedBy: string | null;
+  resolutionReason: string | null;
+  overrideExpiresAt: string | null;
+  overrideExpiresAtMs: number | null;
+};
+
+type CostOfForgeryRemediationOverrideRecord = {
+  requestId: string;
+  action: CostOfForgeryAction;
+  eventId: string | null;
+  subjectHash: string;
+  approvedAt: string;
+  approvedAtMs: number;
+  approvedBy: string;
+  reason: string | null;
+  expiresAt: string;
+  expiresAtMs: number;
 };
 
 type RandomPeriodicAnchorState = {
@@ -594,6 +663,15 @@ function parseBooleanEnv(raw: string | undefined, fallback: boolean): boolean {
   return fallback;
 }
 
+function parseOptionalBooleanEnv(raw: string | undefined): boolean | null {
+  if (typeof raw !== 'string') return null;
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
+  return null;
+}
+
 function u64ToLeBytes(value: bigint): Uint8Array {
   const out = new Uint8Array(8);
   const dv = new DataView(out.buffer);
@@ -772,40 +850,41 @@ export class SchoolStore implements DurableObject {
 
     const windowStartMs = Math.floor(nowMs / periodMs) * periodMs;
     const windowEndMs = windowStartMs + periodMs;
-    let state = this.parseRandomPeriodicAnchorState(await this.ctx.storage.get(RANDOM_ANCHOR_STATE_KEY));
+    const storedState = this.parseRandomPeriodicAnchorState(await this.ctx.storage.get(RANDOM_ANCHOR_STATE_KEY));
     const isStateForCurrentWindow =
-      state &&
-      state.windowStartMs === windowStartMs &&
-      state.targetTsMs >= windowStartMs &&
-      state.targetTsMs < windowEndMs;
-
+      storedState !== null &&
+      storedState.windowStartMs === windowStartMs &&
+      storedState.targetTsMs >= windowStartMs &&
+      storedState.targetTsMs < windowEndMs;
+    const activeState = isStateForCurrentWindow
+      ? storedState
+      : this.buildRandomPeriodicAnchorState(windowStartMs, periodMs);
     if (!isStateForCurrentWindow) {
-      state = this.buildRandomPeriodicAnchorState(windowStartMs, periodMs);
-      await this.ctx.storage.put(RANDOM_ANCHOR_STATE_KEY, state);
+      await this.ctx.storage.put(RANDOM_ANCHOR_STATE_KEY, activeState);
     }
 
     const latestHead = readHashHex(await this.ctx.storage.get<string>(AUDIT_LAST_HASH_GLOBAL_KEY));
-    if (state.anchoredAtMs !== null) {
+    if (activeState.anchoredAtMs !== null) {
       return {
         enabled: true,
         anchored: false,
         reason: 'already_anchored',
         periodMinutes,
-        windowStartMs: state.windowStartMs,
-        targetTsMs: state.targetTsMs,
+        windowStartMs: activeState.windowStartMs,
+        targetTsMs: activeState.targetTsMs,
         latestHead,
-        entryHash: state.lastEntryHash,
+        entryHash: activeState.lastEntryHash,
       };
     }
 
-    if (nowMs < state.targetTsMs) {
+    if (nowMs < activeState.targetTsMs) {
       return {
         enabled: true,
         anchored: false,
         reason: 'not_due',
         periodMinutes,
-        windowStartMs: state.windowStartMs,
-        targetTsMs: state.targetTsMs,
+        windowStartMs: activeState.windowStartMs,
+        targetTsMs: activeState.targetTsMs,
         latestHead,
         entryHash: null,
       };
@@ -816,9 +895,9 @@ export class SchoolStore implements DurableObject {
       { type: 'system', id: 'scheduler' },
       {
         mode: 'random_periodic',
-        windowStartMs: state.windowStartMs,
+        windowStartMs: activeState.windowStartMs,
         windowEndMs,
-        targetTsMs: state.targetTsMs,
+        targetTsMs: activeState.targetTsMs,
         triggeredAtMs: nowMs,
         latestHeadBeforeAnchor: latestHead,
       },
@@ -826,7 +905,7 @@ export class SchoolStore implements DurableObject {
     );
 
     const anchoredState: RandomPeriodicAnchorState = {
-      ...state,
+      ...activeState,
       anchoredAtMs: nowMs,
       lastEntryHash: entry.entry_hash,
     };
@@ -1287,6 +1366,416 @@ export class SchoolStore implements DurableObject {
     return `${baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
   }
 
+  private normalizeEventRiskProfile(raw: unknown): NonNullable<SchoolEvent['riskProfile']> | null {
+    if (typeof raw !== 'string') return null;
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'school_internal') return 'school_internal';
+    if (normalized === 'public') return 'public';
+    return null;
+  }
+
+  private resolveEventRiskProfile(event?: SchoolEvent | null): NonNullable<SchoolEvent['riskProfile']> {
+    return this.normalizeEventRiskProfile(event?.riskProfile) ?? 'school_internal';
+  }
+
+  private isCostOfForgeryFailClosedForAction(
+    action: CostOfForgeryAction,
+    status: CostOfForgeryStatus = this.getCostOfForgeryStatus()
+  ): boolean {
+    const registerOverride = parseOptionalBooleanEnv(this.env.COST_OF_FORGERY_FAIL_CLOSED_REGISTER);
+    const claimOverride = parseOptionalBooleanEnv(this.env.COST_OF_FORGERY_FAIL_CLOSED_CLAIM);
+    if (action === 'user_register' && registerOverride !== null) {
+      return registerOverride;
+    }
+    if ((action === 'user_claim' || action === 'wallet_claim') && claimOverride !== null) {
+      return claimOverride;
+    }
+    return status.failClosed;
+  }
+
+  private resolveCostOfForgeryMinScore(
+    action: CostOfForgeryAction,
+    event: SchoolEvent | null | undefined,
+    status: CostOfForgeryStatus = this.getCostOfForgeryStatus()
+  ): number {
+    const baseMinScore = status.minScore;
+    if (action === 'user_register') {
+      return baseMinScore;
+    }
+    const internalMinScore = parseBoundedInt(
+      this.env.COST_OF_FORGERY_MIN_SCORE_SCHOOL_INTERNAL ?? null,
+      baseMinScore,
+      0,
+      100
+    );
+    const publicMinScore = parseBoundedInt(
+      this.env.COST_OF_FORGERY_MIN_SCORE_PUBLIC ?? null,
+      Math.min(100, baseMinScore + COST_OF_FORGERY_DEFAULT_PUBLIC_MIN_SCORE_OFFSET),
+      0,
+      100
+    );
+    const profile = this.resolveEventRiskProfile(event);
+    return profile === 'public' ? publicMinScore : internalMinScore;
+  }
+
+  private getCostOfForgeryCacheTtlSeconds(): number {
+    return parseBoundedInt(
+      this.env.COST_OF_FORGERY_CACHE_TTL_SECONDS ?? null,
+      COST_OF_FORGERY_DEFAULT_CACHE_TTL_SECONDS,
+      0,
+      COST_OF_FORGERY_MAX_CACHE_TTL_SECONDS
+    );
+  }
+
+  private getCostOfForgeryRemediationOverrideTtlMinutes(): number {
+    return parseBoundedInt(
+      this.env.COST_OF_FORGERY_REMEDIATION_OVERRIDE_TTL_MINUTES ?? null,
+      COST_OF_FORGERY_DEFAULT_REMEDIATION_OVERRIDE_TTL_MINUTES,
+      5,
+      COST_OF_FORGERY_MAX_REMEDIATION_OVERRIDE_TTL_MINUTES
+    );
+  }
+
+  private normalizeCostOfForgeryAction(raw: unknown): CostOfForgeryAction | null {
+    if (typeof raw !== 'string') return null;
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'user_register' || normalized === 'user_claim' || normalized === 'wallet_claim') {
+      return normalized;
+    }
+    return null;
+  }
+
+  private normalizeCostOfForgeryEvidenceType(
+    raw: unknown
+  ): CostOfForgeryRemediationRequestRecord['evidenceType'] | null {
+    if (typeof raw !== 'string') return null;
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'pop_receipt') return 'pop_receipt';
+    if (normalized === 'invite_code_reissue') return 'invite_code_reissue';
+    if (normalized === 'admin_review') return 'admin_review';
+    return null;
+  }
+
+  private normalizeCostOfForgeryRemediationActionType(raw: unknown): CostOfForgeryRemediationActionType | null {
+    if (typeof raw !== 'string') return null;
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'present_pop_receipt') return 'present_pop_receipt';
+    if (normalized === 'reissue_invite_code') return 'reissue_invite_code';
+    if (normalized === 'request_admin_review') return 'request_admin_review';
+    return null;
+  }
+
+  private generateCostOfForgeryRemediationRequestId(): string {
+    const bytes = new Uint8Array(8);
+    crypto.getRandomValues(bytes);
+    const token = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    return `cof-rem-${Date.now().toString(36)}-${token}`;
+  }
+
+  private async buildCostOfForgeryRemediationOverrideKey(
+    action: CostOfForgeryAction,
+    eventId: string | null,
+    subjectHash: string
+  ): Promise<string> {
+    const scope = eventId ? `event:${eventId}` : 'global';
+    const digest = await hashString(`cof-remediation-override:${action}:${scope}:${subjectHash}`);
+    return `${COST_OF_FORGERY_REMEDIATION_OVERRIDE_PREFIX}${digest}`;
+  }
+
+  private parseCostOfForgeryRemediationRequestStatus(raw: unknown): CostOfForgeryRemediationRequestStatus | null {
+    if (typeof raw !== 'string') return null;
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'pending' || normalized === 'approved' || normalized === 'rejected') {
+      return normalized;
+    }
+    return null;
+  }
+
+  private parseCostOfForgeryRemediationRequestRecord(raw: unknown): CostOfForgeryRemediationRequestRecord | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const requestId = this.normalizeStringField(obj.requestId);
+    const createdAt = this.normalizeStringField(obj.createdAt);
+    const createdAtMs = Number(obj.createdAtMs);
+    const status = this.parseCostOfForgeryRemediationRequestStatus(obj.status);
+    const action = this.normalizeCostOfForgeryAction(obj.action);
+    const eventId = this.normalizeStringField(obj.eventId);
+    const subjectHash = this.normalizeStringField(obj.subjectHash);
+    const subjectMask = this.normalizeStringField(obj.subjectMask);
+    const subjectTypeRaw = this.normalizeStringField(obj.subjectType);
+    const subjectType =
+      subjectTypeRaw === 'user' || subjectTypeRaw === 'wallet' || subjectTypeRaw === 'join_token'
+        ? subjectTypeRaw
+        : null;
+    const evidenceType = this.normalizeCostOfForgeryEvidenceType(obj.evidenceType);
+    const requesterIpHash = this.normalizeStringField(obj.requesterIpHash);
+    if (
+      !requestId ||
+      !createdAt ||
+      !Number.isFinite(createdAtMs) ||
+      !status ||
+      !action ||
+      !subjectHash ||
+      !subjectMask ||
+      !subjectType ||
+      !evidenceType ||
+      !requesterIpHash
+    ) {
+      return null;
+    }
+    const resolvedAt = this.normalizeStringField(obj.resolvedAt);
+    const resolvedAtMsRaw = obj.resolvedAtMs;
+    const resolvedAtMs = resolvedAtMsRaw === null ? null : Number(resolvedAtMsRaw);
+    const overrideExpiresAt = this.normalizeStringField(obj.overrideExpiresAt);
+    const overrideExpiresAtMsRaw = obj.overrideExpiresAtMs;
+    const overrideExpiresAtMs = overrideExpiresAtMsRaw === null ? null : Number(overrideExpiresAtMsRaw);
+    if (resolvedAtMsRaw !== null && !Number.isFinite(resolvedAtMs)) return null;
+    if (overrideExpiresAtMsRaw !== null && !Number.isFinite(overrideExpiresAtMs)) return null;
+    return {
+      requestId,
+      createdAt,
+      createdAtMs,
+      status,
+      action,
+      eventId,
+      subjectHash,
+      subjectMask,
+      subjectType,
+      evidenceType,
+      evidenceNote: this.normalizeStringField(obj.evidenceNote),
+      confirmationCode: this.normalizeStringField(obj.confirmationCode),
+      popReceiptId: this.normalizeStringField(obj.popReceiptId),
+      inviteCodeHint: this.normalizeStringField(obj.inviteCodeHint),
+      requesterIpHash,
+      resolvedAt,
+      resolvedAtMs: resolvedAtMsRaw === null ? null : resolvedAtMs,
+      resolvedBy: this.normalizeStringField(obj.resolvedBy),
+      resolutionReason: this.normalizeStringField(obj.resolutionReason),
+      overrideExpiresAt,
+      overrideExpiresAtMs: overrideExpiresAtMsRaw === null ? null : overrideExpiresAtMs,
+    };
+  }
+
+  private parseCostOfForgeryRemediationOverrideRecord(raw: unknown): CostOfForgeryRemediationOverrideRecord | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const requestId = this.normalizeStringField(obj.requestId);
+    const action = this.normalizeCostOfForgeryAction(obj.action);
+    const eventId = this.normalizeStringField(obj.eventId);
+    const subjectHash = this.normalizeStringField(obj.subjectHash);
+    const approvedAt = this.normalizeStringField(obj.approvedAt);
+    const approvedAtMs = Number(obj.approvedAtMs);
+    const approvedBy = this.normalizeStringField(obj.approvedBy);
+    const expiresAt = this.normalizeStringField(obj.expiresAt);
+    const expiresAtMs = Number(obj.expiresAtMs);
+    if (
+      !requestId ||
+      !action ||
+      !subjectHash ||
+      !approvedAt ||
+      !Number.isFinite(approvedAtMs) ||
+      !approvedBy ||
+      !expiresAt ||
+      !Number.isFinite(expiresAtMs)
+    ) {
+      return null;
+    }
+    return {
+      requestId,
+      action,
+      eventId,
+      subjectHash,
+      approvedAt,
+      approvedAtMs,
+      approvedBy,
+      reason: this.normalizeStringField(obj.reason),
+      expiresAt,
+      expiresAtMs,
+    };
+  }
+
+  private buildCostOfForgeryRemediationFlow(params: {
+    action: CostOfForgeryAction;
+    eventId?: string;
+    score?: number | null;
+    minScore?: number;
+    reason?: string | null;
+    decisionId?: string | null;
+    flowId?: string;
+  }): CostOfForgeryRemediationFlow {
+    const actions: CostOfForgeryRemediationFlow['actions'] = [];
+    if (params.action !== 'user_register') {
+      actions.push({
+        type: 'present_pop_receipt',
+        label: 'PoPレシート再提示',
+        description: '確認コードとPoPレシートを再提示して再審査します。',
+        endpoint: '/v1/school/pop-proof',
+        method: 'POST',
+      });
+    }
+    actions.push({
+      type: 'reissue_invite_code',
+      label: '招待コード再発行',
+      description: '招待コード再発行の申請を行い、正規参加者であることを補強します。',
+      endpoint: '/api/cost-of-forgery/remediation/request',
+      method: 'POST',
+    });
+    actions.push({
+      type: 'request_admin_review',
+      label: '管理者承認を申請',
+      description: '管理者に追加証跡のレビューと一時承認を依頼します。',
+      endpoint: '/api/cost-of-forgery/remediation/request',
+      method: 'POST',
+    });
+    const flowId = params.flowId ?? this.generateCostOfForgeryRemediationRequestId();
+    return {
+      flowVersion: 1,
+      flowId,
+      status: 'required',
+      action: params.action,
+      requestEndpoint: '/api/cost-of-forgery/remediation/request',
+      ...(params.eventId ? { eventId: params.eventId } : {}),
+      ...(typeof params.minScore === 'number' ? { minScore: params.minScore } : {}),
+      ...('score' in params ? { score: params.score ?? null } : {}),
+      ...(params.reason ? { reason: params.reason } : {}),
+      ...(params.decisionId ? { decisionId: params.decisionId } : {}),
+      actions,
+    };
+  }
+
+  private async findActiveCostOfForgeryRemediationOverride(params: {
+    action: CostOfForgeryAction;
+    eventId?: string;
+    subject?: string;
+    nowMs: number;
+  }): Promise<CostOfForgeryRemediationOverrideRecord | null> {
+    const subject = this.normalizeStringField(params.subject);
+    if (!subject) return null;
+    const subjectHash = await hashString(`subject:${subject}`);
+    const lookupKeys: Array<string> = [];
+    if (params.eventId) {
+      lookupKeys.push(await this.buildCostOfForgeryRemediationOverrideKey(params.action, params.eventId, subjectHash));
+    }
+    lookupKeys.push(await this.buildCostOfForgeryRemediationOverrideKey(params.action, null, subjectHash));
+    for (const key of lookupKeys) {
+      const record = this.parseCostOfForgeryRemediationOverrideRecord(await this.ctx.storage.get(key));
+      if (!record) continue;
+      if (record.subjectHash !== subjectHash) continue;
+      if (record.action !== params.action) continue;
+      if (record.eventId && params.eventId && record.eventId !== params.eventId) continue;
+      if (record.eventId && !params.eventId) continue;
+      if (record.expiresAtMs <= params.nowMs) continue;
+      return record;
+    }
+    return null;
+  }
+
+  private normalizeWalletForCostOfForgeryCache(walletAddress: string | undefined): string | null {
+    if (typeof walletAddress !== 'string') return null;
+    const normalized = walletAddress.trim();
+    if (!normalized || !MINT_BASE58_RE.test(normalized)) return null;
+    return normalized;
+  }
+
+  private parseCostOfForgeryWalletCacheRecord(raw: unknown): CostOfForgeryWalletCacheRecord | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const wallet = typeof obj.wallet === 'string' ? obj.wallet.trim() : '';
+    const actionRaw = typeof obj.action === 'string' ? obj.action.trim() : '';
+    const action = actionRaw === 'wallet_claim' || actionRaw === 'user_claim' || actionRaw === 'user_register'
+      ? actionRaw
+      : null;
+    const minScoreRaw = Number(obj.minScore);
+    const minScore = Number.isFinite(minScoreRaw) ? Math.max(0, Math.min(100, Math.floor(minScoreRaw))) : NaN;
+    const cachedAtMs = Number(obj.cachedAtMs);
+    const expiresAtMs = Number(obj.expiresAtMs);
+    const decisionRaw = obj.decision;
+    if (!wallet || !MINT_BASE58_RE.test(wallet)) return null;
+    if (!action) return null;
+    if (!Number.isFinite(minScore)) return null;
+    if (!Number.isFinite(cachedAtMs) || !Number.isFinite(expiresAtMs)) return null;
+    if (!decisionRaw || typeof decisionRaw !== 'object') return null;
+    const decisionObj = decisionRaw as Record<string, unknown>;
+    const allow = decisionObj.allow;
+    if (typeof allow !== 'boolean') return null;
+    const scoreRaw = decisionObj.score;
+    const score = scoreRaw === null
+      ? null
+      : typeof scoreRaw === 'number' && Number.isFinite(scoreRaw)
+        ? Math.max(0, Math.min(100, scoreRaw))
+        : null;
+    if (!(scoreRaw === null || typeof scoreRaw === 'number')) return null;
+    const reason = typeof decisionObj.reason === 'string' ? decisionObj.reason : null;
+    const decisionId = typeof decisionObj.decisionId === 'string' ? decisionObj.decisionId : null;
+    return {
+      wallet,
+      action,
+      minScore,
+      cachedAtMs,
+      expiresAtMs,
+      decision: {
+        allow,
+        score,
+        reason,
+        decisionId,
+      },
+    };
+  }
+
+  private async buildCostOfForgeryWalletCacheKey(
+    wallet: string,
+    action: CostOfForgeryAction,
+    minScore: number
+  ): Promise<string> {
+    const walletHash = await hashString(`wallet:${wallet}:action:${action}:min:${minScore}`);
+    return `${COST_OF_FORGERY_CACHE_PREFIX}${walletHash}`;
+  }
+
+  private async getCachedWalletCostOfForgeryDecision(
+    walletAddress: string | undefined,
+    action: CostOfForgeryAction,
+    minScore: number,
+    nowMs: number
+  ): Promise<CostOfForgeryDecision | null> {
+    const ttlSeconds = this.getCostOfForgeryCacheTtlSeconds();
+    if (ttlSeconds <= 0) return null;
+    const wallet = this.normalizeWalletForCostOfForgeryCache(walletAddress);
+    if (!wallet) return null;
+    const cacheKey = await this.buildCostOfForgeryWalletCacheKey(wallet, action, minScore);
+    const cached = this.parseCostOfForgeryWalletCacheRecord(await this.ctx.storage.get(cacheKey));
+    if (!cached) return null;
+    if (cached.wallet !== wallet) return null;
+    if (cached.action !== action) return null;
+    if (cached.minScore !== minScore) return null;
+    if (cached.expiresAtMs <= nowMs) {
+      return null;
+    }
+    return cached.decision;
+  }
+
+  private async cacheWalletCostOfForgeryDecision(
+    walletAddress: string | undefined,
+    action: CostOfForgeryAction,
+    minScore: number,
+    decision: CostOfForgeryDecision,
+    nowMs: number
+  ): Promise<void> {
+    const ttlSeconds = this.getCostOfForgeryCacheTtlSeconds();
+    if (ttlSeconds <= 0) return;
+    const wallet = this.normalizeWalletForCostOfForgeryCache(walletAddress);
+    if (!wallet) return;
+    const cacheKey = await this.buildCostOfForgeryWalletCacheKey(wallet, action, minScore);
+    const record: CostOfForgeryWalletCacheRecord = {
+      wallet,
+      action,
+      minScore,
+      cachedAtMs: nowMs,
+      expiresAtMs: nowMs + ttlSeconds * 1000,
+      decision,
+    };
+    await this.ctx.storage.put(cacheKey, record);
+  }
+
   private shouldEnforceCostOfForgeryAction(action: CostOfForgeryAction): boolean {
     const status = this.getCostOfForgeryStatus();
     if (!status.enabled) return false;
@@ -1384,6 +1873,7 @@ export class SchoolStore implements DurableObject {
   private async evaluateCostOfForgeryDecision(params: {
     request: Request;
     action: CostOfForgeryAction;
+    minScore: number;
     eventId?: string;
     userId?: string;
     subject?: string;
@@ -1436,7 +1926,7 @@ export class SchoolStore implements DurableObject {
         throw new Error(`cost_of_forgery_http_${res.status}`);
       }
       const json = await res.json().catch(() => ({}));
-      return this.parseCostOfForgeryDecision(json, status.minScore);
+      return this.parseCostOfForgeryDecision(json, params.minScore);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         throw new Error('cost_of_forgery_timeout');
@@ -1458,6 +1948,7 @@ export class SchoolStore implements DurableObject {
         ...(error.reason ? { reason: error.reason } : {}),
         ...(error.decisionId ? { decisionId: error.decisionId } : {}),
         ...(error.detail ? { detail: error.detail } : {}),
+        ...(error.remediation ? { remediation: error.remediation } : {}),
       },
       { status: error.status }
     );
@@ -1470,8 +1961,9 @@ export class SchoolStore implements DurableObject {
         success: false,
         error: {
           code: 'eligibility',
-          message: `Cost of Forgery判定により参加条件を満たしていないため受け付けできません${detail}`,
+          message: `Cost of Forgery判定により追加証跡が必要です${detail}`,
         },
+        ...(error.remediation ? { remediation: error.remediation } : {}),
       };
     }
     return {
@@ -1486,17 +1978,31 @@ export class SchoolStore implements DurableObject {
   private async enforceCostOfForgeryRisk(params: {
     request: Request;
     action: CostOfForgeryAction;
+    event?: SchoolEvent | null;
     eventId?: string;
     userId?: string;
     subject?: string;
+    walletAddress?: string;
     costOfForgeryToken?: string;
   }): Promise<CostOfForgeryEnforcementError | null> {
     const status = this.getCostOfForgeryStatus();
+    const failClosedForAction = this.isCostOfForgeryFailClosedForAction(params.action, status);
+    const minScore = this.resolveCostOfForgeryMinScore(params.action, params.event, status);
     if (!this.shouldEnforceCostOfForgeryAction(params.action)) {
       return null;
     }
+    const nowMs = Date.now();
+    const activeRemediationOverride = await this.findActiveCostOfForgeryRemediationOverride({
+      action: params.action,
+      eventId: params.eventId,
+      subject: params.subject,
+      nowMs,
+    });
+    if (activeRemediationOverride) {
+      return null;
+    }
     if (!status.operationalReady) {
-      if (!status.failClosed) {
+      if (!failClosedForAction) {
         return null;
       }
       return {
@@ -1508,7 +2014,19 @@ export class SchoolStore implements DurableObject {
     }
 
     try {
-      const decision = await this.evaluateCostOfForgeryDecision(params);
+      let decision =
+        params.action === 'wallet_claim'
+          ? await this.getCachedWalletCostOfForgeryDecision(params.walletAddress, params.action, minScore, nowMs)
+          : null;
+      if (!decision) {
+        decision = await this.evaluateCostOfForgeryDecision({
+          ...params,
+          minScore,
+        });
+        if (params.action === 'wallet_claim') {
+          await this.cacheWalletCostOfForgeryDecision(params.walletAddress, params.action, minScore, decision, nowMs);
+        }
+      }
       if (decision.allow) {
         return null;
       }
@@ -1517,13 +2035,21 @@ export class SchoolStore implements DurableObject {
         code: 'cost_of_forgery_blocked',
         action: params.action,
         message: 'cost of forgery sybil check blocked this request',
-        minScore: status.minScore,
+        minScore,
         score: decision.score,
         reason: decision.reason,
         decisionId: decision.decisionId,
+        remediation: this.buildCostOfForgeryRemediationFlow({
+          action: params.action,
+          eventId: params.eventId,
+          minScore,
+          score: decision.score,
+          reason: decision.reason,
+          decisionId: decision.decisionId,
+        }),
       };
     } catch (err) {
-      if (!status.failClosed) {
+      if (!failClosedForAction) {
         console.error('[cost-of-forgery] verification failed but allowed (fail-open mode)', err);
         return null;
       }
@@ -2073,6 +2599,10 @@ export class SchoolStore implements DurableObject {
   private getRuntimeStatus(): RuntimeStatusReport {
     const auditStatus = this.getAuditStatus();
     const costOfForgeryStatus = this.getCostOfForgeryStatus();
+    const costOfForgeryAnyFailClosed =
+      this.isCostOfForgeryFailClosedForAction('user_register', costOfForgeryStatus) ||
+      this.isCostOfForgeryFailClosedForAction('user_claim', costOfForgeryStatus) ||
+      this.isCostOfForgeryFailClosedForAction('wallet_claim', costOfForgeryStatus);
     const blockingIssues: string[] = [];
     const warnings: string[] = [];
 
@@ -2104,7 +2634,7 @@ export class SchoolStore implements DurableObject {
     if (auditStatus.failClosedForMutatingRequests && !auditStatus.operationalReady) {
       blockingIssues.push('Audit immutable sink is not operational while AUDIT_IMMUTABLE_MODE=required');
     }
-    if (costOfForgeryStatus.enabled && costOfForgeryStatus.failClosed && !costOfForgeryStatus.operationalReady) {
+    if (costOfForgeryStatus.enabled && costOfForgeryAnyFailClosed && !costOfForgeryStatus.operationalReady) {
       blockingIssues.push('Cost of Forgery is enabled in fail-closed mode but COST_OF_FORGERY_BASE_URL is not configured');
     } else if (costOfForgeryStatus.enabled && !costOfForgeryStatus.operationalReady) {
       warnings.push('Cost of Forgery is enabled but COST_OF_FORGERY_BASE_URL is not configured (fail-open mode)');
@@ -2131,7 +2661,7 @@ export class SchoolStore implements DurableObject {
         auditPrimarySinkConfigured: auditStatus.primaryImmutableSinkConfigured,
         costOfForgeryEnabled: costOfForgeryStatus.enabled,
         costOfForgeryOperationalReady: costOfForgeryStatus.operationalReady,
-        costOfForgeryFailClosed: costOfForgeryStatus.failClosed,
+        costOfForgeryFailClosed: costOfForgeryAnyFailClosed,
         corsOrigin: corsOrigin || null,
       },
       blockingIssues,
@@ -3102,6 +3632,12 @@ export class SchoolStore implements DurableObject {
     if (/^\/v1\/school\/events\/[^/]+\/claimants$/.test(path)) return '/v1/school/events/:eventId/claimants';
     if (/^\/v1\/school\/events\/[^/]+$/.test(path)) return '/v1/school/events/:eventId';
     if (/^\/api\/events\/[^/]+\/claim$/.test(path)) return '/api/events/:eventId/claim';
+    if (/^\/api\/admin\/cost-of-forgery\/remediation\/[^/]+\/approve$/.test(path)) {
+      return '/api/admin/cost-of-forgery/remediation/:requestId/approve';
+    }
+    if (/^\/api\/admin\/cost-of-forgery\/remediation\/[^/]+\/reject$/.test(path)) {
+      return '/api/admin/cost-of-forgery/remediation/:requestId/reject';
+    }
     return path;
   }
 
@@ -4216,6 +4752,16 @@ export class SchoolStore implements DurableObject {
       return { type: 'wallet', id: this.maskActorId(subject || 'unknown') };
     }
 
+    if (path === '/api/cost-of-forgery/remediation/request') {
+      const payload = body as { userId?: unknown; walletAddress?: unknown; joinToken?: unknown } | undefined;
+      const userId = this.normalizeUserId(payload?.userId);
+      if (userId) return { type: 'user', id: userId };
+      const wallet = typeof payload?.walletAddress === 'string' ? payload.walletAddress : '';
+      const joinToken = typeof payload?.joinToken === 'string' ? payload.joinToken : '';
+      const subject = wallet || joinToken;
+      return { type: 'wallet', id: this.maskActorId(subject || 'unknown') };
+    }
+
     if (
       path === '/api/users/register' ||
       path === '/api/auth/verify' ||
@@ -4892,6 +5438,7 @@ export class SchoolStore implements DurableObject {
         datetime?: string;
         host?: string;
         state?: 'draft' | 'published';
+        riskProfile?: 'school_internal' | 'public';
         solanaMint?: string;
         solanaAuthority?: string;
         solanaGrantId?: string;
@@ -4907,6 +5454,9 @@ export class SchoolStore implements DurableObject {
       const title = typeof body?.title === 'string' ? body.title.trim() : '';
       const datetime = typeof body?.datetime === 'string' ? body.datetime.trim() : '';
       const host = typeof body?.host === 'string' ? body.host.trim() : '';
+      const rawRiskProfile = typeof body?.riskProfile === 'string' ? body.riskProfile.trim() : '';
+      const parsedRiskProfile = this.normalizeEventRiskProfile(rawRiskProfile);
+      const riskProfile = parsedRiskProfile ?? 'school_internal';
       const rawTokenAmount = body?.ticketTokenAmount;
       const ticketTokenAmount =
         typeof rawTokenAmount === 'number' && Number.isFinite(rawTokenAmount)
@@ -4933,6 +5483,9 @@ export class SchoolStore implements DurableObject {
 
       if (!title || !datetime || !host) {
         return Response.json({ error: 'title, datetime, host are required' }, { status: 400 });
+      }
+      if (rawRiskProfile && !parsedRiskProfile) {
+        return Response.json({ error: 'riskProfile must be "school_internal" or "public"' }, { status: 400 });
       }
       if (!Number.isInteger(ticketTokenAmount) || ticketTokenAmount <= 0) {
         return Response.json({ error: 'ticketTokenAmount must be a positive integer' }, { status: 400 });
@@ -4966,6 +5519,7 @@ export class SchoolStore implements DurableObject {
       }
       const event = await this.store.createEvent({
         title, datetime, host, state: body.state,
+        riskProfile,
         solanaMint: solanaMint ?? undefined,
         solanaAuthority: solanaAuthority ?? undefined,
         solanaGrantId: solanaGrantId ?? undefined,
@@ -4982,6 +5536,7 @@ export class SchoolStore implements DurableObject {
           title,
           datetime,
           host,
+          riskProfile,
           eventId: event.id,
           createdByAdminId: operator.adminId,
           createdByAdminName: operator.name,
@@ -5121,6 +5676,292 @@ export class SchoolStore implements DurableObject {
       return Response.json(this.getRuntimeStatus());
     }
 
+    if (path === '/api/cost-of-forgery/remediation/request' && request.method === 'POST') {
+      let body: {
+        action?: CostOfForgeryAction;
+        eventId?: string;
+        userId?: string;
+        walletAddress?: string;
+        joinToken?: string;
+        remediationAction?: CostOfForgeryRemediationActionType;
+        evidenceType?: 'pop_receipt' | 'invite_code_reissue' | 'admin_review';
+        confirmationCode?: string;
+        popReceiptId?: string;
+        inviteCodeHint?: string;
+        note?: string;
+      };
+      try {
+        body = (await request.json()) as any;
+      } catch {
+        return Response.json({ error: 'invalid body' }, { status: 400 });
+      }
+
+      const action = this.normalizeCostOfForgeryAction(body?.action);
+      if (!action) {
+        return Response.json({ error: 'action must be user_register, user_claim, or wallet_claim' }, { status: 400 });
+      }
+      const eventId = this.normalizeStringField(body?.eventId);
+      if ((action === 'wallet_claim' || action === 'user_claim') && !eventId) {
+        return Response.json({ error: 'eventId is required for claim remediation' }, { status: 400 });
+      }
+      if (eventId) {
+        const event = await this.store.getEvent(eventId);
+        if (!event) {
+          return Response.json({ error: 'event not found' }, { status: 404 });
+        }
+      }
+
+      const normalizedUserId = this.normalizeUserId(body?.userId);
+      const walletAddress = this.normalizeStringField(body?.walletAddress);
+      const joinToken = this.normalizeStringField(body?.joinToken);
+      let subject: string | null = null;
+      let subjectType: CostOfForgeryRemediationRequestRecord['subjectType'] = 'user';
+      if (action === 'user_register' || action === 'user_claim') {
+        if (!normalizedUserId) {
+          return Response.json({ error: 'userId is required for user_* remediation' }, { status: 400 });
+        }
+        subject = normalizedUserId;
+        subjectType = 'user';
+      } else {
+        subject = normalizeSubject(walletAddress ?? undefined, joinToken ?? undefined);
+        if (!subject) {
+          return Response.json({ error: 'walletAddress or joinToken is required for wallet_claim remediation' }, { status: 400 });
+        }
+        subjectType = walletAddress ? 'wallet' : 'join_token';
+      }
+
+      const remediationAction = this.normalizeCostOfForgeryRemediationActionType(body?.remediationAction);
+      const evidenceType =
+        this.normalizeCostOfForgeryEvidenceType(body?.evidenceType)
+        ?? (remediationAction === 'present_pop_receipt'
+          ? 'pop_receipt'
+          : remediationAction === 'reissue_invite_code'
+            ? 'invite_code_reissue'
+            : 'admin_review');
+      const evidenceNote = this.normalizeStringField(body?.note)?.slice(0, 500) ?? null;
+      const confirmationCode = this.normalizeStringField(body?.confirmationCode);
+      const popReceiptId = this.normalizeStringField(body?.popReceiptId);
+      const inviteCodeHint = this.normalizeStringField(body?.inviteCodeHint);
+
+      const nowMs = Date.now();
+      const createdAt = new Date(nowMs).toISOString();
+      const requestId = this.generateCostOfForgeryRemediationRequestId();
+      const subjectHash = await hashString(`subject:${subject}`);
+      const requesterIpHash = await hashString(`ip:${this.getClientIpAddress(request)}`);
+      const record: CostOfForgeryRemediationRequestRecord = {
+        requestId,
+        createdAt,
+        createdAtMs: nowMs,
+        status: 'pending',
+        action,
+        eventId: eventId ?? null,
+        subjectHash,
+        subjectMask: this.maskActorId(subject),
+        subjectType,
+        evidenceType,
+        evidenceNote,
+        confirmationCode: confirmationCode ?? null,
+        popReceiptId: popReceiptId ?? null,
+        inviteCodeHint: inviteCodeHint ?? null,
+        requesterIpHash,
+        resolvedAt: null,
+        resolvedAtMs: null,
+        resolvedBy: null,
+        resolutionReason: null,
+        overrideExpiresAt: null,
+        overrideExpiresAtMs: null,
+      };
+      await this.ctx.storage.put(costOfForgeryRemediationRequestKey(requestId), record);
+      await this.appendAuditLog(
+        'COST_OF_FORGERY_REMEDIATION_REQUEST',
+        { type: subjectType === 'user' ? 'user' : 'wallet', id: this.maskActorId(subject) },
+        {
+          requestId,
+          action,
+          eventId: eventId ?? null,
+          subjectType,
+          evidenceType,
+          hasConfirmationCode: Boolean(confirmationCode),
+          hasPopReceiptId: Boolean(popReceiptId),
+          hasInviteCodeHint: Boolean(inviteCodeHint),
+        },
+        eventId ?? 'system'
+      );
+      return Response.json(
+        {
+          requestId,
+          status: 'pending',
+          remediation: this.buildCostOfForgeryRemediationFlow({
+            action,
+            eventId: eventId ?? undefined,
+            flowId: requestId,
+          }),
+        },
+        { status: 202 }
+      );
+    }
+
+    const remediationApproveMatch = path.match(/^\/api\/admin\/cost-of-forgery\/remediation\/([^/]+)\/approve$/);
+    if (remediationApproveMatch && request.method === 'POST') {
+      const authError = await this.requireAdminAuthorization(request);
+      if (authError) return authError;
+      const operator = await this.authenticateOperator(request);
+      if (!operator) return this.unauthorizedResponse();
+
+      const requestId = remediationApproveMatch[1].trim();
+      if (!requestId) {
+        return Response.json({ error: 'requestId is required' }, { status: 400 });
+      }
+      const requestKey = costOfForgeryRemediationRequestKey(requestId);
+      const requestRecord = this.parseCostOfForgeryRemediationRequestRecord(await this.ctx.storage.get(requestKey));
+      if (!requestRecord) {
+        return Response.json({ error: 'remediation request not found' }, { status: 404 });
+      }
+      if (requestRecord.status !== 'pending') {
+        return Response.json({ error: 'remediation request is already resolved', status: requestRecord.status }, { status: 409 });
+      }
+
+      let body: { expiresInMinutes?: number | string; reason?: string };
+      try {
+        body = (await request.json()) as any;
+      } catch {
+        body = {};
+      }
+      const rawExpiresInMinutes = body?.expiresInMinutes;
+      const expiresInMinutesInput =
+        typeof rawExpiresInMinutes === 'number' && Number.isFinite(rawExpiresInMinutes)
+          ? String(Math.floor(rawExpiresInMinutes))
+          : typeof rawExpiresInMinutes === 'string'
+            ? rawExpiresInMinutes
+            : null;
+      const expiresInMinutes = parseBoundedInt(
+        expiresInMinutesInput,
+        this.getCostOfForgeryRemediationOverrideTtlMinutes(),
+        5,
+        COST_OF_FORGERY_MAX_REMEDIATION_OVERRIDE_TTL_MINUTES
+      );
+      const reason = this.normalizeStringField(body?.reason);
+      const nowMs = Date.now();
+      const approvedAt = new Date(nowMs).toISOString();
+      const expiresAtMs = nowMs + expiresInMinutes * 60 * 1000;
+      const expiresAt = new Date(expiresAtMs).toISOString();
+
+      const overrideRecord: CostOfForgeryRemediationOverrideRecord = {
+        requestId,
+        action: requestRecord.action,
+        eventId: requestRecord.eventId,
+        subjectHash: requestRecord.subjectHash,
+        approvedAt,
+        approvedAtMs: nowMs,
+        approvedBy: operator.actorId,
+        reason: reason ?? null,
+        expiresAt,
+        expiresAtMs,
+      };
+      const overrideKey = await this.buildCostOfForgeryRemediationOverrideKey(
+        requestRecord.action,
+        requestRecord.eventId,
+        requestRecord.subjectHash
+      );
+      await this.ctx.storage.put(overrideKey, overrideRecord);
+      const updatedRequestRecord: CostOfForgeryRemediationRequestRecord = {
+        ...requestRecord,
+        status: 'approved',
+        resolvedAt: approvedAt,
+        resolvedAtMs: nowMs,
+        resolvedBy: operator.actorId,
+        resolutionReason: reason ?? null,
+        overrideExpiresAt: expiresAt,
+        overrideExpiresAtMs: expiresAtMs,
+      };
+      await this.ctx.storage.put(requestKey, updatedRequestRecord);
+      await this.appendAuditLog(
+        'COST_OF_FORGERY_REMEDIATION_APPROVE',
+        { type: operator.role === 'master' ? 'master' : 'admin', id: operator.actorId },
+        {
+          requestId,
+          action: requestRecord.action,
+          eventId: requestRecord.eventId,
+          subjectType: requestRecord.subjectType,
+          subjectMask: requestRecord.subjectMask,
+          expiresInMinutes,
+          expiresAt,
+          reason,
+        },
+        requestRecord.eventId ?? 'system'
+      );
+      return Response.json({
+        requestId,
+        status: 'approved',
+        action: requestRecord.action,
+        eventId: requestRecord.eventId,
+        expiresAt,
+        approvedBy: operator.actorId,
+      });
+    }
+
+    const remediationRejectMatch = path.match(/^\/api\/admin\/cost-of-forgery\/remediation\/([^/]+)\/reject$/);
+    if (remediationRejectMatch && request.method === 'POST') {
+      const authError = await this.requireAdminAuthorization(request);
+      if (authError) return authError;
+      const operator = await this.authenticateOperator(request);
+      if (!operator) return this.unauthorizedResponse();
+
+      const requestId = remediationRejectMatch[1].trim();
+      if (!requestId) {
+        return Response.json({ error: 'requestId is required' }, { status: 400 });
+      }
+      const requestKey = costOfForgeryRemediationRequestKey(requestId);
+      const requestRecord = this.parseCostOfForgeryRemediationRequestRecord(await this.ctx.storage.get(requestKey));
+      if (!requestRecord) {
+        return Response.json({ error: 'remediation request not found' }, { status: 404 });
+      }
+      if (requestRecord.status !== 'pending') {
+        return Response.json({ error: 'remediation request is already resolved', status: requestRecord.status }, { status: 409 });
+      }
+
+      let body: { reason?: string };
+      try {
+        body = (await request.json()) as any;
+      } catch {
+        body = {};
+      }
+      const reason = this.normalizeStringField(body?.reason);
+      const nowMs = Date.now();
+      const resolvedAt = new Date(nowMs).toISOString();
+      const updatedRequestRecord: CostOfForgeryRemediationRequestRecord = {
+        ...requestRecord,
+        status: 'rejected',
+        resolvedAt,
+        resolvedAtMs: nowMs,
+        resolvedBy: operator.actorId,
+        resolutionReason: reason ?? null,
+        overrideExpiresAt: null,
+        overrideExpiresAtMs: null,
+      };
+      await this.ctx.storage.put(requestKey, updatedRequestRecord);
+      await this.appendAuditLog(
+        'COST_OF_FORGERY_REMEDIATION_REJECT',
+        { type: operator.role === 'master' ? 'master' : 'admin', id: operator.actorId },
+        {
+          requestId,
+          action: requestRecord.action,
+          eventId: requestRecord.eventId,
+          subjectType: requestRecord.subjectType,
+          subjectMask: requestRecord.subjectMask,
+          reason,
+        },
+        requestRecord.eventId ?? 'system'
+      );
+      return Response.json({
+        requestId,
+        status: 'rejected',
+        action: requestRecord.action,
+        eventId: requestRecord.eventId,
+        rejectedBy: operator.actorId,
+      });
+    }
+
     if (path === '/v1/school/pop-proof' && request.method === 'POST') {
       let body: PopProofBody;
       try {
@@ -5205,8 +6046,10 @@ export class SchoolStore implements DurableObject {
         const costOfForgeryError = await this.enforceCostOfForgeryRisk({
           request,
           action: 'wallet_claim',
+          event,
           eventId,
           subject,
+          walletAddress: walletAddress ?? undefined,
           costOfForgeryToken: costOfForgeryToken || undefined,
         });
         if (costOfForgeryError) {
@@ -5501,6 +6344,7 @@ export class SchoolStore implements DurableObject {
         const costOfForgeryError = await this.enforceCostOfForgeryRisk({
           request,
           action: 'user_claim',
+          event,
           eventId,
           userId,
           subject: userId,

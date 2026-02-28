@@ -17,6 +17,7 @@ interface CreateEventBody {
   datetime?: string;
   host?: string;
   state?: 'draft' | 'published';
+  riskProfile?: 'school_internal' | 'public';
   solanaMint?: string;
   solanaAuthority?: string;
   solanaGrantId?: string;
@@ -139,6 +140,7 @@ export function createV1SchoolRouter(deps: V1SchoolDeps): Router {
     }
 
     const state = body.state === 'draft' ? 'draft' : 'published';
+    const riskProfile = body.riskProfile === 'public' ? 'public' : 'school_internal';
     const id = `evt-${Date.now().toString(36)}`;
     const event: SchoolEvent = {
       id,
@@ -146,6 +148,7 @@ export function createV1SchoolRouter(deps: V1SchoolDeps): Router {
       datetime,
       host,
       state,
+      riskProfile,
       solanaMint: body.solanaMint,
       solanaAuthority: body.solanaAuthority,
       solanaGrantId: body.solanaGrantId,

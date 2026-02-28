@@ -9,6 +9,8 @@ export interface SchoolEvent {
   datetime: string;
   host: string;
   state?: 'draft' | 'published' | 'ended';
+  /** CoF 閾値プロファイル（学校内向け/公開イベント） */
+  riskProfile?: 'school_internal' | 'public';
   /** 参加済み数（管理者用・API が返す） */
   claimedCount?: number;
   solanaMint?: string;
@@ -34,6 +36,35 @@ export type SchoolClaimErrorCode =
 export interface SchoolClaimErrorInfo {
   code: SchoolClaimErrorCode;
   message: string;
+}
+
+export type CostOfForgeryActionType = 'user_register' | 'user_claim' | 'wallet_claim';
+
+export type CostOfForgeryRemediationActionType =
+  | 'present_pop_receipt'
+  | 'reissue_invite_code'
+  | 'request_admin_review';
+
+export interface CostOfForgeryRemediationAction {
+  type: CostOfForgeryRemediationActionType;
+  label: string;
+  description: string;
+  endpoint: string;
+  method: 'POST';
+}
+
+export interface CostOfForgeryRemediationFlow {
+  flowVersion: 1;
+  flowId: string;
+  status: 'required';
+  action: CostOfForgeryActionType;
+  requestEndpoint: '/api/cost-of-forgery/remediation/request';
+  eventId?: string;
+  minScore?: number;
+  score?: number | null;
+  reason?: string | null;
+  decisionId?: string | null;
+  actions: CostOfForgeryRemediationAction[];
 }
 
 export interface SchoolClaimResultSuccess {
@@ -83,6 +114,7 @@ export interface ParticipationTicketReceipt {
 export interface SchoolClaimResultFailure {
   success: false;
   error: SchoolClaimErrorInfo;
+  remediation?: CostOfForgeryRemediationFlow;
 }
 
 export type SchoolClaimResult = SchoolClaimResultSuccess | SchoolClaimResultFailure;

@@ -10,8 +10,9 @@ Hono による最小構成の API。`wene-mobile`（Cloudflare Pages）から固
 - `GET /v1/school/events/:eventId`  
   - レスポンス: `SchoolEvent`（`claimedCount` 含む）。存在しなければ 404 + `SchoolClaimResult`（not_found）
 - `POST /v1/school/events`
-  - リクエスト: `{ title: string; datetime: string; host: string; state?: 'draft'|'published'; solanaMint?: string; solanaAuthority?: string; solanaGrantId?: string; ticketTokenAmount: number; claimIntervalDays?: number; maxClaimsPerInterval?: number | null }`
+  - リクエスト: `{ title: string; datetime: string; host: string; state?: 'draft'|'published'; riskProfile?: 'school_internal'|'public'; solanaMint?: string; solanaAuthority?: string; solanaGrantId?: string; ticketTokenAmount: number; claimIntervalDays?: number; maxClaimsPerInterval?: number | null }`
   - `ticketTokenAmount` は 1 以上の整数（数値文字列も許容）
+  - `riskProfile` は未指定時 `school_internal`。`public` の場合は CoF 閾値を厳格化できる
   - `claimIntervalDays` は 1 以上の整数（未指定時 30）
   - `maxClaimsPerInterval` は `null`（無制限）または 1 以上の整数（未指定時 1）
   - `solanaAuthority + solanaMint + solanaGrantId` が既存イベントと重複する場合は 409（同一 grant のイベント再利用を禁止）
@@ -153,10 +154,54 @@ Cost of Forgery 互換のリスク判定 API を登録/参加導線に組み込�
 - `COST_OF_FORGERY_API_KEY`: 判定APIの認証キー（Bearer + `x-api-key` で送信）
 - `COST_OF_FORGERY_TIMEOUT_MS`: 判定APIタイムアウト（ms）
 - `COST_OF_FORGERY_MIN_SCORE`: 許容スコア下限（0-100）
+- `COST_OF_FORGERY_MIN_SCORE_SCHOOL_INTERNAL`: 学校内イベント向けの閾値（`wallet/user claim`）
+- `COST_OF_FORGERY_MIN_SCORE_PUBLIC`: 公開イベント向けの閾値（`wallet/user claim`）
+- `COST_OF_FORGERY_CACHE_TTL_SECONDS`: `wallet -> 判定結果` キャッシュTTL（秒、`0`で無効、既定 300）
 - `COST_OF_FORGERY_ENFORCE_ON_REGISTER`: `/api/users/register` に適用するか
 - `COST_OF_FORGERY_ENFORCE_ON_CLAIM`: `/api/events/:eventId/claim` と `/v1/school/claims` に適用するか
+- `COST_OF_FORGERY_FAIL_CLOSED_REGISTER`: register の fail-closed 設定（推奨 `false`）
+- `COST_OF_FORGERY_FAIL_CLOSED_CLAIM`: claim の fail-closed 設定（推奨 `true`）
+- `COST_OF_FORGERY_REMEDIATION_OVERRIDE_TTL_MINUTES`: 救済承認（一時オーバーライド）の有効期限（分、既定 1440）
 
-ブロック時は `403`（`cost_of_forgery_blocked`）、fail-closed で判定不能時は `503` を返す。
+ブロック時は `403`（`cost_of_forgery_blocked`）で `remediation` を返し、fail-closed で判定不能時は `503` を返す。
+
+### 救済フロー（誤判定対策）
+
+低スコア時は「即拒否で終了」ではなく、追加証跡に進める。
+
+1. 低スコア検知: `403` と `remediation`（`flowId`, `actions`, `requestEndpoint`）を返却
+2. 利用者申請: `POST /api/cost-of-forgery/remediation/request`
+3. 管理者判断: `POST /api/admin/cost-of-forgery/remediation/:requestId/approve` または `.../reject`
+4. 承認済みは TTL 内で同一 subject + action（+event）を一時許可
+
+`remediation.actions` には以下を含む:
+
+- `present_pop_receipt`: PoP レシート再提示
+- `reissue_invite_code`: 招待コード再発行申請
+- `request_admin_review`: 管理者承認申請
+
+申請API例:
+
+```json
+{
+  "action": "wallet_claim",
+  "eventId": "evt-xxxx",
+  "walletAddress": "....",
+  "remediationAction": "request_admin_review",
+  "evidenceType": "admin_review",
+  "confirmationCode": "ABC123",
+  "note": "正規参加者です。"
+}
+```
+
+承認API例:
+
+```json
+{
+  "expiresInMinutes": 180,
+  "reason": "オフライン本人確認済み"
+}
+```
 
 `POST /v1/school/pop-proof` はこの鍵で署名した PoP 証明を返し、クライアントは `claim_grant` 送信前に Ed25519 検証命令を付与する。
 デプロイ後は次を確認してから本番運用に入ること:

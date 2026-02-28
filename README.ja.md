@@ -64,7 +64,7 @@ PoP（Proof of Process）で、学校/公共の参加運用と給付運用を監
 - [Implemented] 管理者のイベント発行は、管理者認証に加えて Phantom 接続と runtime readiness を必須にしています。
 - [Implemented] 検証用 endpoint: `/v1/school/pop-status`、`/v1/school/runtime-status`、`/v1/school/audit-status`、`/api/audit/receipts/verify-code`。
 - [Implemented] APIレイヤーで bot/DDOS 対策を実装済みです。エンドポイント別/全体レート制限、違反時の段階的ブロック、リクエストサイズ制限（`429` + `Retry-After`、`413`）を適用します。
-- [Implemented] Cost of Forgery連携によるSybilリスク判定を登録/参加導線に統合し、fail-closed/fail-open を運用設定で切替可能です。あわせて管理者乱用対策としてイベント発行/管理者コード発行の日次上限を実装しています。
+- [Implemented] Cost of Forgery連携によるSybilリスク判定は、エンドポイント別ポリシー（`register`/`claim`）、イベントリスクプロファイル閾値（`school_internal`/`public`）、wallet判定TTLキャッシュ、救済フロー（`request -> admin approve/reject -> 一時override`）まで実装済みです。あわせて管理者乱用対策としてイベント発行/管理者コード発行の日次上限を実装しています。
 - [Implemented] CI は `anchor build` に加えて localnet の `anchor test --skip-build --provider.cluster localnet` を実行し、コントラクトの最小統合テストを自動検証します。
 - [Implemented] Node依存は `npm` に統一し、インストールは `npm ci` を正とします。正本 lockfile は `package-lock.json`（root / `grant_program` / `api-worker` / `wene-mobile`）です。
 - [Implemented] CI は `yarn.lock` / `pnpm-lock.yaml` / 非正規名の lockfile（例: `package-lock 2.json`）混入を失敗扱いにし、依存再現性の逸脱を防止します。
@@ -165,7 +165,7 @@ flowchart LR
 > - [Implemented] Off-chain Attend は、方針が許すイベントで wallet なしでも参加券（`confirmationCode` + `ticketReceipt`）を発行します。
 > - [Implemented] On-chain redeem / PoP は実装済みです。経路の強制有無はイベント方針で制御しますが、オンチェーン claim 命令内の PoP 検証は常時必須です。
 > - [Implemented] PoP/runtime/audit の運用確認は公開 endpoint と管理者UIで確認できます。
-> - [Implemented] Cost of Forgery連携のSybil対策と、APIレイヤーの濫用対策（rate limit/DDOS緩和 + 管理者発行上限）は現行バックエンドに実装済みです。
+> - [Implemented] Cost of Forgery連携のSybil対策は、エンドポイント別 fail-open/fail-closed、イベントプロファイル閾値、wallet判定TTLキャッシュ、救済フロー（request/approve/reject + 一時override）まで実装済みです。加えて APIレイヤー濫用対策（rate limit/DDOS緩和 + 管理者発行上限）も実装済みです。
 > - [Planned] 連合運用向け設計と chain-agnostic adapter 設計はロードマップ項目です。
 
 ## なぜ重要か（課題）
@@ -203,7 +203,7 @@ flowchart LR
 | 管理者画面での送金監査（onchain/offchain分離） | `Implemented` | `wene-mobile/src/screens/admin/AdminEventDetailScreen.tsx`、`/api/admin/transfers` |
 | 運営者優先の厳格開示（`master > admin`） | `Implemented` | `/api/master/transfers`、`/api/master/admin-disclosures`、`wene-mobile/app/master/index.tsx` |
 | サーバー側インデックス検索（DO SQLite永続化） | `Implemented` | `/api/master/search`、`api-worker/src/storeDO.ts`（`master_search_*`テーブル） |
-| Cost of Forgery連携のSybilリスク判定（`register/claim`, fail-open/fail-closed） | `Implemented` | `api-worker/src/storeDO.ts`、`api-worker/wrangler.toml`、`api-worker/test/costOfForgeryAndIssueLimit.test.ts` |
+| Cost of Forgery連携のSybilリスク判定（エンドポイント別ポリシー、イベントプロファイル閾値、救済フロー） | `Implemented` | `api-worker/src/storeDO.ts`、`api-worker/wrangler.toml`、`api-worker/test/costOfForgeryAndIssueLimit.test.ts` |
 | APIのbot/DDOS対策（レート制限 + サイズ制限） | `Implemented` | `api-worker/src/storeDO.ts`、`api-worker/test/securityGuardrails.test.ts` |
 | 管理者乱用対策（イベント/招待コード発行の日次上限） | `Implemented` | `api-worker/src/storeDO.ts`、`api-worker/test/costOfForgeryAndIssueLimit.test.ts` |
 | 連合運用モデル（複数機関の共同運用） | `Planned` | 設計/ロードマップ段階（このリポジトリには未実装） |
@@ -254,8 +254,15 @@ flowchart LR
   - コード: `api-worker/src/storeDO.ts`
 - `Implemented`: APIプリフライトで bot/DDOS 対策（エンドポイント別/全体レート制限、段階的ブロック、payloadサイズ制限）を適用。
   - コード: `api-worker/src/storeDO.ts`、`api-worker/test/securityGuardrails.test.ts`
-- `Implemented`: Cost of Forgery連携で `/api/users/register`、`/api/events/:eventId/claim`、`/v1/school/claims` のSybilリスク判定を実施（fail-closed/fail-open、最小スコアは設定可能）。
+- `Implemented`: Cost of Forgery連携で `/api/users/register`、`/api/events/:eventId/claim`、`/v1/school/claims` のSybilリスク判定を実施。エンドポイント別 fail-open/fail-closed override と、イベントリスクプロファイル（`school_internal` / `public`）別閾値を適用可能。
+  - コード: `api-worker/src/storeDO.ts`、`api-worker/wrangler.toml`
+- `Implemented`: wallet単位のCoF判定キャッシュはTTL付きで、`wallet + action + minScore` をキーに分離し、ポリシー跨ぎの誤再利用を防止。
   - コード: `api-worker/src/storeDO.ts`、`api-worker/test/costOfForgeryAndIssueLimit.test.ts`
+- `Implemented`: CoF救済フローを実装（低スコア=不正と断定しない運用）。
+  - 申請: `POST /api/cost-of-forgery/remediation/request`
+  - 管理者判定: `POST /api/admin/cost-of-forgery/remediation/:requestId/approve` / `.../reject`
+  - 承認時は `subject + action (+event)` 単位で一時override（TTLは `COST_OF_FORGERY_REMEDIATION_OVERRIDE_TTL_MINUTES`）
+  - コード: `api-worker/src/storeDO.ts`、`api-worker/test/costOfForgeryAndIssueLimit.test.ts`、`api-worker/README.md`
 - `Implemented`: 管理者乱用対策として `/v1/school/events` と `/api/admin/invite` に日次発行上限制御を適用。
   - コード: `api-worker/src/storeDO.ts`、`api-worker/test/costOfForgeryAndIssueLimit.test.ts`
 - `Implemented`: 厳格レベル分離:
@@ -308,6 +315,22 @@ L1: Settlement（Implemented、オンチェーン経路は方針で強制/非強
 開発専用の任意経路:
   - `wene-mobile/server/*` はローカル検証用のモックAPI。
 ```
+
+### 現行アーキテクチャ棚卸し（実装済み）
+- Presentation層（`wene-mobile`）:
+  - 利用者導線: `/u/*`、`/r/school/:eventId`
+  - 運用者導線: `/admin/*`、`/master/*`
+  - 開発/テスト用モックAPI: `wene-mobile/server/*`
+- Process Proof + Ops層（`api-worker`）:
+  - Cloudflare Worker + Durable Object（`SchoolStore`）を正本として運用
+  - append-only監査ハッシュチェーン + immutable sink + ランダム定期アンカー
+  - 参加券レシートの発行/検証API
+  - admin/master向け開示・送金監査・索引検索API
+  - CoF Sybil判定（エンドポイント別ポリシー、イベント閾値、救済フロー、wallet TTLキャッシュ）
+  - 濫用耐性（レート制限、payload制限、発行上限制限）
+- Settlement層（`grant_program`）:
+  - Solana Anchor program による受給決済
+  - claim命令内での PoP 連携検証
 
 ## Reviewer Quickstart（10分）
 
