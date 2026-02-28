@@ -30,15 +30,15 @@ type Bindings = {
   SECURITY_MAX_REQUEST_BODY_BYTES?: string;
   SECURITY_ADMIN_EVENT_ISSUE_LIMIT_PER_DAY?: string;
   SECURITY_ADMIN_INVITE_ISSUE_LIMIT_PER_DAY?: string;
-  FAIRSCALE_ENABLED?: string;
-  FAIRSCALE_FAIL_CLOSED?: string;
-  FAIRSCALE_BASE_URL?: string;
-  FAIRSCALE_VERIFY_PATH?: string;
-  FAIRSCALE_API_KEY?: string;
-  FAIRSCALE_TIMEOUT_MS?: string;
-  FAIRSCALE_MIN_SCORE?: string;
-  FAIRSCALE_ENFORCE_ON_REGISTER?: string;
-  FAIRSCALE_ENFORCE_ON_CLAIM?: string;
+  COST_OF_FORGERY_ENABLED?: string;
+  COST_OF_FORGERY_FAIL_CLOSED?: string;
+  COST_OF_FORGERY_BASE_URL?: string;
+  COST_OF_FORGERY_VERIFY_PATH?: string;
+  COST_OF_FORGERY_API_KEY?: string;
+  COST_OF_FORGERY_TIMEOUT_MS?: string;
+  COST_OF_FORGERY_MIN_SCORE?: string;
+  COST_OF_FORGERY_ENFORCE_ON_REGISTER?: string;
+  COST_OF_FORGERY_ENFORCE_ON_CLAIM?: string;
 };
 
 const DEFAULT_CORS = 'https://instant-grant-core.dev';
@@ -47,7 +47,10 @@ function addCorsHeaders(response: Response, origin: string): Response {
   const headers = new Headers(response.headers);
   headers.set('Access-Control-Allow-Origin', origin);
   headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  headers.set('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization, X-Fairscale-Token');
+  headers.set(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Accept, Authorization, X-Cost-Of-Forgery-Token'
+  );
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -65,7 +68,7 @@ app.use(
       return origin.endsWith('.pages.dev') || origin.includes('localhost') ? origin : (DEFAULT_CORS);
     },
     allowMethods: ['GET', 'POST', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Accept', 'Authorization', 'X-Fairscale-Token'],
+    allowHeaders: ['Content-Type', 'Accept', 'Authorization', 'X-Cost-Of-Forgery-Token'],
   })
 );
 

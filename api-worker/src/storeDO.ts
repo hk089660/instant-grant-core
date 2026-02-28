@@ -102,15 +102,15 @@ export interface Env {
   SECURITY_MAX_REQUEST_BODY_BYTES?: string;
   SECURITY_ADMIN_EVENT_ISSUE_LIMIT_PER_DAY?: string;
   SECURITY_ADMIN_INVITE_ISSUE_LIMIT_PER_DAY?: string;
-  FAIRSCALE_ENABLED?: string;
-  FAIRSCALE_FAIL_CLOSED?: string;
-  FAIRSCALE_BASE_URL?: string;
-  FAIRSCALE_VERIFY_PATH?: string;
-  FAIRSCALE_API_KEY?: string;
-  FAIRSCALE_TIMEOUT_MS?: string;
-  FAIRSCALE_MIN_SCORE?: string;
-  FAIRSCALE_ENFORCE_ON_REGISTER?: string;
-  FAIRSCALE_ENFORCE_ON_CLAIM?: string;
+  COST_OF_FORGERY_ENABLED?: string;
+  COST_OF_FORGERY_FAIL_CLOSED?: string;
+  COST_OF_FORGERY_BASE_URL?: string;
+  COST_OF_FORGERY_VERIFY_PATH?: string;
+  COST_OF_FORGERY_API_KEY?: string;
+  COST_OF_FORGERY_TIMEOUT_MS?: string;
+  COST_OF_FORGERY_MIN_SCORE?: string;
+  COST_OF_FORGERY_ENFORCE_ON_REGISTER?: string;
+  COST_OF_FORGERY_ENFORCE_ON_CLAIM?: string;
 }
 
 const AUDIT_MAX_DEPTH = 4;
@@ -160,9 +160,9 @@ const SECURITY_ISSUE_LIMIT_PREFIX = 'security_issue_limit:';
 const SECURITY_DEFAULT_ADMIN_EVENT_ISSUE_LIMIT_PER_DAY = 30;
 const SECURITY_DEFAULT_ADMIN_INVITE_ISSUE_LIMIT_PER_DAY = 50;
 const SECURITY_ISSUE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
-const FAIRSCALE_DEFAULT_TIMEOUT_MS = 2500;
-const FAIRSCALE_DEFAULT_MIN_SCORE = 70;
-const FAIRSCALE_DEFAULT_VERIFY_PATH = '/v1/risk/score';
+const COST_OF_FORGERY_DEFAULT_TIMEOUT_MS = 2500;
+const COST_OF_FORGERY_DEFAULT_MIN_SCORE = 70;
+const COST_OF_FORGERY_DEFAULT_VERIFY_PATH = '/v1/risk/score';
 
 type SecurityRatePolicy = {
   key: string;
@@ -193,19 +193,19 @@ type SecurityIssueLimitState = {
   lastIssuedAtMs: number;
 };
 
-type FairscaleAction = 'user_register' | 'user_claim' | 'wallet_claim';
+type CostOfForgeryAction = 'user_register' | 'user_claim' | 'wallet_claim';
 
-type FairscaleDecision = {
+type CostOfForgeryDecision = {
   allow: boolean;
   score: number | null;
   reason: string | null;
   decisionId: string | null;
 };
 
-type FairscaleEnforcementError = {
+type CostOfForgeryEnforcementError = {
   status: number;
-  code: 'fairscale_blocked' | 'fairscale_unavailable' | 'fairscale_not_configured';
-  action: FairscaleAction;
+  code: 'cost_of_forgery_blocked' | 'cost_of_forgery_unavailable' | 'cost_of_forgery_not_configured';
+  action: CostOfForgeryAction;
   message: string;
   score?: number | null;
   minScore?: number;
@@ -214,7 +214,7 @@ type FairscaleEnforcementError = {
   detail?: string;
 };
 
-type FairscaleStatus = {
+type CostOfForgeryStatus = {
   enabled: boolean;
   failClosed: boolean;
   enforceOnRegister: boolean;
@@ -258,9 +258,9 @@ type RuntimeStatusReport = {
     auditMode: 'off' | 'best_effort' | 'required';
     auditOperationalReady: boolean;
     auditPrimarySinkConfigured: boolean;
-    fairscaleEnabled: boolean;
-    fairscaleOperationalReady: boolean;
-    fairscaleFailClosed: boolean;
+    costOfForgeryEnabled: boolean;
+    costOfForgeryOperationalReady: boolean;
+    costOfForgeryFailClosed: boolean;
     corsOrigin: string | null;
   };
   blockingIssues: string[];
@@ -1077,21 +1077,21 @@ export class SchoolStore implements DurableObject {
     return this.issueLimitExceededResponse(policy, result.retryAfterSec, perDay);
   }
 
-  private getFairscaleStatus(): FairscaleStatus {
-    const baseUrl = (this.env.FAIRSCALE_BASE_URL ?? '').trim().replace(/\/+$/, '');
-    const enabled = parseBooleanEnv(this.env.FAIRSCALE_ENABLED, Boolean(baseUrl));
-    const failClosed = parseBooleanEnv(this.env.FAIRSCALE_FAIL_CLOSED, true);
-    const enforceOnRegister = parseBooleanEnv(this.env.FAIRSCALE_ENFORCE_ON_REGISTER, true);
-    const enforceOnClaim = parseBooleanEnv(this.env.FAIRSCALE_ENFORCE_ON_CLAIM, true);
+  private getCostOfForgeryStatus(): CostOfForgeryStatus {
+    const baseUrl = (this.env.COST_OF_FORGERY_BASE_URL ?? '').trim().replace(/\/+$/, '');
+    const enabled = parseBooleanEnv(this.env.COST_OF_FORGERY_ENABLED, Boolean(baseUrl));
+    const failClosed = parseBooleanEnv(this.env.COST_OF_FORGERY_FAIL_CLOSED, true);
+    const enforceOnRegister = parseBooleanEnv(this.env.COST_OF_FORGERY_ENFORCE_ON_REGISTER, true);
+    const enforceOnClaim = parseBooleanEnv(this.env.COST_OF_FORGERY_ENFORCE_ON_CLAIM, true);
     const minScore = parseBoundedInt(
-      this.env.FAIRSCALE_MIN_SCORE ?? null,
-      FAIRSCALE_DEFAULT_MIN_SCORE,
+      this.env.COST_OF_FORGERY_MIN_SCORE ?? null,
+      COST_OF_FORGERY_DEFAULT_MIN_SCORE,
       0,
       100
     );
     const timeoutMs = parseBoundedInt(
-      this.env.FAIRSCALE_TIMEOUT_MS ?? null,
-      FAIRSCALE_DEFAULT_TIMEOUT_MS,
+      this.env.COST_OF_FORGERY_TIMEOUT_MS ?? null,
+      COST_OF_FORGERY_DEFAULT_TIMEOUT_MS,
       200,
       10000
     );
@@ -1108,29 +1108,29 @@ export class SchoolStore implements DurableObject {
     };
   }
 
-  private getFairscaleVerifyUrl(): string | null {
-    const baseUrl = (this.env.FAIRSCALE_BASE_URL ?? '').trim().replace(/\/+$/, '');
+  private getCostOfForgeryVerifyUrl(): string | null {
+    const baseUrl = (this.env.COST_OF_FORGERY_BASE_URL ?? '').trim().replace(/\/+$/, '');
     if (!baseUrl) return null;
-    const rawPath = (this.env.FAIRSCALE_VERIFY_PATH ?? '').trim();
+    const rawPath = (this.env.COST_OF_FORGERY_VERIFY_PATH ?? '').trim();
     if (rawPath && /^https?:\/\//i.test(rawPath)) {
       return rawPath;
     }
-    const path = rawPath || FAIRSCALE_DEFAULT_VERIFY_PATH;
+    const path = rawPath || COST_OF_FORGERY_DEFAULT_VERIFY_PATH;
     return `${baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
   }
 
-  private shouldEnforceFairscaleAction(action: FairscaleAction): boolean {
-    const status = this.getFairscaleStatus();
+  private shouldEnforceCostOfForgeryAction(action: CostOfForgeryAction): boolean {
+    const status = this.getCostOfForgeryStatus();
     if (!status.enabled) return false;
     if (action === 'user_register') return status.enforceOnRegister;
     return status.enforceOnClaim;
   }
 
-  private extractFairscaleToken(request: Request, body: unknown): string {
-    const headerToken = request.headers.get('X-Fairscale-Token')?.trim();
+  private extractCostOfForgeryToken(request: Request, body: unknown): string {
+    const headerToken = request.headers.get('X-Cost-Of-Forgery-Token')?.trim();
     if (headerToken) return headerToken.slice(0, 2048);
-    if (body && typeof body === 'object' && 'fairscaleToken' in body) {
-      const raw = (body as { fairscaleToken?: unknown }).fairscaleToken;
+    if (body && typeof body === 'object' && 'costOfForgeryToken' in body) {
+      const raw = (body as { costOfForgeryToken?: unknown }).costOfForgeryToken;
       if (typeof raw === 'string' && raw.trim()) {
         return raw.trim().slice(0, 2048);
       }
@@ -1138,7 +1138,7 @@ export class SchoolStore implements DurableObject {
     return '';
   }
 
-  private parseFairscaleDecision(raw: unknown, minScore: number): FairscaleDecision {
+  private parseCostOfForgeryDecision(raw: unknown, minScore: number): CostOfForgeryDecision {
     const obj = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
     const riskRaw = obj.risk;
     const risk = riskRaw && typeof riskRaw === 'object' ? riskRaw as Record<string, unknown> : null;
@@ -1213,21 +1213,21 @@ export class SchoolStore implements DurableObject {
     };
   }
 
-  private async evaluateFairscaleDecision(params: {
+  private async evaluateCostOfForgeryDecision(params: {
     request: Request;
-    action: FairscaleAction;
+    action: CostOfForgeryAction;
     eventId?: string;
     userId?: string;
     subject?: string;
-    fairscaleToken?: string;
-  }): Promise<FairscaleDecision> {
-    const status = this.getFairscaleStatus();
-    const verifyUrl = this.getFairscaleVerifyUrl();
+    costOfForgeryToken?: string;
+  }): Promise<CostOfForgeryDecision> {
+    const status = this.getCostOfForgeryStatus();
+    const verifyUrl = this.getCostOfForgeryVerifyUrl();
     if (!verifyUrl) {
-      throw new Error('fairscale_not_configured');
+      throw new Error('cost_of_forgery_not_configured');
     }
 
-    const apiKey = (this.env.FAIRSCALE_API_KEY ?? '').trim();
+    const apiKey = (this.env.COST_OF_FORGERY_API_KEY ?? '').trim();
     const ipAddress = this.getClientIpAddress(params.request);
     const ipHash = await hashString(`ip:${ipAddress}`);
     const subjectHash = params.subject ? await hashString(`subject:${params.subject}`) : null;
@@ -1248,11 +1248,11 @@ export class SchoolStore implements DurableObject {
       ipAddress: ipAddress === 'unknown' ? null : ipAddress,
       ipHash,
       userAgent: userAgent || null,
-      attestationToken: params.fairscaleToken?.trim() || null,
+      attestationToken: params.costOfForgeryToken?.trim() || null,
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort('fairscale-timeout'), status.timeoutMs);
+    const timeoutId = setTimeout(() => controller.abort('cost_of_forgery-timeout'), status.timeoutMs);
     try {
       const res = await fetch(verifyUrl, {
         method: 'POST',
@@ -1265,13 +1265,13 @@ export class SchoolStore implements DurableObject {
       });
 
       if (!res.ok) {
-        throw new Error(`fairscale_http_${res.status}`);
+        throw new Error(`cost_of_forgery_http_${res.status}`);
       }
       const json = await res.json().catch(() => ({}));
-      return this.parseFairscaleDecision(json, status.minScore);
+      return this.parseCostOfForgeryDecision(json, status.minScore);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
-        throw new Error('fairscale_timeout');
+        throw new Error('cost_of_forgery_timeout');
       }
       throw err;
     } finally {
@@ -1279,7 +1279,7 @@ export class SchoolStore implements DurableObject {
     }
   }
 
-  private fairscaleErrorResponse(error: FairscaleEnforcementError): Response {
+  private costOfForgeryErrorResponse(error: CostOfForgeryEnforcementError): Response {
     return Response.json(
       {
         error: error.message,
@@ -1295,14 +1295,14 @@ export class SchoolStore implements DurableObject {
     );
   }
 
-  private mapFairscaleErrorToSchoolClaimResult(error: FairscaleEnforcementError): SchoolClaimResult {
-    if (error.code === 'fairscale_blocked') {
+  private mapCostOfForgeryErrorToSchoolClaimResult(error: CostOfForgeryEnforcementError): SchoolClaimResult {
+    if (error.code === 'cost_of_forgery_blocked') {
       const detail = error.reason ? ` (${error.reason})` : '';
       return {
         success: false,
         error: {
           code: 'eligibility',
-          message: `FairScale判定により参加条件を満たしていないため受け付けできません${detail}`,
+          message: `Cost of Forgery判定により参加条件を満たしていないため受け付けできません${detail}`,
         },
       };
     }
@@ -1310,21 +1310,21 @@ export class SchoolStore implements DurableObject {
       success: false,
       error: {
         code: 'retryable',
-        message: 'FairScale判定サービスが一時的に利用できないため、時間を置いて再試行してください。',
+        message: 'Cost of Forgery判定サービスが一時的に利用できないため、時間を置いて再試行してください。',
       },
     };
   }
 
-  private async enforceFairscaleRisk(params: {
+  private async enforceCostOfForgeryRisk(params: {
     request: Request;
-    action: FairscaleAction;
+    action: CostOfForgeryAction;
     eventId?: string;
     userId?: string;
     subject?: string;
-    fairscaleToken?: string;
-  }): Promise<FairscaleEnforcementError | null> {
-    const status = this.getFairscaleStatus();
-    if (!this.shouldEnforceFairscaleAction(params.action)) {
+    costOfForgeryToken?: string;
+  }): Promise<CostOfForgeryEnforcementError | null> {
+    const status = this.getCostOfForgeryStatus();
+    if (!this.shouldEnforceCostOfForgeryAction(params.action)) {
       return null;
     }
     if (!status.operationalReady) {
@@ -1333,22 +1333,22 @@ export class SchoolStore implements DurableObject {
       }
       return {
         status: 503,
-        code: 'fairscale_not_configured',
+        code: 'cost_of_forgery_not_configured',
         action: params.action,
-        message: 'fairscale verification endpoint is not configured',
+        message: 'cost of forgery verification endpoint is not configured',
       };
     }
 
     try {
-      const decision = await this.evaluateFairscaleDecision(params);
+      const decision = await this.evaluateCostOfForgeryDecision(params);
       if (decision.allow) {
         return null;
       }
       return {
         status: 403,
-        code: 'fairscale_blocked',
+        code: 'cost_of_forgery_blocked',
         action: params.action,
-        message: 'fairscale sybil check blocked this request',
+        message: 'cost of forgery sybil check blocked this request',
         minScore: status.minScore,
         score: decision.score,
         reason: decision.reason,
@@ -1356,15 +1356,15 @@ export class SchoolStore implements DurableObject {
       };
     } catch (err) {
       if (!status.failClosed) {
-        console.error('[fairscale] verification failed but allowed (fail-open mode)', err);
+        console.error('[cost-of-forgery] verification failed but allowed (fail-open mode)', err);
         return null;
       }
       const detail = err instanceof Error ? err.message : String(err);
       return {
         status: 503,
-        code: 'fairscale_unavailable',
+        code: 'cost_of_forgery_unavailable',
         action: params.action,
-        message: 'fairscale verification is temporarily unavailable',
+        message: 'cost of forgery verification is temporarily unavailable',
         detail,
       };
     }
@@ -1904,7 +1904,7 @@ export class SchoolStore implements DurableObject {
 
   private getRuntimeStatus(): RuntimeStatusReport {
     const auditStatus = this.getAuditStatus();
-    const fairscaleStatus = this.getFairscaleStatus();
+    const costOfForgeryStatus = this.getCostOfForgeryStatus();
     const blockingIssues: string[] = [];
     const warnings: string[] = [];
 
@@ -1936,10 +1936,10 @@ export class SchoolStore implements DurableObject {
     if (auditStatus.failClosedForMutatingRequests && !auditStatus.operationalReady) {
       blockingIssues.push('Audit immutable sink is not operational while AUDIT_IMMUTABLE_MODE=required');
     }
-    if (fairscaleStatus.enabled && fairscaleStatus.failClosed && !fairscaleStatus.operationalReady) {
-      blockingIssues.push('FairScale is enabled in fail-closed mode but FAIRSCALE_BASE_URL is not configured');
-    } else if (fairscaleStatus.enabled && !fairscaleStatus.operationalReady) {
-      warnings.push('FairScale is enabled but FAIRSCALE_BASE_URL is not configured (fail-open mode)');
+    if (costOfForgeryStatus.enabled && costOfForgeryStatus.failClosed && !costOfForgeryStatus.operationalReady) {
+      blockingIssues.push('Cost of Forgery is enabled in fail-closed mode but COST_OF_FORGERY_BASE_URL is not configured');
+    } else if (costOfForgeryStatus.enabled && !costOfForgeryStatus.operationalReady) {
+      warnings.push('Cost of Forgery is enabled but COST_OF_FORGERY_BASE_URL is not configured (fail-open mode)');
     }
 
     const corsOrigin = this.env.CORS_ORIGIN?.trim() ?? '';
@@ -1961,9 +1961,9 @@ export class SchoolStore implements DurableObject {
         auditMode: auditStatus.mode,
         auditOperationalReady: auditStatus.operationalReady,
         auditPrimarySinkConfigured: auditStatus.primaryImmutableSinkConfigured,
-        fairscaleEnabled: fairscaleStatus.enabled,
-        fairscaleOperationalReady: fairscaleStatus.operationalReady,
-        fairscaleFailClosed: fairscaleStatus.failClosed,
+        costOfForgeryEnabled: costOfForgeryStatus.enabled,
+        costOfForgeryOperationalReady: costOfForgeryStatus.operationalReady,
+        costOfForgeryFailClosed: costOfForgeryStatus.failClosed,
         corsOrigin: corsOrigin || null,
       },
       blockingIssues,
@@ -4967,7 +4967,7 @@ export class SchoolStore implements DurableObject {
           error: { code: 'invalid', message: 'イベントIDが無効です' },
         } as SchoolClaimResult);
       }
-      const fairscaleToken = this.extractFairscaleToken(request, body);
+      const costOfForgeryToken = this.extractCostOfForgeryToken(request, body);
       const eventId = typeof body?.eventId === 'string' ? body.eventId.trim() : '';
       const event = eventId ? await this.store.getEvent(eventId) : null;
       if (!event) {
@@ -5016,16 +5016,16 @@ export class SchoolStore implements DurableObject {
       }
       const alreadyClaimed = await this.store.hasClaimed(eventId, subject, event);
       if (!alreadyClaimed) {
-        const fairscaleError = await this.enforceFairscaleRisk({
+        const costOfForgeryError = await this.enforceCostOfForgeryRisk({
           request,
           action: 'wallet_claim',
           eventId,
           subject,
-          fairscaleToken: fairscaleToken || undefined,
+          costOfForgeryToken: costOfForgeryToken || undefined,
         });
-        if (fairscaleError) {
-          return Response.json(this.mapFairscaleErrorToSchoolClaimResult(fairscaleError), {
-            status: fairscaleError.status,
+        if (costOfForgeryError) {
+          return Response.json(this.mapCostOfForgeryErrorToSchoolClaimResult(costOfForgeryError), {
+            status: costOfForgeryError.status,
           });
         }
       }
@@ -5218,16 +5218,16 @@ export class SchoolStore implements DurableObject {
       if (!/^\d{4,6}$/.test(pin)) {
         return Response.json({ error: 'pin must be 4-6 digits' }, { status: 400 });
       }
-      const fairscaleToken = this.extractFairscaleToken(request, body);
-      const fairscaleError = await this.enforceFairscaleRisk({
+      const costOfForgeryToken = this.extractCostOfForgeryToken(request, body);
+      const costOfForgeryError = await this.enforceCostOfForgeryRisk({
         request,
         action: 'user_register',
         userId,
         subject: userId,
-        fairscaleToken: fairscaleToken || undefined,
+        costOfForgeryToken: costOfForgeryToken || undefined,
       });
-      if (fairscaleError) {
-        return this.fairscaleErrorResponse(fairscaleError);
+      if (costOfForgeryError) {
+        return this.costOfForgeryErrorResponse(costOfForgeryError);
       }
       const pinHash = await hashPin(pin);
       const registerResult = await this.registerUserWithUniqueId({
@@ -5265,7 +5265,7 @@ export class SchoolStore implements DurableObject {
       } catch {
         return Response.json({ error: 'missing params' }, { status: 400 });
       }
-      const fairscaleToken = this.extractFairscaleToken(request, body);
+      const costOfForgeryToken = this.extractCostOfForgeryToken(request, body);
       const userId = this.normalizeUserId(body?.userId);
       const pin = typeof body?.pin === 'string' ? body.pin : '';
       if (!userId || !pin) {
@@ -5312,16 +5312,16 @@ export class SchoolStore implements DurableObject {
         }, { status: 409 });
       }
       if (!already) {
-        const fairscaleError = await this.enforceFairscaleRisk({
+        const costOfForgeryError = await this.enforceCostOfForgeryRisk({
           request,
           action: 'user_claim',
           eventId,
           userId,
           subject: userId,
-          fairscaleToken: fairscaleToken || undefined,
+          costOfForgeryToken: costOfForgeryToken || undefined,
         });
-        if (fairscaleError) {
-          return this.fairscaleErrorResponse(fairscaleError);
+        if (costOfForgeryError) {
+          return this.costOfForgeryErrorResponse(costOfForgeryError);
         }
       }
       if (already) {
@@ -5447,7 +5447,7 @@ export class SchoolStore implements DurableObject {
         headers: {
           'Access-Control-Allow-Origin': this.env.CORS_ORIGIN || '*',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Fairscale-Token',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Cost-Of-Forgery-Token',
         },
       });
     }

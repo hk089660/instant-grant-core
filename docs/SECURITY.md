@@ -46,7 +46,7 @@ we-ne is designed with a **non-custodial** security model. The mobile app never 
 
 **Mitigations**:
 - **Current**: Allowlist-based eligibility (Merkle root)
-- **Planned**: FairScale integration for Sybil resistance
+- **Planned**: Cost of Forgery integration for Sybil resistance
 - **Design Choice**: Not identity-based to preserve privacy
 
 **Limitations**: Allowlist management is off-chain responsibility

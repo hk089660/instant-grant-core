@@ -32,11 +32,11 @@ School participation flow logic, types, and error handling have been restructure
 * **Unified already-handling:** Already-joined (`alreadyJoined`) also navigates to success screen for consistent UX.
 * **Retry flow:** Button label changes to `"Retry"` for retryable errors.
 
-→ Details: **School Participation Flow (Architecture)** and `wene-mobile/docs/STATIC_VERIFICATION_REPORT.md`
+→ Details: **School Participation Flow (Architecture)** and `docs/STATIC_VERIFICATION_REPORT.md`
 
 ---
 
-## Project Status: Claim flow verified on Android (2025)
+## Project Status: Claim flow verified on Android (2026)
 
 Claim flow is fully verified on Android (APK) with Phantom wallet:
 
@@ -95,9 +95,9 @@ HTTP errors are mapped to Result (`404→not_found`, `5xx/network→retryable`)
 
 → Details:
 
-* `wene-mobile/docs/STATIC_VERIFICATION_REPORT.md`
-* `docs/DEVELOPMENT.md`
-* `wene-mobile/docs/EMULATOR_DEVELOPMENT.md`
+* `docs/STATIC_VERIFICATION_REPORT.md`
+* `../docs/DEVELOPMENT.md`
+* `docs/EMULATOR_DEVELOPMENT.md`
 
 ---
 
@@ -132,17 +132,17 @@ The Expo app is the primary flow for Phantom stability; Web/PWA is not used for 
 
 1. **Devnet claim flow on Android with Phantom** (devnet-only)
 
-   * Verified: demo video and steps in `DEVNET_SETUP.md`
+   * Verified: demo video and steps in `../docs/DEVNET_SETUP.md`
 
 2. **Reproducible build/test from repo root**
 
    * Verified: `npm run build` and `npm run test` (or `scripts/build-all.sh build/test`) succeed in the supported environment
-   * Verified: CI and `DEVELOPMENT.md`
+   * Verified: CI and `../docs/DEVELOPMENT.md`
 
 3. **School participation UI flow with API-driven claim states**
 
    * Verified: `/u → /u/scan → /u/confirm → /u/success` and API demo cases `evt-001/002/003` behave as specified
-   * Verified: `STATIC_VERIFICATION_REPORT.md`
+   * Verified: `docs/STATIC_VERIFICATION_REPORT.md`
 
 4. **Print-ready QR and role-restricted admin UI for school devices**
 
@@ -168,7 +168,8 @@ The Expo app is the primary flow for Phantom stability; Web/PWA is not used for 
 ## Abuse Prevention & Eligibility (PoC)
 
 * Implemented: on-chain double-claim prevention per period using `ClaimReceipt` PDA
-* Not implemented: allowlist/Merkle eligibility, FairScale reputation, and production-grade identity checks
+* Implemented: API guardrails (rate limits / payload limits) and configurable Cost of Forgery risk-gated checks on register/claim paths
+* Not implemented (PoC): allowlist/Merkle eligibility and production-grade identity proofing
 * School PoC: optional join-token on the school server can gate participation, but it is not a strong identity system and is out-of-scope for production security
 
 ---
@@ -191,8 +192,9 @@ Recommended browsers for `/u/*`: Safari (iOS) / Chrome (Android). Other browsers
 
 ## School Admin & Off-chain Data Integrity (PoC)
 
-* Admin views and counts are derived from the school API server and its JSON persistence (demo-suitable, not tamper-evident)
-* Participation records are not cryptographically signed or independently verifiable in this PoC
+* Admin views and counts are derived from the school API server (Cloudflare Worker + Durable Object)
+* Participation records are hash-chained, and issued ticket receipts can be verified via `/api/audit/receipts/verify` and `/api/audit/receipts/verify-code`
+* Trust-minimized (L1-only) verification is available only when the on-chain claim route is executed
 * Operational assumption: controlled distribution of QR codes and trusted local operators during the school event
 
 ---
@@ -204,21 +206,21 @@ Recommended browsers for `/u/*`: Safari (iOS) / Chrome (Android). Other browsers
 
 **Links:**
 
-* 日本語版 README: `README.ja.md`
-* Architecture: `docs/ARCHITECTURE.md`
-* Development Guide: `docs/DEVELOPMENT.md`
-* Static Verification Report: `wene-mobile/docs/STATIC_VERIFICATION_REPORT.md`
-* Emulator Development: `wene-mobile/docs/EMULATOR_DEVELOPMENT.md`
+* 日本語版 README: `../README.ja.md`
+* Architecture: `../docs/ARCHITECTURE.md`
+* Development Guide: `../docs/DEVELOPMENT.md`
+* Static Verification Report: `docs/STATIC_VERIFICATION_REPORT.md`
+* Emulator Development: `docs/EMULATOR_DEVELOPMENT.md`
 
 ---
 
 ## Overview
 
 **日本語:**
-We-neは、Solana上で動作する非保管型の支援配布システムのPoCです。現在はプロトタイプ段階で、Phantom連携と基本的なclaimフローが動作しています。本PoCはdevnet固定で、本番利用は想定していません。不正・濫用対策はPoCで限定的で、オンチェーンの二重claim防止が中心です。FairScaleや許可リスト（Allowlist）の連携は計画段階で未実装です。
+We-neは、Solana上で動作する非保管型の支援配布システムのPoCです。現在はプロトタイプ段階で、Phantom連携と基本的なclaimフローが動作しています。本PoCはdevnet固定で、本番利用は想定していません。不正・濫用対策としてオンチェーンの二重claim防止に加え、バックエンドでCost of Forgery連携のリスク判定（設定で有効化）とAPIレベルのガードレールを実装しています。
 
 **English:**
-We-ne is a non-custodial benefit distribution PoC built on Solana. It is prototype-stage with Phantom integration and a working basic claim flow. This PoC is devnet-only and not intended for production use. Abuse prevention is limited, centered on on-chain double-claim prevention. FairScale and allowlist-based eligibility are planned but not implemented.
+We-ne is a non-custodial benefit distribution PoC built on Solana. It is prototype-stage with Phantom integration and a working basic claim flow. This PoC is devnet-only and not intended for production use. Abuse prevention includes on-chain double-claim prevention plus backend Cost of Forgery risk checks (configurable) and API-level guardrails. Allowlist-based identity proofing remains out of current PoC scope.
 
 ---
 
@@ -230,20 +232,20 @@ we-ne is a non-custodial benefit distribution system built on Solana, designed t
 
 ---
 
-## 💡 Technical Highlights (Enterprise-Grade Architecture)
+## 💡 Technical Highlights (Prototype Architecture)
 
-This PoC goes beyond a simple smart contract demonstration; it is designed as an **enterprise-grade product ready for real-world mass adoption**, featuring the following advanced architectural patterns:
+This section describes what is implemented in this repository today for reproducible school/public pilot operations.
 
 ### 1. Breaking the "UX Barrier" via Wallet-less Experience and Off-chain Signatures
 
-The biggest hurdle in Web3 adoption is forcing users to manage wallets (private keys) and gas fees. We bypass this barrier by leveraging Solana's native capability to **separate the Signer from the Fee Payer**. 
-By combining this with our proprietary off-chain processing layer (backend/relayer), we achieve a **seamless, wallet-less UX that rivals or exceeds Account Abstraction (AA) models in EVM ecosystems**. To the user, it feels like a standard Web2 app (just scan a QR code), while complex cryptographic operations are completely abstracted in the background.
+The biggest hurdle in Web3 adoption is forcing users to manage wallets (private keys) and gas fees. We reduce this barrier by leveraging Solana's capability to **separate the Signer from the Fee Payer**.
+Combined with the off-chain processing layer (Cloudflare Worker + Durable Object), policy-allowed flows can issue walletless participation evidence first, while on-chain settlement remains available when required.
 
 ### 2. Complete Auditability via Off-chain Data and Proof of Process (Hash Chains)
 
 Distributing public grants requires balancing two conflicting needs: **transparency/auditability** and **protection of Personally Identifiable Information (PII)**.
 We solve this by keeping detailed personal data (like receipts or event logs) purely off-chain (e.g., in Cloudflare Durable Objects). We then link the **tamper-proof hash of this data to the on-chain transaction signature**, forming a cryptographic Hash Chain (Proof of Process).
-This design fully satisfies enterprise compliance and auditing requirements without the computational overhead of zero-knowledge proofs (ZKP), retaining practical, fast, and low-cost execution.
+This design provides verifiable process evidence for the current PoC, while keeping computational and operational cost low.
 
 ---
 
@@ -355,7 +357,7 @@ Recommended browsers for student UI `/u/*` via QR: Safari (iPhone) / Chrome (And
 **Android:** use Phantom in-app browser
 On Android, “Phantom → back to browser” can fail, so v0 uses Phantom browse deeplink as the main student QR content. Redirect-based connect is not the primary flow; `/phantom-callback` exists only for manual recovery.
 
-→ See `docs/ARCHITECTURE.md` for details
+→ See `../docs/ARCHITECTURE.md` for details
 
 ---
 
@@ -445,7 +447,7 @@ For mobile-only setup, use:
 npm ci --legacy-peer-deps
 ```
 
-See `docs/DEVELOPMENT.md` for per-component setup and recent changes for third-party builds.
+See `../docs/DEVELOPMENT.md` for per-component setup and recent changes for third-party builds.
 
 ---
 
@@ -506,7 +508,7 @@ anchor build
 anchor test
 ```
 
-→ Full setup: `docs/DEVELOPMENT.md`
+→ Full setup: `../docs/DEVELOPMENT.md`
 
 ---
 
@@ -550,7 +552,7 @@ we-ne/
 
 ⚠️ **Audit Status:** NOT AUDITED — use at own risk for testing only
 
-→ Full threat model: `docs/SECURITY.md`
+→ Full threat model: `../docs/SECURITY.md`
 
 ---
 
@@ -563,7 +565,7 @@ we-ne/
 | Admin Dashboard |   +1 month | Web UI for grant creators             |
 | Mainnet Beta    |  +3 months | Audit, partners, production deploy    |
 
-→ Full roadmap: `docs/ROADMAP.md`
+→ Full roadmap: `../docs/ROADMAP.md`
 
 ---
 
@@ -593,7 +595,7 @@ we-ne/
 
 ## 🤝 Contributing
 
-We welcome contributions! See `CONTRIBUTING.md`.
+We welcome contributions! See `../CONTRIBUTING.md`.
 
 Priority areas:
 
@@ -607,7 +609,7 @@ Priority areas:
 ## 📜 License
 
 MIT License — free to use, modify, and distribute.
-See `LICENSE`.
+See `../LICENSE`.
 
 ---
 
@@ -627,7 +629,7 @@ To make the project easier to build and verify for contributors and third partie
   * `wene-mobile/.npmrc (legacy-peer-deps=true)`
   * `--legacy-peer-deps` in root scripts and CI
 * CI: Added `.github/workflows/ci.yml` so every push/PR runs Anchor build & test and mobile install & TypeScript check
-* Docs: `docs/DEVELOPMENT.md` updated with root-level build/test and CI usage
+* Docs: `../docs/DEVELOPMENT.md` updated with root-level build/test and CI usage
 * Double-claim fix: In `grant_program`, the claim receipt account was changed from `init_if_needed` to `init`. This correctly rejects a second claim in the same period (receipt PDA already exists, so init fails). All Anchor tests, including "claimer can claim once per period", now pass.
 
 ---
@@ -636,6 +638,6 @@ To make the project easier to build and verify for contributors and third partie
 
 * Issues: [https://github.com/hk089660/instant-grant-core/issues](https://github.com/hk089660/instant-grant-core/issues)
 * Discussions: [https://github.com/hk089660/instant-grant-core/discussions](https://github.com/hk089660/instant-grant-core/discussions)
-* Security: See `SECURITY.md` for vulnerability reporting
+* Security: See `../SECURITY.md` for vulnerability reporting
 
 Built with ❤️ for public good on Solana

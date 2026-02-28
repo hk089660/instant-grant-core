@@ -79,11 +79,11 @@ export async function registerUser(
   userId: string,
   displayName: string,
   pin: string,
-  fairscaleToken?: string
+  costOfForgeryToken?: string
 ): Promise<RegisterResponse> {
   const base = getBaseUrl();
   const url = `${base}/api/users/register`;
-  return httpPost<RegisterResponse>(url, { userId, displayName, pin, fairscaleToken });
+  return httpPost<RegisterResponse>(url, { userId, displayName, pin, costOfForgeryToken });
 }
 
 export async function verifyUserPin(userId: string, pin: string): Promise<VerifyUserResponse> {
@@ -103,7 +103,7 @@ export async function claimEventWithUser(
   userId: string,
   pin: string,
   proof?: UserClaimOnchainProof,
-  fairscaleToken?: string
+  costOfForgeryToken?: string
 ): Promise<UserClaimResponse> {
   const base = getBaseUrl();
   const url = `${base}/api/events/${encodeURIComponent(eventId)}/claim`;
@@ -113,7 +113,7 @@ export async function claimEventWithUser(
     walletAddress: proof?.walletAddress,
     txSignature: proof?.txSignature,
     receiptPubkey: proof?.receiptPubkey,
-    fairscaleToken,
+    costOfForgeryToken,
   });
 }
 

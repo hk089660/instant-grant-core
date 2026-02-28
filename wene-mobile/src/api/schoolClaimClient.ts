@@ -13,7 +13,7 @@ export interface SchoolClaimSubmitOptions {
   joinToken?: string;
   txSignature?: string;
   receiptPubkey?: string;
-  fairscaleToken?: string;
+  costOfForgeryToken?: string;
 }
 
 export interface SchoolClaimClient {

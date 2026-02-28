@@ -140,21 +140,21 @@ L1 で PoP 検証を行うため、以下の Worker 変数を設定する:
 
 制限超過時は `429`（`Retry-After` 付き）を返す。
 
-### FairScale Sybil Guard（任意）
+### Cost of Forgery Sybil Guard（任意）
 
-FairScale 互換のリスク判定 API を登録/参加導線に組み込める:
+Cost of Forgery 互換のリスク判定 API を登録/参加導線に組み込める:
 
-- `FAIRSCALE_ENABLED`: FairScale 判定を有効化（既定は `FAIRSCALE_BASE_URL` 設定時のみ有効）
-- `FAIRSCALE_FAIL_CLOSED`: 判定API障害時に遮断するか（`true`=503で遮断, `false`=fail-open）
-- `FAIRSCALE_BASE_URL`: 判定APIのベースURL
-- `FAIRSCALE_VERIFY_PATH`: 判定APIパス（既定 `/v1/risk/score`。URL全体指定も可）
-- `FAIRSCALE_API_KEY`: 判定APIの認証キー（Bearer + `x-api-key` で送信）
-- `FAIRSCALE_TIMEOUT_MS`: 判定APIタイムアウト（ms）
-- `FAIRSCALE_MIN_SCORE`: 許容スコア下限（0-100）
-- `FAIRSCALE_ENFORCE_ON_REGISTER`: `/api/users/register` に適用するか
-- `FAIRSCALE_ENFORCE_ON_CLAIM`: `/api/events/:eventId/claim` と `/v1/school/claims` に適用するか
+- `COST_OF_FORGERY_ENABLED`: Cost of Forgery 判定を有効化（既定は `COST_OF_FORGERY_BASE_URL` 設定時のみ有効）
+- `COST_OF_FORGERY_FAIL_CLOSED`: 判定API障害時に遮断するか（`true`=503で遮断, `false`=fail-open）
+- `COST_OF_FORGERY_BASE_URL`: 判定APIのベースURL
+- `COST_OF_FORGERY_VERIFY_PATH`: 判定APIパス（既定 `/v1/risk/score`。URL全体指定も可）
+- `COST_OF_FORGERY_API_KEY`: 判定APIの認証キー（Bearer + `x-api-key` で送信）
+- `COST_OF_FORGERY_TIMEOUT_MS`: 判定APIタイムアウト（ms）
+- `COST_OF_FORGERY_MIN_SCORE`: 許容スコア下限（0-100）
+- `COST_OF_FORGERY_ENFORCE_ON_REGISTER`: `/api/users/register` に適用するか
+- `COST_OF_FORGERY_ENFORCE_ON_CLAIM`: `/api/events/:eventId/claim` と `/v1/school/claims` に適用するか
 
-ブロック時は `403`（`fairscale_blocked`）、fail-closed で判定不能時は `503` を返す。
+ブロック時は `403`（`cost_of_forgery_blocked`）、fail-closed で判定不能時は `503` を返す。
 
 `POST /v1/school/pop-proof` はこの鍵で署名した PoP 証明を返し、クライアントは `claim_grant` 送信前に Ed25519 検証命令を付与する。
 デプロイ後は次を確認してから本番運用に入ること:

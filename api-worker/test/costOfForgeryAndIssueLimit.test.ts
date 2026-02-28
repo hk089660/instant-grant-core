@@ -39,7 +39,7 @@ class MockDurableObjectState {
   }
 }
 
-describe('fairscale integration and admin issuance limits', () => {
+describe('costOfForgery integration and admin issuance limits', () => {
   let state: MockDurableObjectState;
 
   beforeEach(() => {
@@ -51,15 +51,15 @@ describe('fairscale integration and admin issuance limits', () => {
     vi.restoreAllMocks();
   });
 
-  it('blocks user registration when fairscale denies', async () => {
+  it('blocks user registration when costOfForgery denies', async () => {
     const env: Env = {
       ADMIN_PASSWORD: 'master-secret',
       AUDIT_IMMUTABLE_MODE: 'off',
-      FAIRSCALE_ENABLED: 'true',
-      FAIRSCALE_FAIL_CLOSED: 'true',
-      FAIRSCALE_BASE_URL: 'https://fairscale.example',
-      FAIRSCALE_VERIFY_PATH: '/v1/risk/score',
-      FAIRSCALE_MIN_SCORE: '70',
+      COST_OF_FORGERY_ENABLED: 'true',
+      COST_OF_FORGERY_FAIL_CLOSED: 'true',
+      COST_OF_FORGERY_BASE_URL: 'https://cost-of-forgery.example',
+      COST_OF_FORGERY_VERIFY_PATH: '/v1/risk/score',
+      COST_OF_FORGERY_MIN_SCORE: '70',
     };
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -83,8 +83,8 @@ describe('fairscale integration and admin issuance limits', () => {
           'CF-Connecting-IP': '198.51.100.101',
         },
         body: JSON.stringify({
-          userId: 'fairscale-user-01',
-          displayName: 'FairScale User',
+          userId: 'cost-of-forgery-user-01',
+          displayName: 'Cost of Forgery User',
           pin: '1234',
         }),
       })
@@ -92,21 +92,21 @@ describe('fairscale integration and admin issuance limits', () => {
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { code?: string; reason?: string };
-    expect(body.code).toBe('fairscale_blocked');
+    expect(body.code).toBe('cost_of_forgery_blocked');
     expect(body.reason).toContain('high_sybil_risk');
 
     const users = await state.storage.list({ prefix: 'user:' });
     expect(users.size).toBe(0);
   });
 
-  it('allows registration in fail-open mode when fairscale is unavailable', async () => {
+  it('allows registration in fail-open mode when costOfForgery is unavailable', async () => {
     const env: Env = {
       ADMIN_PASSWORD: 'master-secret',
       AUDIT_IMMUTABLE_MODE: 'off',
-      FAIRSCALE_ENABLED: 'true',
-      FAIRSCALE_FAIL_CLOSED: 'false',
-      FAIRSCALE_BASE_URL: 'https://fairscale.example',
-      FAIRSCALE_VERIFY_PATH: '/v1/risk/score',
+      COST_OF_FORGERY_ENABLED: 'true',
+      COST_OF_FORGERY_FAIL_CLOSED: 'false',
+      COST_OF_FORGERY_BASE_URL: 'https://cost-of-forgery.example',
+      COST_OF_FORGERY_VERIFY_PATH: '/v1/risk/score',
     };
     const fetchMock = vi.fn().mockRejectedValue(new Error('upstream timeout'));
     vi.stubGlobal('fetch', fetchMock);
@@ -121,7 +121,7 @@ describe('fairscale integration and admin issuance limits', () => {
           'CF-Connecting-IP': '198.51.100.102',
         },
         body: JSON.stringify({
-          userId: 'fairscale-user-02',
+          userId: 'cost-of-forgery-user-02',
           displayName: 'Fail Open User',
           pin: '1234',
         }),
@@ -130,7 +130,7 @@ describe('fairscale integration and admin issuance limits', () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { userId?: string };
-    expect(body.userId).toBe('fairscale-user-02');
+    expect(body.userId).toBe('cost-of-forgery-user-02');
     consoleErrorSpy.mockRestore();
   });
 

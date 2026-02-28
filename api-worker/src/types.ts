@@ -65,7 +65,7 @@ export interface ClaimBody {
   joinToken?: string;
   txSignature?: string;
   receiptPubkey?: string;
-  fairscaleToken?: string;
+  costOfForgeryToken?: string;
 }
 
 export interface PopProofBody {
@@ -117,7 +117,7 @@ export interface RegisterBody {
   userId?: string;
   displayName?: string;
   pin?: string;
-  fairscaleToken?: string;
+  costOfForgeryToken?: string;
 }
 
 /** POST /api/events/:eventId/claim (userId+pin flow) */
@@ -127,7 +127,7 @@ export interface UserClaimBody {
   walletAddress?: string;
   txSignature?: string;
   receiptPubkey?: string;
-  fairscaleToken?: string;
+  costOfForgeryToken?: string;
 }
 
 export interface UserClaimResponse {

@@ -105,7 +105,7 @@ Reference one-page flow:
 
 ## Long Term (3 Months)
 
-### FairScale Integration
+### Cost of Forgery Integration
 - [ ] Sybil resistance layer
 - [ ] Privacy-preserving eligibility proofs
 - [ ] Cross-grant deduplication

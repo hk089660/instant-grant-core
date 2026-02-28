@@ -24,7 +24,7 @@ export function createHttpSchoolClaimClient(options: HttpSchoolClaimClientOption
           joinToken: opts?.joinToken,
           txSignature: opts?.txSignature,
           receiptPubkey: opts?.receiptPubkey,
-          fairscaleToken: opts?.fairscaleToken,
+          costOfForgeryToken: opts?.costOfForgeryToken,
         };
         const result = await httpPost<SchoolClaimResult>(url, body);
         if (result && typeof result === 'object' && 'success' in result) {
