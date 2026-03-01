@@ -296,6 +296,35 @@ flowchart TB
   W -. イベントごとに任意 .-> SP
 ```
 
+### 役割構成（利用者 / 管理者 / 運営者）
+
+```mermaid
+flowchart LR
+  subgraph Actors["Actors"]
+    USER["利用者"]
+    ADMIN["管理者"]
+    OP["運営者（master）"]
+  end
+
+  subgraph Surfaces["UI Surface"]
+    UUI["利用者UI\n/u/*, /r/school/:eventId"]
+    AUI["管理者UI\n/admin/*"]
+    MUI["運営者UI\n/master/*"]
+  end
+
+  subgraph Core["Core API / Governance"]
+    API["Cloudflare Worker + Durable Object\nSchoolStore"]
+    CONS["運営者コード発行\n全会一致承認（approve/reject）"]
+    AUD["監査ログ / 開示 / 検索"]
+  end
+
+  USER --> UUI --> API
+  ADMIN --> AUI --> API
+  OP --> MUI --> API
+  MUI --> CONS --> API
+  API --> AUD
+```
+
 ```text
 L3: UI（Implemented）
   - 利用者: /u/*, /r/school/:eventId（RN/Web）

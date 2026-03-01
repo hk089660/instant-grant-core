@@ -1,9 +1,25 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AppText, Button, CountBadge, EventRow, AdminShell, StatusBadge, Loading } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
-import { closeAdminEvent, fetchAdminEvents, fetchPopStatus, type PopStatusResponse } from '../../api/adminApi';
+import {
+  closeAdminEvent,
+  fetchAdminEvents,
+  fetchPopStatus,
+  fetchAdminSecurityLogs,
+  fetchAdminSecurityFreezeStatus,
+  fetchAdminReportObligations,
+  unlockFrozenAdmin,
+  revokeAdminAccess,
+  restoreAdminAccess,
+  type PopStatusResponse,
+  type AdminSecurityLogEntry,
+  type AdminFrozenAccount,
+  type AdminPendingWarning,
+  type AdminRevokedAccount,
+  type AdminReportObligationItem,
+} from '../../api/adminApi';
 import type { SchoolEvent } from '../../types/school';
 import { copyTextWithFeedback } from '../../utils/copyText';
 
@@ -17,22 +33,36 @@ export const AdminEventsScreen: React.FC = () => {
   const [popStatusError, setPopStatusError] = useState<string | null>(null);
   const [popStatusCheckedAt, setPopStatusCheckedAt] = useState<string | null>(null);
   const [closingEventId, setClosingEventId] = useState<string | null>(null);
+  const [securityLogs, setSecurityLogs] = useState<AdminSecurityLogEntry[]>([]);
+  const [frozenAccounts, setFrozenAccounts] = useState<AdminFrozenAccount[]>([]);
+  const [revokedAccounts, setRevokedAccounts] = useState<AdminRevokedAccount[]>([]);
+  const [pendingWarnings, setPendingWarnings] = useState<AdminPendingWarning[]>([]);
+  const [reportObligations, setReportObligations] = useState<AdminReportObligationItem[]>([]);
+  const [securityCheckedAt, setSecurityCheckedAt] = useState<string | null>(null);
+  const [securityLoading, setSecurityLoading] = useState(true);
+  const [securityError, setSecurityError] = useState<string | null>(null);
+  const [unlockingActorId, setUnlockingActorId] = useState<string | null>(null);
+  const [revokeTargetActorId, setRevokeTargetActorId] = useState('');
+  const [revokeReason, setRevokeReason] = useState('operator_policy_violation');
+  const [revokingActorId, setRevokingActorId] = useState<string | null>(null);
+  const [restoringActorId, setRestoringActorId] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-
+  const loadDashboard = useCallback(() => {
     setLoading(true);
     setError(null);
     setPopStatusLoading(true);
     setPopStatusError(null);
+    setSecurityLoading(true);
+    setSecurityError(null);
 
     Promise.allSettled([
       fetchAdminEvents(),
       fetchPopStatus(),
+      fetchAdminSecurityFreezeStatus(),
+      fetchAdminSecurityLogs({ limit: 80 }),
+      fetchAdminReportObligations({ status: 'required', limit: 50 }),
     ])
-      .then(([eventsResult, popResult]) => {
-        if (cancelled) return;
-
+      .then(([eventsResult, popResult, freezeResult, logsResult, reportResult]) => {
         if (eventsResult.status === 'fulfilled') {
           setEvents(eventsResult.value);
         } else {
@@ -47,49 +77,48 @@ export const AdminEventsScreen: React.FC = () => {
           setPopStatus(null);
           setPopStatusError(popResult.reason instanceof Error ? popResult.reason.message : 'PoP状態の取得に失敗しました。');
         }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-          setPopStatusLoading(false);
-        }
-      });
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const handleRetry = () => {
-    setLoading(true);
-    setError(null);
-    setPopStatusLoading(true);
-    setPopStatusError(null);
-
-    Promise.allSettled([
-      fetchAdminEvents(),
-      fetchPopStatus(),
-    ])
-      .then(([eventsResult, popResult]) => {
-        if (eventsResult.status === 'fulfilled') {
-          setEvents(eventsResult.value);
+        if (freezeResult.status === 'fulfilled') {
+          setFrozenAccounts(freezeResult.value.items ?? []);
+          setRevokedAccounts(freezeResult.value.revokedItems ?? []);
+          setPendingWarnings(freezeResult.value.pendingWarnings ?? []);
+          setSecurityCheckedAt(freezeResult.value.checkedAt ?? new Date().toISOString());
         } else {
-          setError(eventsResult.reason instanceof Error ? eventsResult.reason.message : '読み込みに失敗しました。再読み込みしてください。');
-          setEvents([]);
+          setFrozenAccounts([]);
+          setRevokedAccounts([]);
+          setPendingWarnings([]);
+          setSecurityError(freezeResult.reason instanceof Error ? freezeResult.reason.message : '凍結状態の取得に失敗しました。');
         }
 
-        if (popResult.status === 'fulfilled') {
-          setPopStatus(popResult.value);
-          setPopStatusCheckedAt(new Date().toISOString());
+        if (logsResult.status === 'fulfilled') {
+          setSecurityLogs(logsResult.value.items ?? []);
+          setSecurityCheckedAt((prev) => prev ?? logsResult.value.checkedAt ?? new Date().toISOString());
         } else {
-          setPopStatus(null);
-          setPopStatusError(popResult.reason instanceof Error ? popResult.reason.message : 'PoP状態の取得に失敗しました。');
+          setSecurityLogs([]);
+          setSecurityError((prev) => prev ?? (logsResult.reason instanceof Error ? logsResult.reason.message : '監査ログの取得に失敗しました。'));
+        }
+
+        if (reportResult.status === 'fulfilled') {
+          setReportObligations(reportResult.value.items ?? []);
+          setSecurityCheckedAt((prev) => prev ?? reportResult.value.checkedAt ?? new Date().toISOString());
+        } else {
+          setReportObligations([]);
+          setSecurityError((prev) => prev ?? (reportResult.reason instanceof Error ? reportResult.reason.message : '報告義務ログの取得に失敗しました。'));
         }
       })
       .finally(() => {
         setLoading(false);
         setPopStatusLoading(false);
+        setSecurityLoading(false);
       });
+  }, []);
+
+  useEffect(() => {
+    loadDashboard();
+  }, [loadDashboard]);
+
+  const handleRetry = () => {
+    loadDashboard();
   };
 
   const handleCopyPopStatus = useCallback(async () => {
@@ -132,6 +161,98 @@ export const AdminEventsScreen: React.FC = () => {
       setClosingEventId(null);
     }
   }, [closingEventId]);
+
+  const handleUnlockAccount = useCallback(async (targetActorId: string) => {
+    if (!targetActorId || unlockingActorId) return;
+    setUnlockingActorId(targetActorId);
+    setSecurityError(null);
+    try {
+      await unlockFrozenAdmin(targetActorId);
+      await Promise.allSettled([
+        fetchAdminSecurityFreezeStatus(),
+        fetchAdminSecurityLogs({ limit: 80 }),
+        fetchAdminReportObligations({ status: 'required', limit: 50 }),
+      ]).then(([freezeResult, logsResult, reportResult]) => {
+        if (freezeResult.status === 'fulfilled') {
+          setFrozenAccounts(freezeResult.value.items ?? []);
+          setRevokedAccounts(freezeResult.value.revokedItems ?? []);
+          setPendingWarnings(freezeResult.value.pendingWarnings ?? []);
+          setSecurityCheckedAt(freezeResult.value.checkedAt ?? new Date().toISOString());
+        }
+        if (logsResult.status === 'fulfilled') {
+          setSecurityLogs(logsResult.value.items ?? []);
+          setSecurityCheckedAt((prev) => prev ?? logsResult.value.checkedAt ?? new Date().toISOString());
+        }
+        if (reportResult.status === 'fulfilled') {
+          setReportObligations(reportResult.value.items ?? []);
+          setSecurityCheckedAt((prev) => prev ?? reportResult.value.checkedAt ?? new Date().toISOString());
+        }
+      });
+    } catch (e) {
+      setSecurityError(e instanceof Error ? e.message : 'ロック解除に失敗しました。');
+    } finally {
+      setUnlockingActorId(null);
+    }
+  }, [unlockingActorId]);
+
+  const refreshSecurityBlocks = useCallback(async () => {
+    await Promise.allSettled([
+      fetchAdminSecurityFreezeStatus(),
+      fetchAdminSecurityLogs({ limit: 80 }),
+      fetchAdminReportObligations({ status: 'required', limit: 50 }),
+    ]).then(([freezeResult, logsResult, reportResult]) => {
+      if (freezeResult.status === 'fulfilled') {
+        setFrozenAccounts(freezeResult.value.items ?? []);
+        setRevokedAccounts(freezeResult.value.revokedItems ?? []);
+        setPendingWarnings(freezeResult.value.pendingWarnings ?? []);
+        setSecurityCheckedAt(freezeResult.value.checkedAt ?? new Date().toISOString());
+      }
+      if (logsResult.status === 'fulfilled') {
+        setSecurityLogs(logsResult.value.items ?? []);
+        setSecurityCheckedAt((prev) => prev ?? logsResult.value.checkedAt ?? new Date().toISOString());
+      }
+      if (reportResult.status === 'fulfilled') {
+        setReportObligations(reportResult.value.items ?? []);
+        setSecurityCheckedAt((prev) => prev ?? reportResult.value.checkedAt ?? new Date().toISOString());
+      }
+    });
+  }, []);
+
+  const handleRevokeAccess = useCallback(async (targetActorIdRaw?: string) => {
+    const targetActorId = (targetActorIdRaw ?? revokeTargetActorId).trim();
+    if (!targetActorId || revokingActorId) return;
+    setRevokingActorId(targetActorId);
+    setSecurityError(null);
+    try {
+      await revokeAdminAccess(targetActorId, revokeReason.trim() || undefined);
+      setRevokeTargetActorId('');
+      await refreshSecurityBlocks();
+    } catch (e) {
+      setSecurityError(e instanceof Error ? e.message : '権限剥奪に失敗しました。');
+    } finally {
+      setRevokingActorId(null);
+    }
+  }, [revokeTargetActorId, revokingActorId, revokeReason, refreshSecurityBlocks]);
+
+  const handleRestoreAccess = useCallback(async (targetActorId: string) => {
+    if (!targetActorId || restoringActorId) return;
+    setRestoringActorId(targetActorId);
+    setSecurityError(null);
+    try {
+      await restoreAdminAccess(targetActorId);
+      await refreshSecurityBlocks();
+    } catch (e) {
+      setSecurityError(e instanceof Error ? e.message : '権限復旧に失敗しました。');
+    } finally {
+      setRestoringActorId(null);
+    }
+  }, [restoringActorId, refreshSecurityBlocks]);
+
+  const shortActor = (actorId: string) => {
+    if (!actorId) return '-';
+    if (actorId.length <= 24) return actorId;
+    return `${actorId.slice(0, 12)}...${actorId.slice(-8)}`;
+  };
 
   return (
     <AdminShell title="イベント一覧" role="admin">
@@ -222,6 +343,206 @@ export const AdminEventsScreen: React.FC = () => {
               PoP状態を取得できませんでした
             </AppText>
           )}
+        </View>
+
+        <View style={styles.securityCard}>
+          <View style={styles.securityHeader}>
+            <AppText variant="h3" style={styles.securityTitle}>
+              運営者監査・実行ログ
+            </AppText>
+            <Button
+              title={securityLoading ? '更新中…' : '再取得'}
+              variant="secondary"
+              dark
+              onPress={handleRetry}
+              disabled={securityLoading}
+              style={styles.securityRefreshButton}
+            />
+          </View>
+
+          {securityError ? (
+            <AppText variant="small" style={styles.securityErrorText}>
+              {securityError}
+            </AppText>
+          ) : null}
+
+          <AppText variant="small" style={styles.securityMetaText}>
+            凍結中: {frozenAccounts.length} / 権限剥奪中: {revokedAccounts.length} / 警告保留: {pendingWarnings.length}
+          </AppText>
+          <AppText variant="small" style={styles.securityMetaText}>
+            checkedAt: {securityCheckedAt ?? '-'}
+          </AppText>
+
+          <View style={styles.securitySection}>
+            <AppText variant="body" style={styles.securitySectionTitle}>
+              報告義務ログ（全体表示）
+            </AppText>
+            {securityLoading ? (
+              <AppText variant="small" style={styles.securityMetaText}>
+                報告義務ログを読み込み中です...
+              </AppText>
+            ) : reportObligations.length === 0 ? (
+              <AppText variant="small" style={styles.securityMetaText}>
+                未対応の報告義務はありません
+              </AppText>
+            ) : (
+              reportObligations.slice(0, 8).map((report) => (
+                <View key={report.reportId} style={styles.logRow}>
+                  <AppText variant="small" style={styles.logActionText}>
+                    [{report.type}] {report.reason}
+                  </AppText>
+                  <AppText variant="small" style={styles.securityMetaText}>
+                    target: {shortActor(report.targetActorId)} / by: {shortActor(report.actionByActorId)}
+                  </AppText>
+                  <AppText variant="small" style={styles.securityMetaText}>
+                    createdAt: {report.createdAt}
+                  </AppText>
+                </View>
+              ))
+            )}
+          </View>
+
+          <View style={styles.securitySection}>
+            <AppText variant="body" style={styles.securitySectionTitle}>
+              権限剥奪を実行
+            </AppText>
+            <TextInput
+              value={revokeTargetActorId}
+              onChangeText={setRevokeTargetActorId}
+              placeholder="targetActorId (例: admin:operator-abc123)"
+              placeholderTextColor={adminTheme.colors.textTertiary}
+              style={styles.securityInput}
+              autoCapitalize="none"
+            />
+            <TextInput
+              value={revokeReason}
+              onChangeText={setRevokeReason}
+              placeholder="reason (例: policy_violation)"
+              placeholderTextColor={adminTheme.colors.textTertiary}
+              style={styles.securityInput}
+              autoCapitalize="none"
+            />
+            <Button
+              title="権限を剥奪する"
+              variant="secondary"
+              dark
+              onPress={() => void handleRevokeAccess()}
+              loading={Boolean(revokingActorId && revokingActorId === revokeTargetActorId.trim())}
+              disabled={!revokeTargetActorId.trim() || Boolean(revokingActorId)}
+              style={styles.revokeButton}
+            />
+          </View>
+
+          <View style={styles.securitySection}>
+            <AppText variant="body" style={styles.securitySectionTitle}>
+              凍結アカウント（手動解除必須）
+            </AppText>
+            {securityLoading ? (
+              <AppText variant="small" style={styles.securityMetaText}>
+                凍結状態を読み込み中です...
+              </AppText>
+            ) : frozenAccounts.length === 0 ? (
+              <AppText variant="small" style={styles.securityMetaText}>
+                凍結中のアカウントはありません
+              </AppText>
+            ) : (
+              frozenAccounts.map((item) => (
+                <View key={item.actorId} style={styles.frozenRow}>
+                  <View style={styles.frozenInfo}>
+                    <AppText variant="small" style={styles.securityActorText}>
+                      {shortActor(item.actorId)}
+                    </AppText>
+                    <AppText variant="small" style={styles.securityMetaText}>
+                      reason: {item.reason ?? '-'}
+                    </AppText>
+                    <AppText variant="small" style={styles.securityMetaText}>
+                      frozenAt: {item.frozenAt ?? '-'}
+                    </AppText>
+                  </View>
+                  <Button
+                    title="ロック解除"
+                    variant="secondary"
+                    dark
+                    size="medium"
+                    onPress={() => void handleUnlockAccount(item.actorId)}
+                    loading={unlockingActorId === item.actorId}
+                    disabled={Boolean(unlockingActorId && unlockingActorId !== item.actorId)}
+                    style={styles.unlockButton}
+                  />
+                </View>
+              ))
+            )}
+          </View>
+
+          <View style={styles.securitySection}>
+            <AppText variant="body" style={styles.securitySectionTitle}>
+              権限剥奪アカウント（手動復旧必須）
+            </AppText>
+            {securityLoading ? (
+              <AppText variant="small" style={styles.securityMetaText}>
+                権限剥奪状態を読み込み中です...
+              </AppText>
+            ) : revokedAccounts.length === 0 ? (
+              <AppText variant="small" style={styles.securityMetaText}>
+                権限剥奪中のアカウントはありません
+              </AppText>
+            ) : (
+              revokedAccounts.map((item) => (
+                <View key={item.actorId} style={styles.frozenRow}>
+                  <View style={styles.frozenInfo}>
+                    <AppText variant="small" style={styles.securityActorText}>
+                      {shortActor(item.actorId)}
+                    </AppText>
+                    <AppText variant="small" style={styles.securityMetaText}>
+                      reason: {item.reason ?? '-'}
+                    </AppText>
+                    <AppText variant="small" style={styles.securityMetaText}>
+                      revokedAt: {item.revokedAt ?? '-'}
+                    </AppText>
+                  </View>
+                  <Button
+                    title="権限復旧"
+                    variant="secondary"
+                    dark
+                    size="medium"
+                    onPress={() => void handleRestoreAccess(item.actorId)}
+                    loading={restoringActorId === item.actorId}
+                    disabled={Boolean(restoringActorId && restoringActorId !== item.actorId)}
+                    style={styles.unlockButton}
+                  />
+                </View>
+              ))
+            )}
+          </View>
+
+          <View style={styles.securitySection}>
+            <AppText variant="body" style={styles.securitySectionTitle}>
+              監査/実行ログ（最新）
+            </AppText>
+            {securityLoading ? (
+              <AppText variant="small" style={styles.securityMetaText}>
+                ログを読み込み中です...
+              </AppText>
+            ) : securityLogs.length === 0 ? (
+              <AppText variant="small" style={styles.securityMetaText}>
+                ログはまだありません
+              </AppText>
+            ) : (
+              securityLogs.slice(0, 12).map((log) => (
+                <View key={log.id} style={styles.logRow}>
+                  <AppText variant="small" style={styles.logActionText}>
+                    [{log.category}] {log.action}
+                  </AppText>
+                  <AppText variant="small" style={styles.securityMetaText}>
+                    actor: {shortActor(log.actor.actorId)}
+                  </AppText>
+                  <AppText variant="small" style={styles.securityMetaText}>
+                    at: {log.ts}
+                  </AppText>
+                </View>
+              ))
+            )}
+          </View>
         </View>
 
         <View style={styles.list}>
@@ -374,6 +695,86 @@ const styles = StyleSheet.create({
     marginTop: adminTheme.spacing.sm,
     alignSelf: 'flex-start',
     minWidth: 140,
+  },
+  securityCard: {
+    backgroundColor: adminTheme.colors.surface,
+    borderRadius: adminTheme.radius.md,
+    padding: adminTheme.spacing.md,
+    marginBottom: adminTheme.spacing.lg,
+    borderWidth: 1,
+    borderColor: adminTheme.colors.border,
+  },
+  securityHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: adminTheme.spacing.sm,
+  },
+  securityTitle: {
+    color: adminTheme.colors.text,
+  },
+  securityRefreshButton: {
+    minWidth: 88,
+  },
+  securityErrorText: {
+    color: '#FF5C5C',
+    marginBottom: adminTheme.spacing.xs,
+  },
+  securityMetaText: {
+    color: adminTheme.colors.textSecondary,
+    marginTop: 2,
+  },
+  securitySection: {
+    marginTop: adminTheme.spacing.md,
+  },
+  securitySectionTitle: {
+    color: adminTheme.colors.text,
+    marginBottom: adminTheme.spacing.xs,
+  },
+  securityInput: {
+    borderWidth: 1,
+    borderColor: adminTheme.colors.border,
+    borderRadius: adminTheme.radius.sm,
+    paddingHorizontal: adminTheme.spacing.md,
+    paddingVertical: adminTheme.spacing.sm,
+    color: adminTheme.colors.text,
+    backgroundColor: adminTheme.colors.background,
+    marginTop: adminTheme.spacing.xs,
+  },
+  revokeButton: {
+    marginTop: adminTheme.spacing.sm,
+    alignSelf: 'flex-start',
+    minWidth: 140,
+  },
+  frozenRow: {
+    borderWidth: 1,
+    borderColor: adminTheme.colors.border,
+    borderRadius: adminTheme.radius.sm,
+    padding: adminTheme.spacing.sm,
+    marginTop: adminTheme.spacing.xs,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: adminTheme.spacing.sm,
+  },
+  frozenInfo: {
+    flex: 1,
+  },
+  securityActorText: {
+    color: '#FFD166',
+    fontFamily: 'monospace',
+  },
+  unlockButton: {
+    minWidth: 112,
+  },
+  logRow: {
+    borderBottomWidth: 1,
+    borderBottomColor: adminTheme.colors.border,
+    paddingVertical: adminTheme.spacing.xs,
+  },
+  logActionText: {
+    color: adminTheme.colors.text,
+    fontFamily: 'monospace',
   },
   list: {
     backgroundColor: adminTheme.colors.surface,

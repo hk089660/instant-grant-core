@@ -23,6 +23,7 @@ import { parseAuditImmutableMode, persistImmutableAuditEntry } from './audit/imm
 
 const USER_PREFIX = 'user:';
 const ADMIN_CODE_PREFIX = 'admin_code:';
+const ADMIN_INVITE_PROPOSAL_PREFIX = 'admin_invite_proposal:';
 const EVENT_OWNER_PREFIX = 'event_owner:';
 const TICKET_RECEIPT_CODE_PREFIX = 'ticket_receipt:';
 const TICKET_RECEIPT_SUBJECT_PREFIX = 'ticket_receipt_subject:';
@@ -36,6 +37,10 @@ function userKey(userId: string): string {
 
 function adminCodeKey(code: string): string {
   return ADMIN_CODE_PREFIX + code;
+}
+
+function adminInviteProposalKey(proposalId: string): string {
+  return ADMIN_INVITE_PROPOSAL_PREFIX + proposalId;
 }
 
 function eventOwnerKey(eventId: string): string {
@@ -418,6 +423,47 @@ type AdminCodeRecord = {
   source: 'invite';
   revokedAt: string | null;
   revokedBy: string | null;
+};
+
+type InviteConsensusOperator = {
+  actorId: string;
+  adminId: string;
+  role: 'master' | 'admin';
+  source: 'master' | 'invite';
+  name: string;
+};
+
+type AdminInviteApproval = {
+  actorId: string;
+  adminId: string;
+  role: 'master' | 'admin';
+  source: 'master' | 'invite';
+  name: string;
+  approvedAt: string;
+};
+
+type AdminInviteProposalStatus = 'pending' | 'issued' | 'cancelled';
+
+type AdminInviteProposalRecord = {
+  proposalId: string;
+  name: string;
+  createdAt: string;
+  requestedBy: {
+    actorId: string;
+    adminId: string;
+    role: 'master' | 'admin';
+    source: 'master' | 'invite';
+    name: string;
+  };
+  approvals: AdminInviteApproval[];
+  status: AdminInviteProposalStatus;
+  issuedCode: string | null;
+  issuedAdminId: string | null;
+  issuedAt: string | null;
+  issuedByActorId: string | null;
+  cancelledAt: string | null;
+  cancelledByActorId: string | null;
+  cancelledReason: string | null;
 };
 
 type OperatorIdentity = {
@@ -2072,7 +2118,12 @@ export class SchoolStore implements DurableObject {
   private isAuditFailCloseExemptRoute(path: string, method: string): boolean {
     const m = method.toUpperCase();
     if (m !== 'POST') return false;
-    return path === '/api/admin/login' || path === '/api/admin/invite' || path === '/api/admin/rename' || path === '/api/admin/revoke';
+    return path === '/api/admin/login' ||
+      path === '/api/admin/invite' ||
+      path === '/api/admin/invite/approve' ||
+      path === '/api/admin/invite/reject' ||
+      path === '/api/admin/rename' ||
+      path === '/api/admin/revoke';
   }
 
   private isAuditFailClosed(path: string, method: string): boolean {
@@ -2360,6 +2411,340 @@ export class SchoolStore implements DurableObject {
       if (parsed.adminId === needle) return code;
     }
     return null;
+  }
+
+  private isInviteConsensusEligibleOperator(operator: OperatorIdentity): boolean {
+    return operator.source === 'master' || operator.source === 'invite';
+  }
+
+  private toInviteConsensusOperator(operator: OperatorIdentity): InviteConsensusOperator | null {
+    if (!this.isInviteConsensusEligibleOperator(operator)) return null;
+    return {
+      actorId: operator.actorId,
+      adminId: operator.adminId,
+      role: operator.role,
+      source: operator.source === 'master' ? 'master' : 'invite',
+      name: operator.name || (operator.role === 'master' ? 'Master Operator' : 'Unknown Admin'),
+    };
+  }
+
+  private async listInviteConsensusOperators(): Promise<InviteConsensusOperator[]> {
+    const operators = new Map<string, { op: InviteConsensusOperator; createdAtMs: number }>();
+    const masterPassword = this.getConfiguredMasterPassword();
+    if (masterPassword) {
+      operators.set('master', {
+        op: {
+          actorId: 'master',
+          adminId: 'master',
+          role: 'master',
+          source: 'master',
+          name: 'Master Operator',
+        },
+        createdAtMs: 0,
+      });
+    }
+
+    const adminRows = await this.ctx.storage.list({ prefix: ADMIN_CODE_PREFIX });
+    for (const [key, value] of adminRows.entries()) {
+      const code = key.slice(ADMIN_CODE_PREFIX.length);
+      const parsed = this.parseAdminCodeRecord(code, value);
+      if (!parsed || parsed.revokedAt) continue;
+      const actorId = `admin:${parsed.adminId}`;
+      const createdAtMs = Date.parse(parsed.createdAt);
+      const candidate: InviteConsensusOperator = {
+        actorId,
+        adminId: parsed.adminId,
+        role: 'admin',
+        source: 'invite',
+        name: parsed.name,
+      };
+      const existing = operators.get(actorId);
+      if (!existing || createdAtMs > existing.createdAtMs) {
+        operators.set(actorId, {
+          op: candidate,
+          createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : 0,
+        });
+      }
+    }
+
+    return Array.from(operators.values())
+      .map((entry) => entry.op)
+      .sort((a, b) => a.actorId.localeCompare(b.actorId));
+  }
+
+  private parseAdminInviteApproval(raw: unknown): AdminInviteApproval | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const actorId = typeof obj.actorId === 'string' ? obj.actorId.trim() : '';
+    const adminId = typeof obj.adminId === 'string' ? obj.adminId.trim() : '';
+    const name = typeof obj.name === 'string' ? obj.name.trim() : '';
+    const approvedAt = typeof obj.approvedAt === 'string' ? obj.approvedAt.trim() : '';
+    const roleRaw = typeof obj.role === 'string' ? obj.role.trim() : '';
+    const sourceRaw = typeof obj.source === 'string' ? obj.source.trim() : '';
+    if (!actorId || !adminId || !approvedAt) return null;
+    const role: AdminInviteApproval['role'] = roleRaw === 'master' ? 'master' : 'admin';
+    const source: AdminInviteApproval['source'] = sourceRaw === 'master' ? 'master' : 'invite';
+    return {
+      actorId,
+      adminId,
+      role,
+      source,
+      name: name || (role === 'master' ? 'Master Operator' : 'Unknown Admin'),
+      approvedAt,
+    };
+  }
+
+  private parseAdminInviteProposalRecord(proposalId: string, raw: unknown): AdminInviteProposalRecord | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const name = typeof obj.name === 'string' ? obj.name.trim() : '';
+    const createdAt = typeof obj.createdAt === 'string' && obj.createdAt.trim()
+      ? obj.createdAt.trim()
+      : new Date(0).toISOString();
+    if (!name) return null;
+
+    const requestedByRaw = obj.requestedBy;
+    if (!requestedByRaw || typeof requestedByRaw !== 'object') return null;
+    const requestedByObj = requestedByRaw as Record<string, unknown>;
+    const requestedByActorId = typeof requestedByObj.actorId === 'string' ? requestedByObj.actorId.trim() : '';
+    const requestedByAdminId = typeof requestedByObj.adminId === 'string' ? requestedByObj.adminId.trim() : '';
+    const requestedByRoleRaw = typeof requestedByObj.role === 'string' ? requestedByObj.role.trim() : '';
+    const requestedBySourceRaw = typeof requestedByObj.source === 'string' ? requestedByObj.source.trim() : '';
+    const requestedByNameRaw = typeof requestedByObj.name === 'string' ? requestedByObj.name.trim() : '';
+    if (!requestedByActorId || !requestedByAdminId) return null;
+
+    const requestedByRole: AdminInviteProposalRecord['requestedBy']['role'] =
+      requestedByRoleRaw === 'master' ? 'master' : 'admin';
+    const requestedBySource: AdminInviteProposalRecord['requestedBy']['source'] =
+      requestedBySourceRaw === 'master' ? 'master' : 'invite';
+
+    const approvalsRaw = Array.isArray(obj.approvals) ? obj.approvals : [];
+    const approvalMap = new Map<string, AdminInviteApproval>();
+    for (const item of approvalsRaw) {
+      const parsed = this.parseAdminInviteApproval(item);
+      if (!parsed) continue;
+      const existing = approvalMap.get(parsed.actorId);
+      if (!existing || existing.approvedAt < parsed.approvedAt) {
+        approvalMap.set(parsed.actorId, parsed);
+      }
+    }
+    const approvals = Array.from(approvalMap.values()).sort((a, b) => a.approvedAt.localeCompare(b.approvedAt));
+
+    const statusRaw = typeof obj.status === 'string' ? obj.status.trim() : '';
+    const status: AdminInviteProposalStatus =
+      statusRaw === 'issued' || statusRaw === 'cancelled'
+        ? statusRaw
+        : 'pending';
+
+    const issuedCode = typeof obj.issuedCode === 'string' && obj.issuedCode.trim() ? obj.issuedCode.trim() : null;
+    const issuedAdminId = typeof obj.issuedAdminId === 'string' && obj.issuedAdminId.trim() ? obj.issuedAdminId.trim() : null;
+    const issuedAt = typeof obj.issuedAt === 'string' && obj.issuedAt.trim() ? obj.issuedAt.trim() : null;
+    const issuedByActorId = typeof obj.issuedByActorId === 'string' && obj.issuedByActorId.trim() ? obj.issuedByActorId.trim() : null;
+    const cancelledAt = typeof obj.cancelledAt === 'string' && obj.cancelledAt.trim() ? obj.cancelledAt.trim() : null;
+    const cancelledByActorId = typeof obj.cancelledByActorId === 'string' && obj.cancelledByActorId.trim()
+      ? obj.cancelledByActorId.trim()
+      : null;
+    const cancelledReason = typeof obj.cancelledReason === 'string' && obj.cancelledReason.trim()
+      ? obj.cancelledReason.trim()
+      : null;
+
+    return {
+      proposalId,
+      name,
+      createdAt,
+      requestedBy: {
+        actorId: requestedByActorId,
+        adminId: requestedByAdminId,
+        role: requestedByRole,
+        source: requestedBySource,
+        name: requestedByNameRaw || (requestedByRole === 'master' ? 'Master Operator' : 'Unknown Admin'),
+      },
+      approvals,
+      status,
+      issuedCode,
+      issuedAdminId,
+      issuedAt,
+      issuedByActorId,
+      cancelledAt,
+      cancelledByActorId,
+      cancelledReason,
+    };
+  }
+
+  private buildInviteProposalPendingResponse(
+    proposal: AdminInviteProposalRecord,
+    requiredOperators: InviteConsensusOperator[]
+  ): Response {
+    const requiredActorIds = new Set(requiredOperators.map((item) => item.actorId));
+    const approvedBy = proposal.approvals.filter((item) => requiredActorIds.has(item.actorId));
+    const approvedActorIds = new Set(approvedBy.map((item) => item.actorId));
+    const missingApprovers = requiredOperators
+      .filter((item) => !approvedActorIds.has(item.actorId))
+      .map((item) => ({
+        actorId: item.actorId,
+        adminId: item.adminId,
+        role: item.role,
+        source: item.source,
+        name: item.name,
+      }));
+    return Response.json(
+      {
+        status: 'pending_approval',
+        proposalId: proposal.proposalId,
+        name: proposal.name,
+        createdAt: proposal.createdAt,
+        requestedBy: proposal.requestedBy,
+        approvals: approvedBy,
+        approvedCount: approvedBy.length,
+        requiredCount: requiredOperators.length,
+        requiredApprovers: requiredOperators,
+        missingApprovers,
+        unanimousApproved: missingApprovers.length === 0,
+      },
+      { status: 202 }
+    );
+  }
+
+  private async approveAdminInviteProposal(
+    operator: OperatorIdentity,
+    proposal: AdminInviteProposalRecord
+  ): Promise<Response> {
+    if (!this.isInviteConsensusEligibleOperator(operator)) {
+      return Response.json({ error: 'forbidden: invite consensus approver only' }, { status: 403 });
+    }
+    if (proposal.status === 'cancelled') {
+      return Response.json({ error: 'invite proposal cancelled' }, { status: 409 });
+    }
+
+    const requiredOperators = await this.listInviteConsensusOperators();
+    if (requiredOperators.length === 0) {
+      return this.serverConfigErrorResponse();
+    }
+    const requiredActorIds = new Set(requiredOperators.map((item) => item.actorId));
+
+    if (proposal.status === 'issued') {
+      if (!proposal.issuedCode || !proposal.issuedAdminId || !proposal.issuedAt) {
+        return Response.json({ error: 'invite proposal already issued but incomplete' }, { status: 500 });
+      }
+      const approvedBy = proposal.approvals.filter((item) => requiredActorIds.has(item.actorId));
+      return Response.json({
+        code: proposal.issuedCode,
+        adminId: proposal.issuedAdminId,
+        name: proposal.name,
+        status: 'active',
+        createdAt: proposal.issuedAt,
+        consensus: {
+          proposalId: proposal.proposalId,
+          approvedCount: approvedBy.length,
+          requiredCount: requiredOperators.length,
+          unanimousApproved: approvedBy.length >= requiredOperators.length,
+          approvedBy,
+        },
+      });
+    }
+
+    const approver = this.toInviteConsensusOperator(operator);
+    if (!approver) {
+      return Response.json({ error: 'forbidden: invite consensus approver only' }, { status: 403 });
+    }
+    if (!proposal.approvals.some((item) => item.actorId === approver.actorId)) {
+      proposal.approvals.push({
+        actorId: approver.actorId,
+        adminId: approver.adminId,
+        role: approver.role,
+        source: approver.source,
+        name: approver.name,
+        approvedAt: new Date().toISOString(),
+      });
+      proposal.approvals.sort((a, b) => a.approvedAt.localeCompare(b.approvedAt));
+    }
+
+    const approvedBy = proposal.approvals.filter((item) => requiredActorIds.has(item.actorId));
+    const approvedActorIds = new Set(approvedBy.map((item) => item.actorId));
+    const unanimousApproved = requiredOperators.every((item) => approvedActorIds.has(item.actorId));
+
+    if (!unanimousApproved) {
+      await this.ctx.storage.put(adminInviteProposalKey(proposal.proposalId), proposal);
+      return this.buildInviteProposalPendingResponse(proposal, requiredOperators);
+    }
+
+    const issueLimitError = await this.enforceAdminInviteIssueLimit();
+    if (issueLimitError) {
+      await this.ctx.storage.put(adminInviteProposalKey(proposal.proposalId), proposal);
+      return issueLimitError;
+    }
+
+    const code = crypto.randomUUID().replace(/-/g, '');
+    const adminId = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    await this.ctx.storage.put(adminCodeKey(code), {
+      adminId,
+      name: proposal.name,
+      source: 'invite',
+      createdAt,
+      revokedAt: null,
+      revokedBy: null,
+    });
+
+    proposal.status = 'issued';
+    proposal.issuedCode = code;
+    proposal.issuedAdminId = adminId;
+    proposal.issuedAt = createdAt;
+    proposal.issuedByActorId = operator.actorId;
+    await this.ctx.storage.put(adminInviteProposalKey(proposal.proposalId), proposal);
+
+    return Response.json({
+      code,
+      adminId,
+      name: proposal.name,
+      status: 'active',
+      createdAt,
+      consensus: {
+        proposalId: proposal.proposalId,
+        approvedCount: approvedBy.length,
+        requiredCount: requiredOperators.length,
+        unanimousApproved: true,
+        approvedBy,
+      },
+    });
+  }
+
+  private async rejectAdminInviteProposal(
+    operator: OperatorIdentity,
+    proposal: AdminInviteProposalRecord,
+    reasonInput: string
+  ): Promise<Response> {
+    if (!this.isInviteConsensusEligibleOperator(operator)) {
+      return Response.json({ error: 'forbidden: invite consensus approver only' }, { status: 403 });
+    }
+    const reason = reasonInput.trim();
+    if (!reason) {
+      return Response.json({ error: 'reason required' }, { status: 400 });
+    }
+    if (reason.length > 300) {
+      return Response.json({ error: 'reason must be 1-300 chars' }, { status: 400 });
+    }
+    if (proposal.status === 'issued') {
+      return Response.json({ error: 'invite proposal already issued' }, { status: 409 });
+    }
+
+    if (proposal.status !== 'cancelled') {
+      const now = new Date().toISOString();
+      proposal.status = 'cancelled';
+      proposal.cancelledAt = now;
+      proposal.cancelledByActorId = operator.actorId;
+      proposal.cancelledReason = reason;
+      await this.ctx.storage.put(adminInviteProposalKey(proposal.proposalId), proposal);
+    }
+
+    return Response.json({
+      status: 'cancelled',
+      proposalId: proposal.proposalId,
+      name: proposal.name,
+      cancelledAt: proposal.cancelledAt,
+      cancelledByActorId: proposal.cancelledByActorId,
+      reason: proposal.cancelledReason,
+    });
   }
 
   private operatorToEventOwner(operator: OperatorIdentity): EventOwnerRecord {
@@ -5173,43 +5558,193 @@ export class SchoolStore implements DurableObject {
       return Response.json(response);
     }
 
-    // POST /api/admin/invite (Master Password required)
+    // POST /api/admin/invite (Operator auth required, unanimous approval required)
     if (path === '/api/admin/invite' && request.method === 'POST') {
-      const authError = this.requireMasterAuthorization(request);
-      if (authError) {
-        return authError;
+      const operator = await this.authenticateOperator(request);
+      if (!operator) {
+        return this.unauthorizedResponse();
       }
-
-      let body: { name?: string };
+      if (!this.isInviteConsensusEligibleOperator(operator)) {
+        return Response.json({ error: 'forbidden: invite consensus approver only' }, { status: 403 });
+      }
+      let body: { name?: string; proposalId?: string };
       try {
         body = (await request.json()) as any;
       } catch {
         return Response.json({ error: 'invalid body' }, { status: 400 });
       }
-      const name = typeof body?.name === 'string' ? body.name.trim() : 'Unknown Admin';
+
+      const proposalId = typeof body?.proposalId === 'string' ? body.proposalId.trim() : '';
+      if (proposalId) {
+        const raw = await this.ctx.storage.get(adminInviteProposalKey(proposalId));
+        const proposal = this.parseAdminInviteProposalRecord(proposalId, raw);
+        if (!proposal) {
+          return Response.json({ error: 'invite proposal not found' }, { status: 404 });
+        }
+        return this.approveAdminInviteProposal(operator, proposal);
+      }
+
+      const name = typeof body?.name === 'string' ? body.name.trim() : '';
       if (!name) {
         return Response.json({ error: 'name required' }, { status: 400 });
       }
+      if (name.length > 64) {
+        return Response.json({ error: 'name must be 1-64 chars' }, { status: 400 });
+      }
+      const requester = this.toInviteConsensusOperator(operator);
+      if (!requester) {
+        return Response.json({ error: 'forbidden: invite consensus approver only' }, { status: 403 });
+      }
+      const newProposalId = crypto.randomUUID();
+      const createdAt = new Date().toISOString();
+      const proposal: AdminInviteProposalRecord = {
+        proposalId: newProposalId,
+        name,
+        createdAt,
+        requestedBy: {
+          actorId: requester.actorId,
+          adminId: requester.adminId,
+          role: requester.role,
+          source: requester.source,
+          name: requester.name,
+        },
+        approvals: [],
+        status: 'pending',
+        issuedCode: null,
+        issuedAdminId: null,
+        issuedAt: null,
+        issuedByActorId: null,
+        cancelledAt: null,
+        cancelledByActorId: null,
+        cancelledReason: null,
+      };
+      await this.ctx.storage.put(adminInviteProposalKey(newProposalId), proposal);
+      return this.approveAdminInviteProposal(operator, proposal);
+    }
 
-      const issueLimitError = await this.enforceAdminInviteIssueLimit();
-      if (issueLimitError) {
-        return issueLimitError;
+    // GET /api/admin/invite/pending (Operator auth required)
+    if (path === '/api/admin/invite/pending' && request.method === 'GET') {
+      const operator = await this.authenticateOperator(request);
+      if (!operator) {
+        return this.unauthorizedResponse();
+      }
+      if (!this.isInviteConsensusEligibleOperator(operator)) {
+        return Response.json({ error: 'forbidden: invite consensus approver only' }, { status: 403 });
       }
 
-      // Generate secure random code
-      const code = crypto.randomUUID().replace(/-/g, '');
-      const adminId = crypto.randomUUID();
-      const createdAt = new Date().toISOString();
-      await this.ctx.storage.put(adminCodeKey(code), {
-        adminId,
-        name,
-        source: 'invite',
-        createdAt,
-        revokedAt: null,
-        revokedBy: null,
-      });
+      const requiredOperators = await this.listInviteConsensusOperators();
+      const requiredActorIds = new Set(requiredOperators.map((item) => item.actorId));
+      const rows = await this.ctx.storage.list({ prefix: ADMIN_INVITE_PROPOSAL_PREFIX });
+      const proposals = Array.from(rows.entries())
+        .map(([key, value]) => {
+          const proposalId = key.slice(ADMIN_INVITE_PROPOSAL_PREFIX.length);
+          const proposal = this.parseAdminInviteProposalRecord(proposalId, value);
+          if (!proposal || proposal.status !== 'pending') return null;
+          const approvals = proposal.approvals.filter((item) => requiredActorIds.has(item.actorId));
+          const approvedActorIds = new Set(approvals.map((item) => item.actorId));
+          const missingApprovers = requiredOperators
+            .filter((item) => !approvedActorIds.has(item.actorId))
+            .map((item) => ({
+              actorId: item.actorId,
+              adminId: item.adminId,
+              role: item.role,
+              source: item.source,
+              name: item.name,
+            }));
+          return {
+            proposalId: proposal.proposalId,
+            name: proposal.name,
+            createdAt: proposal.createdAt,
+            requestedBy: proposal.requestedBy,
+            approvals,
+            approvedCount: approvals.length,
+            requiredCount: requiredOperators.length,
+            missingApprovers,
+            unanimousApproved: missingApprovers.length === 0,
+          };
+        })
+        .filter((item): item is {
+          proposalId: string;
+          name: string;
+          createdAt: string;
+          requestedBy: AdminInviteProposalRecord['requestedBy'];
+          approvals: AdminInviteApproval[];
+          approvedCount: number;
+          requiredCount: number;
+          missingApprovers: Array<{
+            actorId: string;
+            adminId: string;
+            role: 'master' | 'admin';
+            source: 'master' | 'invite';
+            name: string;
+          }>;
+          unanimousApproved: boolean;
+        } => item !== null);
 
-      return Response.json({ code, adminId, name, status: 'active', createdAt });
+      proposals.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      return Response.json({
+        checkedAt: new Date().toISOString(),
+        requiredApprovers: requiredOperators,
+        requiredCount: requiredOperators.length,
+        proposals,
+      });
+    }
+
+    // POST /api/admin/invite/approve (Operator auth required)
+    if (path === '/api/admin/invite/approve' && request.method === 'POST') {
+      const operator = await this.authenticateOperator(request);
+      if (!operator) {
+        return this.unauthorizedResponse();
+      }
+      if (!this.isInviteConsensusEligibleOperator(operator)) {
+        return Response.json({ error: 'forbidden: invite consensus approver only' }, { status: 403 });
+      }
+
+      let body: { proposalId?: string };
+      try {
+        body = (await request.json()) as any;
+      } catch {
+        return Response.json({ error: 'invalid body' }, { status: 400 });
+      }
+      const proposalId = typeof body?.proposalId === 'string' ? body.proposalId.trim() : '';
+      if (!proposalId) {
+        return Response.json({ error: 'proposalId required' }, { status: 400 });
+      }
+      const raw = await this.ctx.storage.get(adminInviteProposalKey(proposalId));
+      const proposal = this.parseAdminInviteProposalRecord(proposalId, raw);
+      if (!proposal) {
+        return Response.json({ error: 'invite proposal not found' }, { status: 404 });
+      }
+      return this.approveAdminInviteProposal(operator, proposal);
+    }
+
+    // POST /api/admin/invite/reject (Operator auth required)
+    if (path === '/api/admin/invite/reject' && request.method === 'POST') {
+      const operator = await this.authenticateOperator(request);
+      if (!operator) {
+        return this.unauthorizedResponse();
+      }
+      if (!this.isInviteConsensusEligibleOperator(operator)) {
+        return Response.json({ error: 'forbidden: invite consensus approver only' }, { status: 403 });
+      }
+
+      let body: { proposalId?: string; reason?: string };
+      try {
+        body = (await request.json()) as any;
+      } catch {
+        return Response.json({ error: 'invalid body' }, { status: 400 });
+      }
+      const proposalId = typeof body?.proposalId === 'string' ? body.proposalId.trim() : '';
+      if (!proposalId) {
+        return Response.json({ error: 'proposalId required' }, { status: 400 });
+      }
+      const reason = typeof body?.reason === 'string' ? body.reason : '';
+      const raw = await this.ctx.storage.get(adminInviteProposalKey(proposalId));
+      const proposal = this.parseAdminInviteProposalRecord(proposalId, raw);
+      if (!proposal) {
+        return Response.json({ error: 'invite proposal not found' }, { status: 404 });
+      }
+      return this.rejectAdminInviteProposal(operator, proposal, reason);
     }
 
     // GET /api/admin/invites (Master Password required)

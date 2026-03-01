@@ -6,6 +6,8 @@ import { AppText, Button, Card } from '../../src/ui/components';
 import { masterTheme } from '../../src/ui/masterTheme';
 import {
     createInviteCode,
+    fetchPendingInviteApprovals,
+    rejectInviteProposal,
     revokeInviteCode,
     renameInviteCode,
     fetchMasterAuditLogs,
@@ -18,6 +20,7 @@ import {
     MasterAuditLog,
     TransferLogEntry,
     fetchInviteCodes,
+    InviteCodePendingApproval,
 } from '../../src/api/adminApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MASTER_AUTH_KEY } from './_layout';
@@ -31,6 +34,10 @@ export default function MasterDashboard() {
     const [invites, setInvites] = useState<InviteCodeRecord[]>([]);
     const [invitesLoading, setInvitesLoading] = useState(false);
     const [inviteActionLoading, setInviteActionLoading] = useState(false);
+    const [pendingInvites, setPendingInvites] = useState<InviteCodePendingApproval[]>([]);
+    const [pendingInvitesLoading, setPendingInvitesLoading] = useState(false);
+    const [pendingRejectReasons, setPendingRejectReasons] = useState<Record<string, string>>({});
+    const [pendingRejectTargetId, setPendingRejectTargetId] = useState<string | null>(null);
     const [newAdminName, setNewAdminName] = useState('');
     const [generatedCode, setGeneratedCode] = useState<string | null>(null);
     const [renameCode, setRenameCode] = useState('');
@@ -65,6 +72,7 @@ export default function MasterDashboard() {
             loadAdminDisclosures();
         } else if (activeTab === 'invites') {
             loadInvites();
+            loadPendingInvites();
         }
     }, [activeTab]);
 
@@ -99,6 +107,25 @@ export default function MasterDashboard() {
             await handleSessionExpired(e, true);
         } finally {
             setInvitesLoading(false);
+        }
+    };
+
+    const loadPendingInvites = async () => {
+        setPendingInvitesLoading(true);
+        try {
+            const password = await AsyncStorage.getItem(MASTER_AUTH_KEY);
+            if (!password) {
+                setPendingInvites([]);
+                return;
+            }
+            const proposals = await fetchPendingInviteApprovals(password);
+            setPendingInvites(proposals);
+        } catch (e) {
+            console.error(e);
+            setPendingInvites([]);
+            await handleSessionExpired(e, true);
+        } finally {
+            setPendingInvitesLoading(false);
         }
     };
 
@@ -254,11 +281,20 @@ export default function MasterDashboard() {
             }
 
             const res = await createInviteCode(password, newAdminName);
-            setGeneratedCode(res.code);
             setNewAdminName('');
-            Alert.alert('Success', `Code created: ${res.code}`);
+            if ('proposalId' in res) {
+                setGeneratedCode(null);
+                Alert.alert(
+                    'Pending Approval',
+                    `Proposal ${res.proposalId}\nApprovals: ${res.approvedCount}/${res.requiredCount}\n運営者全員の承認後にコードが発行されます。`
+                );
+            } else {
+                setGeneratedCode(res.code);
+                Alert.alert('Success', `Code created: ${res.code}`);
+            }
             // Do not block button recovery on list refresh.
             void loadInvites();
+            void loadPendingInvites();
             if (activeTab === 'disclosure') {
                 void loadAdminDisclosures();
             }
@@ -270,6 +306,39 @@ export default function MasterDashboard() {
             Alert.alert('Error', message);
         } finally {
             setInviteActionLoading(false);
+        }
+    };
+
+    const handleRejectPendingInvite = async (proposalId: string) => {
+        const reason = (pendingRejectReasons[proposalId] ?? '').trim();
+        if (!reason) {
+            Alert.alert('Error', 'Please enter rejection reason');
+            return;
+        }
+        setPendingRejectTargetId(proposalId);
+        try {
+            const password = await AsyncStorage.getItem(MASTER_AUTH_KEY);
+            if (!password) {
+                Alert.alert('Session expired', 'Please login again.');
+                router.replace('/master/login');
+                return;
+            }
+            await rejectInviteProposal(password, proposalId, reason);
+            setPendingRejectReasons((prev) => {
+                const next = { ...prev };
+                delete next[proposalId];
+                return next;
+            });
+            Alert.alert('Rejected', `Proposal ${proposalId} was rejected.`);
+            void loadPendingInvites();
+        } catch (e) {
+            if (await handleSessionExpired(e)) {
+                return;
+            }
+            const message = e instanceof Error ? e.message : 'Failed to reject proposal';
+            Alert.alert('Error', message);
+        } finally {
+            setPendingRejectTargetId(null);
         }
     };
 
@@ -580,6 +649,60 @@ export default function MasterDashboard() {
                             </View>
                         )}
 
+                        <Card style={styles.pendingInviteCard}>
+                            <View style={styles.pendingInviteHeader}>
+                                <AppText style={styles.pendingInviteTitle}>Pending Invite Proposals</AppText>
+                                <Button
+                                    title="Refresh"
+                                    onPress={loadPendingInvites}
+                                    variant="secondary"
+                                    dark
+                                    size="medium"
+                                    style={styles.pendingInviteRefreshButton}
+                                />
+                            </View>
+                            {pendingInvitesLoading ? (
+                                <AppText style={styles.emptyText}>Loading proposals...</AppText>
+                            ) : pendingInvites.length === 0 ? (
+                                <AppText style={styles.emptyText}>No pending proposals.</AppText>
+                            ) : (
+                                pendingInvites.map((proposal) => {
+                                    const reason = pendingRejectReasons[proposal.proposalId] ?? '';
+                                    const isRejecting = pendingRejectTargetId === proposal.proposalId;
+                                    return (
+                                        <View key={proposal.proposalId} style={styles.pendingInviteItem}>
+                                            <AppText style={styles.pendingInviteItemTitle}>{proposal.name}</AppText>
+                                            <AppText style={styles.pendingInviteMeta}>proposalId: {proposal.proposalId}</AppText>
+                                            <AppText style={styles.pendingInviteMeta}>Approvals: {proposal.approvedCount}/{proposal.requiredCount}</AppText>
+                                            <TextInput
+                                                style={styles.pendingRejectInput}
+                                                placeholder="却下理由を入力してください"
+                                                placeholderTextColor={masterTheme.colors.textSecondary}
+                                                value={reason}
+                                                onChangeText={(text) => {
+                                                    setPendingRejectReasons((prev) => ({
+                                                        ...prev,
+                                                        [proposal.proposalId]: text,
+                                                    }));
+                                                }}
+                                                editable={!isRejecting}
+                                                multiline
+                                            />
+                                            <Button
+                                                title={isRejecting ? 'Rejecting...' : 'Reject'}
+                                                onPress={() => handleRejectPendingInvite(proposal.proposalId)}
+                                                variant="secondary"
+                                                dark
+                                                size="medium"
+                                                disabled={isRejecting || !reason.trim()}
+                                                style={styles.pendingRejectButton}
+                                            />
+                                        </View>
+                                    );
+                                })
+                            )}
+                        </Card>
+
                         {invitesLoading && (
                             <AppText style={styles.emptyText}>Loading codes...</AppText>
                         )}
@@ -797,6 +920,63 @@ const styles = StyleSheet.create({
     },
     inviteToolsPanel: {
         marginBottom: masterTheme.spacing.md,
+    },
+    pendingInviteCard: {
+        backgroundColor: '#111',
+        borderColor: masterTheme.colors.border,
+        marginBottom: masterTheme.spacing.md,
+    },
+    pendingInviteHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: masterTheme.spacing.md,
+    },
+    pendingInviteTitle: {
+        color: masterTheme.colors.text,
+        fontSize: 16,
+        fontWeight: '700',
+        flex: 1,
+        marginRight: masterTheme.spacing.sm,
+    },
+    pendingInviteRefreshButton: {
+        height: 34,
+        minHeight: 0,
+    },
+    pendingInviteItem: {
+        borderWidth: 1,
+        borderColor: masterTheme.colors.border,
+        borderRadius: masterTheme.radius.sm,
+        padding: masterTheme.spacing.md,
+        marginBottom: masterTheme.spacing.md,
+        backgroundColor: '#0a0a0a',
+    },
+    pendingInviteItemTitle: {
+        color: '#fff',
+        fontSize: 15,
+        fontWeight: '700',
+    },
+    pendingInviteMeta: {
+        color: masterTheme.colors.textSecondary,
+        fontSize: 12,
+        marginTop: 4,
+    },
+    pendingRejectInput: {
+        marginTop: masterTheme.spacing.sm,
+        backgroundColor: '#000',
+        borderWidth: 1,
+        borderColor: masterTheme.colors.border,
+        color: '#fff',
+        borderRadius: masterTheme.radius.sm,
+        padding: masterTheme.spacing.sm,
+        minHeight: 64,
+        textAlignVertical: 'top',
+    },
+    pendingRejectButton: {
+        marginTop: masterTheme.spacing.sm,
+        height: 36,
+        backgroundColor: '#330000',
+        borderColor: '#660000',
     },
     inviteList: {
         flex: 1,

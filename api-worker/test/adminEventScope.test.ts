@@ -47,6 +47,7 @@ describe('GET /v1/school/events scope=mine', () => {
   let state: MockDurableObjectState;
   let store: SchoolStore;
   const masterToken = 'master-secret';
+  let approverTokens: string[];
 
   beforeEach(() => {
     state = new MockDurableObjectState();
@@ -57,6 +58,7 @@ describe('GET /v1/school/events scope=mine', () => {
     };
     // @ts-expect-error mock for DurableObjectState
     store = new SchoolStore(state, env);
+    approverTokens = [masterToken];
   });
 
   async function inviteAdmin(name: string): Promise<string> {
@@ -70,10 +72,35 @@ describe('GET /v1/school/events scope=mine', () => {
         body: JSON.stringify({ name }),
       })
     );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { code?: string };
-    expect(typeof body.code).toBe('string');
-    return body.code as string;
+    const body = (await res.json()) as { code?: string; proposalId?: string };
+    if (res.status === 200) {
+      expect(typeof body.code).toBe('string');
+      approverTokens.push(body.code as string);
+      return body.code as string;
+    }
+    expect(res.status).toBe(202);
+    expect(typeof body.proposalId).toBe('string');
+    const proposalId = body.proposalId as string;
+    for (const token of approverTokens) {
+      const approveRes = await store.fetch(
+        new Request('https://example.com/api/admin/invite/approve', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ proposalId }),
+        })
+      );
+      const approveBody = (await approveRes.json()) as { code?: string };
+      if (approveRes.status === 200) {
+        expect(typeof approveBody.code).toBe('string');
+        approverTokens.push(approveBody.code as string);
+        return approveBody.code as string;
+      }
+      expect(approveRes.status).toBe(202);
+    }
+    throw new Error(`invite approval did not reach unanimity for proposal ${proposalId}`);
   }
 
   async function createEvent(token: string, title: string): Promise<string> {

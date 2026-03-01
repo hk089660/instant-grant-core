@@ -743,6 +743,9 @@ describe('costOfForgery integration and admin issuance limits', () => {
       })
     );
     expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as { code?: string };
+    expect(typeof firstBody.code).toBe('string');
+    const adminOneCode = firstBody.code as string;
 
     const second = await store.fetch(
       new Request('https://example.com/api/admin/invite', {
@@ -751,8 +754,23 @@ describe('costOfForgery integration and admin issuance limits', () => {
         body: JSON.stringify({ name: 'Admin Two' }),
       })
     );
-    expect(second.status).toBe(429);
-    const body = (await second.json()) as { code?: string };
+    expect(second.status).toBe(202);
+    const secondBody = (await second.json()) as { proposalId?: string };
+    expect(typeof secondBody.proposalId).toBe('string');
+    const proposalId = secondBody.proposalId as string;
+
+    const approve = await store.fetch(
+      new Request('https://example.com/api/admin/invite/approve', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${adminOneCode}`,
+        },
+        body: JSON.stringify({ proposalId }),
+      })
+    );
+    expect(approve.status).toBe(429);
+    const body = (await approve.json()) as { code?: string };
     expect(body.code).toBe('admin_invite_issue_limit_exceeded');
   });
 });

@@ -3,7 +3,7 @@ import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AppText } from './AppText';
 import { adminTheme } from '../adminTheme';
-import { loginAdmin } from '../../api/adminApi';
+import { fetchAdminReportObligations, loginAdmin, type AdminReportObligationItem } from '../../api/adminApi';
 import { clearAdminSession, loadAdminSession, saveAdminSession } from '../../lib/adminAuth';
 import { clearAdminRuntimeArtifacts } from '../../lib/adminRuntimeScope';
 import { useAuth } from '../../contexts/AuthContext';
@@ -18,12 +18,28 @@ export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
   const router = useRouter();
   const { refresh } = useAuth();
   const [adminName, setAdminName] = useState('');
+  const [operatorId, setOperatorId] = useState('');
+  const [reportObligations, setReportObligations] = useState<AdminReportObligationItem[]>([]);
+  const [reportCheckedAt, setReportCheckedAt] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     loadAdminSession()
       .then(async (session) => {
         if (!session || cancelled) return;
+        const deriveFallbackOperatorId = (seed: string): string => {
+          let hash = 2166136261;
+          for (let i = 0; i < seed.length; i += 1) {
+            hash ^= seed.charCodeAt(i);
+            hash = Math.imul(hash, 16777619);
+          }
+          return (hash >>> 0).toString(16).padStart(8, '0');
+        };
+        const scopedOperatorId =
+          (typeof session.adminId === 'string' && session.adminId.trim())
+            ? session.adminId.trim()
+            : `operator-${deriveFallbackOperatorId(`${session.role}:${session.token}`)}`;
+        setOperatorId(scopedOperatorId);
         if (session.adminName) {
           setAdminName(session.adminName);
           return;
@@ -45,12 +61,46 @@ export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
       .catch(() => {
         if (!cancelled) {
           setAdminName('');
+          setOperatorId('');
         }
       });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const loadReportObligations = async () => {
+      try {
+        const data = await fetchAdminReportObligations({ status: 'required', limit: 5 });
+        if (cancelled) return;
+        setReportObligations(data.items ?? []);
+        setReportCheckedAt(data.checkedAt ?? new Date().toISOString());
+      } catch {
+        if (!cancelled) {
+          setReportObligations([]);
+        }
+      }
+    };
+
+    void loadReportObligations();
+    timer = setInterval(() => {
+      void loadReportObligations();
+    }, 30_000);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, []);
+
+  const shortenActorId = (actorId: string): string => {
+    if (actorId.length <= 22) return actorId;
+    return `${actorId.slice(0, 10)}...${actorId.slice(-8)}`;
+  };
 
   const handleLogout = async () => {
     const currentSession = await loadAdminSession();
@@ -76,6 +126,11 @@ export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
             {adminName ? (
               <AppText variant="caption" style={styles.adminName}>
                 管理者: {adminName}
+              </AppText>
+            ) : null}
+            {operatorId ? (
+              <AppText variant="caption" style={styles.adminName}>
+                運営者ID: {operatorId}
               </AppText>
             ) : null}
           </View>
@@ -110,6 +165,21 @@ export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
           </View>
         </View>
       </View>
+      {reportObligations.length > 0 ? (
+        <View style={styles.reportBanner}>
+          <AppText variant="small" style={styles.reportBannerTitle}>
+            報告義務ログ: 未対応 {reportObligations.length} 件
+          </AppText>
+          {reportObligations.slice(0, 3).map((item) => (
+            <AppText key={item.reportId} variant="small" style={styles.reportBannerText}>
+              [{item.type}] target={shortenActorId(item.targetActorId)} reason={item.reason}
+            </AppText>
+          ))}
+          <AppText variant="small" style={styles.reportBannerMeta}>
+            checkedAt: {reportCheckedAt ?? '-'}
+          </AppText>
+        </View>
+      ) : null}
       <View style={styles.content}>{children}</View>
     </View>
   );
@@ -167,5 +237,29 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: adminTheme.spacing.md,
     paddingVertical: adminTheme.spacing.md,
+  },
+  reportBanner: {
+    marginTop: adminTheme.spacing.xs,
+    marginHorizontal: adminTheme.spacing.md,
+    marginBottom: adminTheme.spacing.sm,
+    borderWidth: 1,
+    borderColor: '#FF4D4F',
+    backgroundColor: 'rgba(255, 77, 79, 0.12)',
+    borderRadius: adminTheme.radius.sm,
+    padding: adminTheme.spacing.sm,
+  },
+  reportBannerTitle: {
+    color: '#FF6B6B',
+    fontWeight: '700',
+  },
+  reportBannerText: {
+    color: '#FFD5D5',
+    marginTop: 2,
+    fontFamily: 'monospace',
+  },
+  reportBannerMeta: {
+    color: '#FFCFCF',
+    marginTop: adminTheme.spacing.xs,
+    fontSize: 11,
   },
 });

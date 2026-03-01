@@ -290,6 +290,35 @@ flowchart TB
   W -. Optional per event .-> SP
 ```
 
+### Role Composition (User / Admin / Operator)
+
+```mermaid
+flowchart LR
+  subgraph Actors["Actors"]
+    USER["User"]
+    ADMIN["Admin"]
+    OP["Operator (master)"]
+  end
+
+  subgraph Surfaces["UI Surface"]
+    UUI["User UI\n/u/*, /r/school/:eventId"]
+    AUI["Admin UI\n/admin/*"]
+    MUI["Operator UI\n/master/*"]
+  end
+
+  subgraph Core["Core API / Governance"]
+    API["Cloudflare Worker + Durable Object\nSchoolStore"]
+    CONS["Operator code issuance\nunanimous approvals (approve/reject)"]
+    AUD["Audit logs / disclosure / search"]
+  end
+
+  USER --> UUI --> API
+  ADMIN --> AUI --> API
+  OP --> MUI --> API
+  MUI --> CONS --> API
+  API --> AUD
+```
+
 ```text
 L3: UI (Implemented)
   - User screens: /u/* and /r/school/:eventId (RN/Web)

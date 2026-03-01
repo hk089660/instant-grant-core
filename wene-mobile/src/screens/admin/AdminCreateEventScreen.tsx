@@ -10,7 +10,7 @@ import { useRouter } from 'expo-router';
 import * as QRCode from 'qrcode';
 import { AppText, Button, Card } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
-import { createAdminEvent, fetchRuntimeStatus, type RuntimeStatusResponse } from '../../api/adminApi';
+import { createAdminEvent, fetchRuntimeStatus, type RuntimeStatusResponse, type AdminSecurityWarning, AdminSecurityWarningError } from '../../api/adminApi';
 import type { SchoolEvent } from '../../types/school';
 import { useRecipientStore } from '../../store/recipientStore';
 import { usePhantomStore } from '../../store/phantomStore';
@@ -65,6 +65,7 @@ export const AdminCreateEventScreen: React.FC = () => {
     const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatusResponse | null>(null);
     const [runtimeStatusLoading, setRuntimeStatusLoading] = useState(false);
     const [runtimeStatusError, setRuntimeStatusError] = useState<string | null>(null);
+    const [securityWarning, setSecurityWarning] = useState<AdminSecurityWarning | null>(null);
 
     // 作成結果
     const [createdEvent, setCreatedEvent] = useState<SchoolEvent | null>(null);
@@ -137,6 +138,8 @@ export const AdminCreateEventScreen: React.FC = () => {
             return;
         }
         if (!canSubmit) return;
+        setSecurityWarning(null);
+        setError(null);
         setStep('preview');
     }, [canSubmit, runtimeReady]);
 
@@ -295,10 +298,19 @@ export const AdminCreateEventScreen: React.FC = () => {
                 ticketTokenAmount,
                 claimIntervalDays,
                 maxClaimsPerInterval,
+            }, {
+                acknowledgeSecurityWarning: securityWarning !== null,
             });
+            setSecurityWarning(null);
             setCreatedEvent(event);
             setStep('done');
         } catch (e: unknown) {
+            if (e instanceof AdminSecurityWarningError) {
+                setSecurityWarning(e.warning);
+                setError('赤い警告を確認してください。このまま続行すると管理者アカウントが凍結され、運営者の手動解除が必要になります。');
+                return;
+            }
+            setSecurityWarning(null);
             setError(formatAdminCreateError(e));
         } finally {
             setLoading(false);
@@ -319,6 +331,7 @@ export const AdminCreateEventScreen: React.FC = () => {
         maxClaimsPerInterval,
         maxClaimsValid,
         runtimeReady,
+        securityWarning,
     ]);
 
     // QR生成
@@ -354,6 +367,7 @@ export const AdminCreateEventScreen: React.FC = () => {
         setCreatedEvent(null);
         setQrDataUrl(null);
         setError(null);
+        setSecurityWarning(null);
         setSetupTxSignatures([]);
     };
 
@@ -572,6 +586,28 @@ export const AdminCreateEventScreen: React.FC = () => {
                             </AppText>
                         </View>
 
+                        {securityWarning && (
+                            <View style={styles.securityWarningCard}>
+                                <AppText variant="body" style={styles.securityWarningTitle}>
+                                    {securityWarning.title}
+                                </AppText>
+                                <AppText variant="small" style={styles.securityWarningText}>
+                                    {securityWarning.message}
+                                </AppText>
+                                <AppText variant="small" style={styles.securityWarningText}>
+                                    検知時刻: {securityWarning.detectedAt}
+                                </AppText>
+                                <AppText variant="small" style={styles.securityWarningText}>
+                                    検知シグナル: {securityWarning.signals.length > 0 ? securityWarning.signals.join(' / ') : '-'}
+                                </AppText>
+                                {securityWarning.freezeOnProceed && (
+                                    <AppText variant="small" style={styles.securityWarningText}>
+                                        続行時: 管理者アカウントをリアルタイム凍結
+                                    </AppText>
+                                )}
+                            </View>
+                        )}
+
                         {error ? (
                             <AppText variant="caption" style={styles.errorText}>{error}</AppText>
                         ) : null}
@@ -581,11 +617,15 @@ export const AdminCreateEventScreen: React.FC = () => {
                                 title="← 戻る"
                                 variant="secondary"
                                 dark
-                                onPress={() => { setStep('form'); setError(null); }}
+                                onPress={() => {
+                                    setStep('form');
+                                    setError(null);
+                                    setSecurityWarning(null);
+                                }}
                                 style={styles.halfButton}
                             />
                             <Button
-                                title={loading ? '発行中…' : '発行する'}
+                                title={loading ? '発行中…' : securityWarning ? '警告を承知して進める（凍結）' : '発行する'}
                                 onPress={handleCreate}
                                 loading={loading}
                                 disabled={loading}
@@ -806,12 +846,28 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     errorText: {
-        color: adminTheme.colors.text,
+        color: '#FF5C5C',
         marginTop: adminTheme.spacing.sm,
     },
     noticeText: {
-        color: adminTheme.colors.textSecondary,
+        color: '#FFD166',
         marginTop: adminTheme.spacing.sm,
+    },
+    securityWarningCard: {
+        marginTop: adminTheme.spacing.md,
+        borderWidth: 1,
+        borderColor: '#FF4D4F',
+        backgroundColor: 'rgba(255, 77, 79, 0.14)',
+        borderRadius: adminTheme.radius.sm,
+        padding: adminTheme.spacing.md,
+    },
+    securityWarningTitle: {
+        color: '#FF6B6B',
+        fontWeight: '700',
+    },
+    securityWarningText: {
+        color: '#FFD5D5',
+        marginTop: adminTheme.spacing.xs,
     },
     previewRow: {
         paddingVertical: adminTheme.spacing.sm,

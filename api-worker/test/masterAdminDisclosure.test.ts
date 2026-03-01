@@ -367,4 +367,173 @@ describe('master admin disclosure APIs', () => {
     expect(revoked?.status).toBe('revoked');
     expect(typeof revoked?.revokedAt).toBe('string');
   });
+
+  it('requires unanimous operator approvals to issue a new invite', async () => {
+    const firstInviteRes = await store.fetch(
+      new Request('https://example.com/api/admin/invite', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${masterToken}`,
+        },
+        body: JSON.stringify({ name: 'Admin First' }),
+      })
+    );
+    expect(firstInviteRes.status).toBe(200);
+    const firstInviteBody = (await firstInviteRes.json()) as { code?: string; adminId?: string };
+    expect(typeof firstInviteBody.code).toBe('string');
+    expect(typeof firstInviteBody.adminId).toBe('string');
+    const firstAdminCode = firstInviteBody.code as string;
+    const firstAdminId = firstInviteBody.adminId as string;
+
+    const secondInviteRes = await store.fetch(
+      new Request('https://example.com/api/admin/invite', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${masterToken}`,
+        },
+        body: JSON.stringify({ name: 'Admin Second' }),
+      })
+    );
+    expect(secondInviteRes.status).toBe(202);
+    const secondInviteBody = (await secondInviteRes.json()) as {
+      status?: string;
+      proposalId?: string;
+      approvedCount?: number;
+      requiredCount?: number;
+      missingApprovers?: Array<{ actorId?: string }>;
+    };
+    expect(secondInviteBody.status).toBe('pending_approval');
+    expect(secondInviteBody.approvedCount).toBe(1);
+    expect(secondInviteBody.requiredCount).toBe(2);
+    expect(secondInviteBody.missingApprovers?.some((item) => item.actorId === `admin:${firstAdminId}`)).toBe(true);
+    const proposalId = secondInviteBody.proposalId as string;
+    expect(typeof proposalId).toBe('string');
+
+    const pendingBeforeApproveRes = await store.fetch(
+      new Request('https://example.com/api/admin/invite/pending', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${firstAdminCode}`,
+        },
+      })
+    );
+    expect(pendingBeforeApproveRes.status).toBe(200);
+    const pendingBeforeApproveBody = (await pendingBeforeApproveRes.json()) as {
+      proposals?: Array<{ proposalId: string }>;
+    };
+    expect(pendingBeforeApproveBody.proposals?.some((item) => item.proposalId === proposalId)).toBe(true);
+
+    const approveRes = await store.fetch(
+      new Request('https://example.com/api/admin/invite/approve', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${firstAdminCode}`,
+        },
+        body: JSON.stringify({ proposalId }),
+      })
+    );
+    expect(approveRes.status).toBe(200);
+    const approveBody = (await approveRes.json()) as { code?: string; adminId?: string };
+    expect(typeof approveBody.code).toBe('string');
+    expect(typeof approveBody.adminId).toBe('string');
+
+    const pendingAfterApproveRes = await store.fetch(
+      new Request('https://example.com/api/admin/invite/pending', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${firstAdminCode}`,
+        },
+      })
+    );
+    expect(pendingAfterApproveRes.status).toBe(200);
+    const pendingAfterApproveBody = (await pendingAfterApproveRes.json()) as {
+      proposals?: Array<{ proposalId: string }>;
+    };
+    expect(pendingAfterApproveBody.proposals?.some((item) => item.proposalId === proposalId)).toBe(false);
+  });
+
+  it('allows rejecting pending invite proposal with reason', async () => {
+    const firstInviteRes = await store.fetch(
+      new Request('https://example.com/api/admin/invite', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${masterToken}`,
+        },
+        body: JSON.stringify({ name: 'Admin Rejector' }),
+      })
+    );
+    expect(firstInviteRes.status).toBe(200);
+    const firstInviteBody = (await firstInviteRes.json()) as { code?: string };
+    const firstAdminCode = firstInviteBody.code as string;
+
+    const secondInviteRes = await store.fetch(
+      new Request('https://example.com/api/admin/invite', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${masterToken}`,
+        },
+        body: JSON.stringify({ name: 'Rejected Candidate' }),
+      })
+    );
+    expect(secondInviteRes.status).toBe(202);
+    const secondInviteBody = (await secondInviteRes.json()) as { proposalId?: string };
+    const proposalId = secondInviteBody.proposalId as string;
+    expect(typeof proposalId).toBe('string');
+
+    const rejectValidationRes = await store.fetch(
+      new Request('https://example.com/api/admin/invite/reject', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${firstAdminCode}`,
+        },
+        body: JSON.stringify({ proposalId, reason: '' }),
+      })
+    );
+    expect(rejectValidationRes.status).toBe(400);
+
+    const rejectRes = await store.fetch(
+      new Request('https://example.com/api/admin/invite/reject', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${firstAdminCode}`,
+        },
+        body: JSON.stringify({ proposalId, reason: 'Duplicate request' }),
+      })
+    );
+    expect(rejectRes.status).toBe(200);
+    const rejectBody = (await rejectRes.json()) as { status?: string; reason?: string | null };
+    expect(rejectBody.status).toBe('cancelled');
+    expect(rejectBody.reason).toBe('Duplicate request');
+
+    const pendingRes = await store.fetch(
+      new Request('https://example.com/api/admin/invite/pending', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${masterToken}`,
+        },
+      })
+    );
+    expect(pendingRes.status).toBe(200);
+    const pendingBody = (await pendingRes.json()) as { proposals?: Array<{ proposalId: string }> };
+    expect(pendingBody.proposals?.some((item) => item.proposalId === proposalId)).toBe(false);
+
+    const approveAfterRejectRes = await store.fetch(
+      new Request('https://example.com/api/admin/invite/approve', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${firstAdminCode}`,
+        },
+        body: JSON.stringify({ proposalId }),
+      })
+    );
+    expect(approveAfterRejectRes.status).toBe(409);
+  });
 });

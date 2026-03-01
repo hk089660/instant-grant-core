@@ -63,6 +63,194 @@ describe('school API', () => {
     expect(res.body.error).toContain('ticketTokenAmount');
   });
 
+  it('POST /v1/school/events returns red security warning when suspicious issuance is detected', async () => {
+    const res = await request(app)
+      .post('/v1/school/events')
+      .set('Authorization', 'Bearer admin-warning-test')
+      .send({
+        title: 'bot mass issue campaign',
+        datetime: '2026/03/01 10:00-11:00',
+        host: 'Automation Team',
+      });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('security_warning');
+    expect(res.body.warning?.alertColor).toBe('red');
+    expect(res.body.warning?.freezeOnProceed).toBe(true);
+    expect(Array.isArray(res.body.warning?.signals)).toBe(true);
+    expect(res.body.warning?.signals.length).toBeGreaterThan(0);
+  });
+
+  it('POST /v1/school/events keeps account frozen until operator manually unlocks it', async () => {
+    const actorToken = 'Bearer admin-freeze-test';
+    const suspiciousPayload = {
+      title: 'bot scripted event',
+      datetime: '2026/03/02 10:00-11:00',
+      host: 'script-operator',
+    };
+
+    const warningRes = await request(app)
+      .post('/v1/school/events')
+      .set('Authorization', actorToken)
+      .send(suspiciousPayload);
+    expect(warningRes.status).toBe(409);
+    expect(warningRes.body.code).toBe('security_warning');
+
+    const freezeRes = await request(app)
+      .post('/v1/school/events')
+      .set('Authorization', actorToken)
+      .set('X-Admin-Security-Override', 'continue')
+      .send(suspiciousPayload);
+    expect(freezeRes.status).toBe(423);
+    expect(freezeRes.body.code).toBe('account_frozen');
+    expect(freezeRes.body.alertColor).toBe('red');
+    expect(freezeRes.body.unlockRequired).toBe(true);
+    expect(typeof freezeRes.body.frozenAt).toBe('string');
+
+    const blockedRes = await request(app)
+      .post('/v1/school/events')
+      .set('Authorization', actorToken)
+      .send({
+        title: 'normal event after freeze',
+        datetime: '2026/03/03 10:00-11:00',
+        host: 'Student Council',
+      });
+    expect(blockedRes.status).toBe(423);
+    expect(blockedRes.body.code).toBe('account_frozen');
+
+    const freezeStatusRes = await request(app)
+      .get('/v1/school/admin/security/freeze-status')
+      .set('Authorization', 'Bearer operator-admin-01')
+      .set('X-Admin-Role', 'admin')
+      .set('X-Admin-Id', 'operator-admin-01');
+    expect(freezeStatusRes.status).toBe(200);
+    expect(Array.isArray(freezeStatusRes.body.items)).toBe(true);
+    expect(freezeStatusRes.body.items.length).toBeGreaterThanOrEqual(1);
+    const frozenActor = freezeStatusRes.body.items[0]?.actorId as string | undefined;
+    expect(typeof frozenActor).toBe('string');
+
+    const unlockRes = await request(app)
+      .post('/v1/school/admin/security/unlock')
+      .set('Authorization', 'Bearer operator-admin-01')
+      .set('X-Admin-Role', 'admin')
+      .set('X-Admin-Id', 'operator-admin-01')
+      .send({ targetActorId: frozenActor });
+    expect(unlockRes.status).toBe(200);
+    expect(unlockRes.body.success).toBe(true);
+
+    const afterUnlockRes = await request(app)
+      .post('/v1/school/events')
+      .set('Authorization', actorToken)
+      .send({
+        title: 'event after manual unlock',
+        datetime: '2026/03/03 10:00-11:00',
+        host: 'Student Council',
+      });
+    expect(afterUnlockRes.status).toBe(201);
+
+    const otherAdminRes = await request(app)
+      .post('/v1/school/events')
+      .set('Authorization', 'Bearer admin-not-frozen')
+      .send({
+        title: 'Normal Event',
+        datetime: '2026/03/03 12:00-13:00',
+        host: 'Student Council',
+      });
+    expect(otherAdminRes.status).toBe(201);
+  });
+
+  it('operators can read security audit and execution logs', async () => {
+    const actorToken = 'Bearer admin-log-test';
+    const suspiciousPayload = {
+      title: 'bot log test event',
+      datetime: '2026/03/05 10:00-11:00',
+      host: 'script-team',
+    };
+
+    await request(app)
+      .post('/v1/school/events')
+      .set('Authorization', actorToken)
+      .send(suspiciousPayload);
+    await request(app)
+      .post('/v1/school/events')
+      .set('Authorization', actorToken)
+      .set('X-Admin-Security-Override', 'continue')
+      .send(suspiciousPayload);
+
+    const logsRes = await request(app)
+      .get('/v1/school/admin/security/logs?limit=20')
+      .set('Authorization', 'Bearer operator-admin-02')
+      .set('X-Admin-Role', 'admin')
+      .set('X-Admin-Id', 'operator-admin-02');
+    expect(logsRes.status).toBe(200);
+    expect(Array.isArray(logsRes.body.items)).toBe(true);
+    expect(logsRes.body.items.length).toBeGreaterThan(0);
+    expect(logsRes.body.roleView).toBe('operator');
+
+    const actions = logsRes.body.items.map((item: { action?: string }) => item.action);
+    expect(actions).toContain('security_warning_detected');
+    expect(actions).toContain('freeze_enforced');
+  });
+
+  it('revoke access creates required report obligation and blocks until restored', async () => {
+    const targetHeaders = {
+      Authorization: 'Bearer target-admin-token',
+      'X-Admin-Id': 'target-admin-001',
+    };
+    const operatorHeaders = {
+      Authorization: 'Bearer operator-admin-03',
+      'X-Admin-Role': 'admin',
+      'X-Admin-Id': 'operator-admin-03',
+    };
+
+    const revokeRes = await request(app)
+      .post('/v1/school/admin/security/revoke-access')
+      .set(operatorHeaders)
+      .send({
+        targetActorId: 'admin:target-admin-001',
+        reason: 'policy_violation',
+      });
+    expect(revokeRes.status).toBe(200);
+    expect(revokeRes.body.success).toBe(true);
+    expect(typeof revokeRes.body.reportId).toBe('string');
+
+    const blockedRes = await request(app)
+      .post('/v1/school/events')
+      .set(targetHeaders)
+      .send({
+        title: 'revoked access should block',
+        datetime: '2026/03/10 10:00-11:00',
+        host: 'Student Council',
+      });
+    expect(blockedRes.status).toBe(403);
+    expect(blockedRes.body.code).toBe('access_revoked');
+
+    const obligationsRes = await request(app)
+      .get('/v1/school/admin/security/report-obligations?status=required')
+      .set(operatorHeaders);
+    expect(obligationsRes.status).toBe(200);
+    expect(Array.isArray(obligationsRes.body.items)).toBe(true);
+    expect(obligationsRes.body.items.some((item: { type?: string; targetActorId?: string }) => (
+      item.type === 'revoke_access' && item.targetActorId === 'admin:target-admin-001'
+    ))).toBe(true);
+
+    const restoreRes = await request(app)
+      .post('/v1/school/admin/security/restore-access')
+      .set(operatorHeaders)
+      .send({ targetActorId: 'admin:target-admin-001' });
+    expect(restoreRes.status).toBe(200);
+    expect(restoreRes.body.success).toBe(true);
+
+    const afterRestoreRes = await request(app)
+      .post('/v1/school/events')
+      .set(targetHeaders)
+      .send({
+        title: 'restored access event',
+        datetime: '2026/03/10 12:00-13:00',
+        host: 'Student Council',
+      });
+    expect(afterRestoreRes.status).toBe(201);
+  });
+
   it('POST /v1/school/claims evt-001 first time returns success', async () => {
     const res = await request(app)
       .post('/v1/school/claims')
