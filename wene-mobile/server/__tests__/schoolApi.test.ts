@@ -365,6 +365,34 @@ describe('school API', () => {
     expect(revokedOperatorAccessRes.body.code).toBe('operator_revoked');
   });
 
+  it('admin role cannot revoke operator or user accounts', async () => {
+    const adminHeaders = {
+      Authorization: 'Bearer operator-admin-07',
+      'X-Admin-Role': 'admin',
+      'X-Admin-Id': 'operator-admin-07',
+    };
+
+    const revokeOperatorRes = await request(app)
+      .post('/v1/school/admin/security/operator/revoke')
+      .set(adminHeaders)
+      .send({
+        targetOperatorActorId: 'admin:operator-master-99',
+        reason: 'policy_violation',
+      });
+    expect(revokeOperatorRes.status).toBe(403);
+    expect(revokeOperatorRes.body.code).toBe('operator_consensus_required');
+
+    const deleteUserRes = await request(app)
+      .post('/v1/school/admin/security/users/delete')
+      .set(adminHeaders)
+      .send({
+        userId: 'target-user-01',
+        reason: 'policy_violation',
+      });
+    expect(deleteUserRes.status).toBe(403);
+    expect(deleteUserRes.body.code).toBe('operator_consensus_required');
+  });
+
   it('operator community can freeze/delete users only with unanimous approvals', async () => {
     await request(app)
       .post('/api/users/register')

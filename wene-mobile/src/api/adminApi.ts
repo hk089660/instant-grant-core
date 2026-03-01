@@ -21,6 +21,16 @@ function getBaseUrl(): string {
   throw new Error('API base URL is required (set EXPO_PUBLIC_SCHOOL_API_BASE_URL or EXPO_PUBLIC_API_BASE_URL)');
 }
 
+function toHeaderByteString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  for (let i = 0; i < trimmed.length; i += 1) {
+    if (trimmed.charCodeAt(i) > 0xff) return null;
+  }
+  return trimmed;
+}
+
 async function getAdminAuthHeaders(): Promise<Record<string, string>> {
   const session = await loadAdminSession();
   if (!session?.token) {
@@ -43,10 +53,24 @@ async function getAdminAuthHeaders(): Promise<Record<string, string>> {
     'X-Admin-Role': session.role,
     'X-Admin-Id': scopedOperatorId,
   };
-  if (session.adminName) {
-    headers['X-Admin-Name'] = session.adminName;
+  const adminNameHeader = toHeaderByteString(session.adminName);
+  if (adminNameHeader) {
+    headers['X-Admin-Name'] = adminNameHeader;
   }
   return headers;
+}
+
+async function ensureMasterRole(action: string): Promise<void> {
+  const session = await loadAdminSession();
+  if (!session?.token) {
+    throw new HttpError(401, { message: '管理者ログインが必要です' });
+  }
+  if (session.role !== 'master') {
+    throw new HttpError(403, {
+      code: 'operator_consensus_required',
+      message: `この操作（${action}）は運営者コミュニティ(master)のみ実行できます`,
+    });
+  }
 }
 
 async function withAdminAuth<T>(request: () => Promise<T>): Promise<T> {
@@ -1091,24 +1115,82 @@ export interface AdminSecurityLogsResponse {
   items: AdminSecurityLogEntry[];
 }
 
-export interface UnlockFrozenAdminResponse {
-  success: true;
-  targetActorId: string;
-  unlockedAt: string;
+export type AdminGovernanceActionType =
+  | 'unlock_admin'
+  | 'revoke_admin_access'
+  | 'restore_admin_access'
+  | 'revoke_operator'
+  | 'restore_operator'
+  | 'freeze_user'
+  | 'unfreeze_user'
+  | 'delete_user'
+  | 'restore_user';
+
+export interface AdminGovernanceProposalApproval {
+  actorId: string;
+  approvedAt: string;
 }
 
-export interface RevokeAdminAccessResponse {
-  success: true;
-  targetActorId: string;
-  revokedAt: string;
+export interface AdminGovernanceProposalItem {
+  proposalId: string;
+  actionType: AdminGovernanceActionType;
+  targetId: string;
   reason: string;
-  reportId: string;
+  status: 'pending' | 'executed';
+  createdAt: string;
+  requestedByActorId: string;
+  approvedCount: number;
+  requiredCount: number;
+  requiredApproverIds: string[];
+  approvals: AdminGovernanceProposalApproval[];
+  missingApprovers: string[];
+  unanimousApproved: boolean;
+  executedAt: string | null;
+  executedByActorId: string | null;
 }
 
-export interface RestoreAdminAccessResponse {
+export interface AdminGovernanceProposalsResponse {
+  checkedAt: string;
+  viewer: AdminSecurityViewer;
+  total: number;
+  limit: number;
+  items: AdminGovernanceProposalItem[];
+}
+
+export interface AdminGovernanceActionPendingResponse {
+  success: false;
+  status: 'pending_consensus';
+  consensus: AdminGovernanceProposalItem;
+}
+
+export interface AdminGovernanceActionSuccessResponse {
   success: true;
-  targetActorId: string;
-  restoredAt: string;
+  alreadyExecuted?: boolean;
+  consensus: AdminGovernanceProposalItem;
+  [key: string]: unknown;
+}
+
+export type AdminGovernanceActionResponse =
+  | AdminGovernanceActionPendingResponse
+  | AdminGovernanceActionSuccessResponse;
+
+export interface AdminSecurityUserItem {
+  userId: string;
+  frozenAt: string | null;
+  frozenReason: string | null;
+  frozenByActorId: string | null;
+  frozenReportId: string | null;
+  deletedAt: string | null;
+  deletedReason: string | null;
+  deletedByActorId: string | null;
+  deletedReportId: string | null;
+}
+
+export interface AdminSecurityUsersResponse {
+  checkedAt: string;
+  viewer: AdminSecurityViewer;
+  total: number;
+  items: AdminSecurityUserItem[];
 }
 
 export async function fetchAdminSecurityFreezeStatus(): Promise<AdminSecurityFreezeStatusResponse> {
@@ -1157,49 +1239,260 @@ export async function fetchAdminReportObligations(params?: {
   });
 }
 
-export async function unlockFrozenAdmin(targetActorId: string): Promise<UnlockFrozenAdminResponse> {
+export async function fetchAdminGovernanceProposals(params?: {
+  limit?: number;
+}): Promise<AdminGovernanceProposalsResponse> {
+  const base = getBaseUrl();
+  const query = new URLSearchParams();
+  if (typeof params?.limit === 'number' && Number.isFinite(params.limit)) {
+    query.set('limit', String(Math.max(1, Math.floor(params.limit))));
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return withAdminAuth(async () => {
+    const headers = await getAdminAuthHeaders();
+    return httpGet<AdminGovernanceProposalsResponse>(`${base}/v1/school/admin/security/governance/proposals${suffix}`, { headers });
+  });
+}
+
+export async function fetchAdminSecurityUsers(params?: {
+  userId?: string;
+}): Promise<AdminSecurityUsersResponse> {
+  const base = getBaseUrl();
+  const query = new URLSearchParams();
+  const userId = typeof params?.userId === 'string' ? params.userId.trim().toLowerCase() : '';
+  if (userId) {
+    query.set('userId', userId);
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return withAdminAuth(async () => {
+    const headers = await getAdminAuthHeaders();
+    return httpGet<AdminSecurityUsersResponse>(`${base}/v1/school/admin/security/users${suffix}`, { headers });
+  });
+}
+
+export async function unlockFrozenAdmin(
+  targetActorId: string,
+  proposalId?: string
+): Promise<AdminGovernanceActionResponse> {
   const base = getBaseUrl();
   const trimmed = targetActorId.trim();
   if (!trimmed) {
     throw new Error('targetActorId is required');
   }
+  const trimmedProposalId = typeof proposalId === 'string' ? proposalId.trim() : '';
   return withAdminAuth(async () => {
+    await ensureMasterRole('unlock_frozen_admin');
     const headers = await getAdminAuthHeaders();
-    return httpPost<UnlockFrozenAdminResponse>(
+    return httpPost<AdminGovernanceActionResponse>(
       `${base}/v1/school/admin/security/unlock`,
-      { targetActorId: trimmed },
+      {
+        targetActorId: trimmed,
+        ...(trimmedProposalId ? { proposalId: trimmedProposalId } : {}),
+      },
       { headers }
     );
   });
 }
 
-export async function revokeAdminAccess(targetActorId: string, reason?: string): Promise<RevokeAdminAccessResponse> {
+export async function revokeAdminAccess(
+  targetActorId: string,
+  reason?: string,
+  proposalId?: string
+): Promise<AdminGovernanceActionResponse> {
   const base = getBaseUrl();
   const trimmed = targetActorId.trim();
   if (!trimmed) {
     throw new Error('targetActorId is required');
   }
+  const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+  const trimmedProposalId = typeof proposalId === 'string' ? proposalId.trim() : '';
   return withAdminAuth(async () => {
+    await ensureMasterRole('revoke_admin_access');
     const headers = await getAdminAuthHeaders();
-    return httpPost<RevokeAdminAccessResponse>(
+    return httpPost<AdminGovernanceActionResponse>(
       `${base}/v1/school/admin/security/revoke-access`,
-      { targetActorId: trimmed, reason: typeof reason === 'string' ? reason : undefined },
+      {
+        targetActorId: trimmed,
+        ...(trimmedReason ? { reason: trimmedReason } : {}),
+        ...(trimmedProposalId ? { proposalId: trimmedProposalId } : {}),
+      },
       { headers }
     );
   });
 }
 
-export async function restoreAdminAccess(targetActorId: string): Promise<RestoreAdminAccessResponse> {
+export async function restoreAdminAccess(
+  targetActorId: string,
+  proposalId?: string
+): Promise<AdminGovernanceActionResponse> {
   const base = getBaseUrl();
   const trimmed = targetActorId.trim();
   if (!trimmed) {
     throw new Error('targetActorId is required');
   }
+  const trimmedProposalId = typeof proposalId === 'string' ? proposalId.trim() : '';
   return withAdminAuth(async () => {
+    await ensureMasterRole('restore_admin_access');
     const headers = await getAdminAuthHeaders();
-    return httpPost<RestoreAdminAccessResponse>(
+    return httpPost<AdminGovernanceActionResponse>(
       `${base}/v1/school/admin/security/restore-access`,
-      { targetActorId: trimmed },
+      {
+        targetActorId: trimmed,
+        ...(trimmedProposalId ? { proposalId: trimmedProposalId } : {}),
+      },
+      { headers }
+    );
+  });
+}
+
+export async function revokeOperatorAccess(
+  targetOperatorActorId: string,
+  reason?: string,
+  proposalId?: string
+): Promise<AdminGovernanceActionResponse> {
+  const base = getBaseUrl();
+  const trimmed = targetOperatorActorId.trim();
+  if (!trimmed) {
+    throw new Error('targetOperatorActorId is required');
+  }
+  const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+  const trimmedProposalId = typeof proposalId === 'string' ? proposalId.trim() : '';
+  return withAdminAuth(async () => {
+    await ensureMasterRole('revoke_operator');
+    const headers = await getAdminAuthHeaders();
+    return httpPost<AdminGovernanceActionResponse>(
+      `${base}/v1/school/admin/security/operator/revoke`,
+      {
+        targetOperatorActorId: trimmed,
+        ...(trimmedReason ? { reason: trimmedReason } : {}),
+        ...(trimmedProposalId ? { proposalId: trimmedProposalId } : {}),
+      },
+      { headers }
+    );
+  });
+}
+
+export async function restoreOperatorAccess(
+  targetOperatorActorId: string,
+  proposalId?: string
+): Promise<AdminGovernanceActionResponse> {
+  const base = getBaseUrl();
+  const trimmed = targetOperatorActorId.trim();
+  if (!trimmed) {
+    throw new Error('targetOperatorActorId is required');
+  }
+  const trimmedProposalId = typeof proposalId === 'string' ? proposalId.trim() : '';
+  return withAdminAuth(async () => {
+    await ensureMasterRole('restore_operator');
+    const headers = await getAdminAuthHeaders();
+    return httpPost<AdminGovernanceActionResponse>(
+      `${base}/v1/school/admin/security/operator/restore`,
+      {
+        targetOperatorActorId: trimmed,
+        ...(trimmedProposalId ? { proposalId: trimmedProposalId } : {}),
+      },
+      { headers }
+    );
+  });
+}
+
+export async function freezeUserAccount(
+  userId: string,
+  reason?: string,
+  proposalId?: string
+): Promise<AdminGovernanceActionResponse> {
+  const base = getBaseUrl();
+  const trimmed = userId.trim().toLowerCase();
+  if (!trimmed) {
+    throw new Error('userId is required');
+  }
+  const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+  const trimmedProposalId = typeof proposalId === 'string' ? proposalId.trim() : '';
+  return withAdminAuth(async () => {
+    await ensureMasterRole('freeze_user');
+    const headers = await getAdminAuthHeaders();
+    return httpPost<AdminGovernanceActionResponse>(
+      `${base}/v1/school/admin/security/users/freeze`,
+      {
+        userId: trimmed,
+        ...(trimmedReason ? { reason: trimmedReason } : {}),
+        ...(trimmedProposalId ? { proposalId: trimmedProposalId } : {}),
+      },
+      { headers }
+    );
+  });
+}
+
+export async function unfreezeUserAccount(
+  userId: string,
+  proposalId?: string
+): Promise<AdminGovernanceActionResponse> {
+  const base = getBaseUrl();
+  const trimmed = userId.trim().toLowerCase();
+  if (!trimmed) {
+    throw new Error('userId is required');
+  }
+  const trimmedProposalId = typeof proposalId === 'string' ? proposalId.trim() : '';
+  return withAdminAuth(async () => {
+    await ensureMasterRole('unfreeze_user');
+    const headers = await getAdminAuthHeaders();
+    return httpPost<AdminGovernanceActionResponse>(
+      `${base}/v1/school/admin/security/users/unfreeze`,
+      {
+        userId: trimmed,
+        ...(trimmedProposalId ? { proposalId: trimmedProposalId } : {}),
+      },
+      { headers }
+    );
+  });
+}
+
+export async function deleteUserAccount(
+  userId: string,
+  reason?: string,
+  proposalId?: string
+): Promise<AdminGovernanceActionResponse> {
+  const base = getBaseUrl();
+  const trimmed = userId.trim().toLowerCase();
+  if (!trimmed) {
+    throw new Error('userId is required');
+  }
+  const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+  const trimmedProposalId = typeof proposalId === 'string' ? proposalId.trim() : '';
+  return withAdminAuth(async () => {
+    await ensureMasterRole('delete_user');
+    const headers = await getAdminAuthHeaders();
+    return httpPost<AdminGovernanceActionResponse>(
+      `${base}/v1/school/admin/security/users/delete`,
+      {
+        userId: trimmed,
+        ...(trimmedReason ? { reason: trimmedReason } : {}),
+        ...(trimmedProposalId ? { proposalId: trimmedProposalId } : {}),
+      },
+      { headers }
+    );
+  });
+}
+
+export async function restoreUserAccount(
+  userId: string,
+  proposalId?: string
+): Promise<AdminGovernanceActionResponse> {
+  const base = getBaseUrl();
+  const trimmed = userId.trim().toLowerCase();
+  if (!trimmed) {
+    throw new Error('userId is required');
+  }
+  const trimmedProposalId = typeof proposalId === 'string' ? proposalId.trim() : '';
+  return withAdminAuth(async () => {
+    await ensureMasterRole('restore_user');
+    const headers = await getAdminAuthHeaders();
+    return httpPost<AdminGovernanceActionResponse>(
+      `${base}/v1/school/admin/security/users/restore`,
+      {
+        userId: trimmed,
+        ...(trimmedProposalId ? { proposalId: trimmedProposalId } : {}),
+      },
       { headers }
     );
   });
