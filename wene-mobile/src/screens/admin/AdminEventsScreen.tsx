@@ -21,6 +21,7 @@ import {
   type AdminReportObligationItem,
 } from '../../api/adminApi';
 import type { SchoolEvent } from '../../types/school';
+import { loadAdminSession } from '../../lib/adminAuth';
 import { copyTextWithFeedback } from '../../utils/copyText';
 
 export const AdminEventsScreen: React.FC = () => {
@@ -46,6 +47,22 @@ export const AdminEventsScreen: React.FC = () => {
   const [revokeReason, setRevokeReason] = useState('operator_policy_violation');
   const [revokingActorId, setRevokingActorId] = useState<string | null>(null);
   const [restoringActorId, setRestoringActorId] = useState<string | null>(null);
+  const [canViewOperatorReports, setCanViewOperatorReports] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadAdminSession()
+      .then((session) => {
+        if (cancelled) return;
+        setCanViewOperatorReports(session?.role === 'master');
+      })
+      .catch(() => {
+        if (!cancelled) setCanViewOperatorReports(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadDashboard = useCallback(() => {
     setLoading(true);
@@ -60,7 +77,9 @@ export const AdminEventsScreen: React.FC = () => {
       fetchPopStatus(),
       fetchAdminSecurityFreezeStatus(),
       fetchAdminSecurityLogs({ limit: 80 }),
-      fetchAdminReportObligations({ status: 'required', limit: 50 }),
+      canViewOperatorReports
+        ? fetchAdminReportObligations({ status: 'required', limit: 50 })
+        : Promise.resolve(null),
     ])
       .then(([eventsResult, popResult, freezeResult, logsResult, reportResult]) => {
         if (eventsResult.status === 'fulfilled') {
@@ -98,12 +117,19 @@ export const AdminEventsScreen: React.FC = () => {
           setSecurityError((prev) => prev ?? (logsResult.reason instanceof Error ? logsResult.reason.message : '監査ログの取得に失敗しました。'));
         }
 
-        if (reportResult.status === 'fulfilled') {
-          setReportObligations(reportResult.value.items ?? []);
-          setSecurityCheckedAt((prev) => prev ?? reportResult.value.checkedAt ?? new Date().toISOString());
+        if (canViewOperatorReports) {
+          if (reportResult.status === 'fulfilled' && reportResult.value) {
+            const reportData = reportResult.value;
+            setReportObligations(reportData.items ?? []);
+            setSecurityCheckedAt((prev) => prev ?? reportData.checkedAt ?? new Date().toISOString());
+          } else {
+            setReportObligations([]);
+            setSecurityError((prev) => prev ?? (reportResult.status === 'rejected' && reportResult.reason instanceof Error
+              ? reportResult.reason.message
+              : '報告義務ログの取得に失敗しました。'));
+          }
         } else {
           setReportObligations([]);
-          setSecurityError((prev) => prev ?? (reportResult.reason instanceof Error ? reportResult.reason.message : '報告義務ログの取得に失敗しました。'));
         }
       })
       .finally(() => {
@@ -111,7 +137,7 @@ export const AdminEventsScreen: React.FC = () => {
         setPopStatusLoading(false);
         setSecurityLoading(false);
       });
-  }, []);
+  }, [canViewOperatorReports]);
 
   useEffect(() => {
     loadDashboard();
@@ -171,7 +197,9 @@ export const AdminEventsScreen: React.FC = () => {
       await Promise.allSettled([
         fetchAdminSecurityFreezeStatus(),
         fetchAdminSecurityLogs({ limit: 80 }),
-        fetchAdminReportObligations({ status: 'required', limit: 50 }),
+        canViewOperatorReports
+          ? fetchAdminReportObligations({ status: 'required', limit: 50 })
+          : Promise.resolve(null),
       ]).then(([freezeResult, logsResult, reportResult]) => {
         if (freezeResult.status === 'fulfilled') {
           setFrozenAccounts(freezeResult.value.items ?? []);
@@ -183,9 +211,14 @@ export const AdminEventsScreen: React.FC = () => {
           setSecurityLogs(logsResult.value.items ?? []);
           setSecurityCheckedAt((prev) => prev ?? logsResult.value.checkedAt ?? new Date().toISOString());
         }
-        if (reportResult.status === 'fulfilled') {
-          setReportObligations(reportResult.value.items ?? []);
-          setSecurityCheckedAt((prev) => prev ?? reportResult.value.checkedAt ?? new Date().toISOString());
+        if (canViewOperatorReports) {
+          if (reportResult.status === 'fulfilled' && reportResult.value) {
+            const reportData = reportResult.value;
+            setReportObligations(reportData.items ?? []);
+            setSecurityCheckedAt((prev) => prev ?? reportData.checkedAt ?? new Date().toISOString());
+          }
+        } else {
+          setReportObligations([]);
         }
       });
     } catch (e) {
@@ -193,13 +226,15 @@ export const AdminEventsScreen: React.FC = () => {
     } finally {
       setUnlockingActorId(null);
     }
-  }, [unlockingActorId]);
+  }, [unlockingActorId, canViewOperatorReports]);
 
   const refreshSecurityBlocks = useCallback(async () => {
     await Promise.allSettled([
       fetchAdminSecurityFreezeStatus(),
       fetchAdminSecurityLogs({ limit: 80 }),
-      fetchAdminReportObligations({ status: 'required', limit: 50 }),
+      canViewOperatorReports
+        ? fetchAdminReportObligations({ status: 'required', limit: 50 })
+        : Promise.resolve(null),
     ]).then(([freezeResult, logsResult, reportResult]) => {
       if (freezeResult.status === 'fulfilled') {
         setFrozenAccounts(freezeResult.value.items ?? []);
@@ -211,12 +246,17 @@ export const AdminEventsScreen: React.FC = () => {
         setSecurityLogs(logsResult.value.items ?? []);
         setSecurityCheckedAt((prev) => prev ?? logsResult.value.checkedAt ?? new Date().toISOString());
       }
-      if (reportResult.status === 'fulfilled') {
-        setReportObligations(reportResult.value.items ?? []);
-        setSecurityCheckedAt((prev) => prev ?? reportResult.value.checkedAt ?? new Date().toISOString());
+      if (canViewOperatorReports) {
+        if (reportResult.status === 'fulfilled' && reportResult.value) {
+          const reportData = reportResult.value;
+          setReportObligations(reportData.items ?? []);
+          setSecurityCheckedAt((prev) => prev ?? reportData.checkedAt ?? new Date().toISOString());
+        }
+      } else {
+        setReportObligations([]);
       }
     });
-  }, []);
+  }, [canViewOperatorReports]);
 
   const handleRevokeAccess = useCallback(async (targetActorIdRaw?: string) => {
     const targetActorId = (targetActorIdRaw ?? revokeTargetActorId).trim();
@@ -373,34 +413,36 @@ export const AdminEventsScreen: React.FC = () => {
             checkedAt: {securityCheckedAt ?? '-'}
           </AppText>
 
-          <View style={styles.securitySection}>
-            <AppText variant="body" style={styles.securitySectionTitle}>
-              報告義務ログ（全体表示）
-            </AppText>
-            {securityLoading ? (
-              <AppText variant="small" style={styles.securityMetaText}>
-                報告義務ログを読み込み中です...
+          {canViewOperatorReports ? (
+            <View style={styles.securitySection}>
+              <AppText variant="body" style={styles.securitySectionTitle}>
+                報告義務ログ（運営者コミュニティ内）
               </AppText>
-            ) : reportObligations.length === 0 ? (
-              <AppText variant="small" style={styles.securityMetaText}>
-                未対応の報告義務はありません
-              </AppText>
-            ) : (
-              reportObligations.slice(0, 8).map((report) => (
-                <View key={report.reportId} style={styles.logRow}>
-                  <AppText variant="small" style={styles.logActionText}>
-                    [{report.type}] {report.reason}
-                  </AppText>
-                  <AppText variant="small" style={styles.securityMetaText}>
-                    target: {shortActor(report.targetActorId)} / by: {shortActor(report.actionByActorId)}
-                  </AppText>
-                  <AppText variant="small" style={styles.securityMetaText}>
-                    createdAt: {report.createdAt}
-                  </AppText>
-                </View>
-              ))
-            )}
-          </View>
+              {securityLoading ? (
+                <AppText variant="small" style={styles.securityMetaText}>
+                  報告義務ログを読み込み中です...
+                </AppText>
+              ) : reportObligations.length === 0 ? (
+                <AppText variant="small" style={styles.securityMetaText}>
+                  未対応の報告義務はありません
+                </AppText>
+              ) : (
+                reportObligations.slice(0, 8).map((report) => (
+                  <View key={report.reportId} style={styles.logRow}>
+                    <AppText variant="small" style={styles.logActionText}>
+                      [{report.type}] {report.reason}
+                    </AppText>
+                    <AppText variant="small" style={styles.securityMetaText}>
+                      target: {shortActor(report.targetActorId)} / by: {shortActor(report.actionByActorId)}
+                    </AppText>
+                    <AppText variant="small" style={styles.securityMetaText}>
+                      createdAt: {report.createdAt}
+                    </AppText>
+                  </View>
+                ))
+              )}
+            </View>
+          ) : null}
 
           <View style={styles.securitySection}>
             <AppText variant="body" style={styles.securitySectionTitle}>

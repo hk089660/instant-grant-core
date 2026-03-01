@@ -19,6 +19,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
   const { refresh } = useAuth();
   const [adminName, setAdminName] = useState('');
   const [operatorId, setOperatorId] = useState('');
+  const [canViewOperatorReports, setCanViewOperatorReports] = useState(false);
   const [reportObligations, setReportObligations] = useState<AdminReportObligationItem[]>([]);
   const [reportCheckedAt, setReportCheckedAt] = useState<string | null>(null);
 
@@ -27,6 +28,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
     loadAdminSession()
       .then(async (session) => {
         if (!session || cancelled) return;
+        setCanViewOperatorReports(session.role === 'master');
         const deriveFallbackOperatorId = (seed: string): string => {
           let hash = 2166136261;
           for (let i = 0; i < seed.length; i += 1) {
@@ -62,6 +64,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
         if (!cancelled) {
           setAdminName('');
           setOperatorId('');
+          setCanViewOperatorReports(false);
         }
       });
     return () => {
@@ -70,6 +73,12 @@ export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
   }, []);
 
   useEffect(() => {
+    if (!canViewOperatorReports) {
+      setReportObligations([]);
+      setReportCheckedAt(null);
+      return;
+    }
+
     let cancelled = false;
     let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -95,7 +104,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
       cancelled = true;
       if (timer) clearInterval(timer);
     };
-  }, []);
+  }, [canViewOperatorReports]);
 
   const shortenActorId = (actorId: string): string => {
     if (actorId.length <= 22) return actorId;
@@ -165,7 +174,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({ title, children }) => {
           </View>
         </View>
       </View>
-      {reportObligations.length > 0 ? (
+      {canViewOperatorReports && reportObligations.length > 0 ? (
         <View style={styles.reportBanner}>
           <AppText variant="small" style={styles.reportBannerTitle}>
             報告義務ログ: 未対応 {reportObligations.length} 件
