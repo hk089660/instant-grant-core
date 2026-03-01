@@ -1,9 +1,11 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import type { SchoolStorage } from '../storage/MemoryStorage';
+import type { SharedSecurityState } from '../security/sharedSecurityState';
 
 export interface ApiDeps {
     storage: SchoolStorage;
+    sharedSecurity: SharedSecurityState;
 }
 
 const USER_ID_MIN_LENGTH = 3;
@@ -22,7 +24,7 @@ function genConfirmationCode(): string {
 
 export function createApiRouter(deps: ApiDeps): Router {
     const router = Router();
-    const { storage } = deps;
+    const { storage, sharedSecurity } = deps;
     const userIdHashes = new Set<string>();
     let userIdChainLastHash = '0'.repeat(64);
 
@@ -39,6 +41,34 @@ export function createApiRouter(deps: ApiDeps): Router {
 
     const hashUserId = (userId: string): string => {
         return crypto.createHash('sha256').update(`user-id:${userId}`).digest('hex');
+    };
+
+    const userModeration = sharedSecurity.userModeration;
+
+    const ensureUserNotModerated = (res: Response, userId: string): boolean => {
+        const normalized = normalizeUserId(userId);
+        if (!normalized) return true;
+        const state = userModeration.get(normalized);
+        if (state?.deleted) {
+            res.status(403).json({
+                error: 'user account deleted by operator consensus',
+                code: 'user_deleted',
+                deletedAt: new Date(state.deleted.deletedAt).toISOString(),
+                reason: state.deleted.reason,
+            });
+            return false;
+        }
+        if (state?.frozen) {
+            res.status(423).json({
+                error: 'user account frozen by operator consensus',
+                code: 'user_frozen',
+                frozenAt: new Date(state.frozen.frozenAt).toISOString(),
+                reason: state.frozen.reason,
+                unlockRequired: true,
+            });
+            return false;
+        }
+        return true;
     };
 
     const buildUserIdChainHash = (userIdHash: string, prevChainHash: string): string => {
@@ -63,6 +93,9 @@ export function createApiRouter(deps: ApiDeps): Router {
         const userIdError = validateUserId(userId);
         if (userIdError) {
             res.status(400).json({ error: userIdError, code: 'invalid_user_id' });
+            return;
+        }
+        if (!ensureUserNotModerated(res, userId)) {
             return;
         }
         if (!displayName || displayName.length < 1) {
@@ -100,6 +133,9 @@ export function createApiRouter(deps: ApiDeps): Router {
             res.status(400).json({ error: 'missing params' });
             return;
         }
+        if (!ensureUserNotModerated(res, userId)) {
+            return;
+        }
 
         const user = storage.getUser(userId);
         if (!user) {
@@ -124,6 +160,9 @@ export function createApiRouter(deps: ApiDeps): Router {
 
         if (!userId || !pin) {
             res.status(400).json({ error: 'missing params' });
+            return;
+        }
+        if (!ensureUserNotModerated(res, userId)) {
             return;
         }
 
@@ -206,6 +245,9 @@ export function createApiRouter(deps: ApiDeps): Router {
 
         if (!userId || !pin) {
             res.status(400).json({ error: 'missing params' });
+            return;
+        }
+        if (!ensureUserNotModerated(res, userId)) {
             return;
         }
         if (hasOnchainProof && (!walletAddress || !txSignature || !receiptPubkey)) {

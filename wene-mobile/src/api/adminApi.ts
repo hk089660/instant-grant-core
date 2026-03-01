@@ -1011,14 +1011,25 @@ export interface AdminSecurityFreezeStatusResponse {
   frozenCount: number;
   revokedCount?: number;
   warningCount: number;
+  operatorCommunityCount?: number;
+  operatorRevokedCount?: number;
+  governancePendingCount?: number;
   items: AdminFrozenAccount[];
   revokedItems?: AdminRevokedAccount[];
   pendingWarnings: AdminPendingWarning[];
+  operatorItems?: Array<{
+    actorId: string;
+    role: 'admin' | 'master' | 'unknown';
+    name: string | null;
+    revokedAt: string | null;
+    revokedReason: string | null;
+    revokedReportId: string | null;
+  }>;
 }
 
 export interface AdminReportObligationItem {
   reportId: string;
-  type: 'freeze' | 'revoke_access';
+  type: 'freeze' | 'revoke_access' | 'operator_revoke' | 'user_freeze' | 'user_delete';
   status: 'required' | 'resolved';
   targetActorId: string;
   actionByActorId: string;
@@ -1053,7 +1064,16 @@ export interface AdminSecurityLogEntry {
   | 'unlock_executed'
   | 'access_revoked'
   | 'revoke_blocked_operation'
-  | 'access_restored';
+  | 'access_restored'
+  | 'operator_access_revoked'
+  | 'operator_access_restored'
+  | 'user_frozen'
+  | 'user_unfrozen'
+  | 'user_deleted'
+  | 'user_restored'
+  | 'governance_proposal_created'
+  | 'governance_proposal_approved'
+  | 'governance_proposal_executed';
   actor: AdminSecurityViewer;
   targetActorId?: string;
   prevHash: string;

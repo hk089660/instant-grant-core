@@ -128,12 +128,43 @@ describe('school API', () => {
     const frozenActor = freezeStatusRes.body.items[0]?.actorId as string | undefined;
     expect(typeof frozenActor).toBe('string');
 
-    const unlockRes = await request(app)
+    const deniedUnlockRes = await request(app)
       .post('/v1/school/admin/security/unlock')
       .set('Authorization', 'Bearer operator-admin-01')
       .set('X-Admin-Role', 'admin')
       .set('X-Admin-Id', 'operator-admin-01')
       .send({ targetActorId: frozenActor });
+    expect(deniedUnlockRes.status).toBe(403);
+    expect(deniedUnlockRes.body.code).toBe('operator_consensus_required');
+
+    await request(app)
+      .get('/v1/school/admin/security/freeze-status')
+      .set('Authorization', 'Bearer operator-master-01')
+      .set('X-Admin-Role', 'master')
+      .set('X-Admin-Id', 'operator-master-01');
+    await request(app)
+      .get('/v1/school/admin/security/freeze-status')
+      .set('Authorization', 'Bearer operator-master-02')
+      .set('X-Admin-Role', 'master')
+      .set('X-Admin-Id', 'operator-master-02');
+
+    const unlockProposalRes = await request(app)
+      .post('/v1/school/admin/security/unlock')
+      .set('Authorization', 'Bearer operator-master-01')
+      .set('X-Admin-Role', 'master')
+      .set('X-Admin-Id', 'operator-master-01')
+      .send({ targetActorId: frozenActor });
+    expect(unlockProposalRes.status).toBe(202);
+    expect(unlockProposalRes.body.status).toBe('pending_consensus');
+    const unlockProposalId = unlockProposalRes.body.consensus?.proposalId as string | undefined;
+    expect(typeof unlockProposalId).toBe('string');
+
+    const unlockRes = await request(app)
+      .post('/v1/school/admin/security/unlock')
+      .set('Authorization', 'Bearer operator-master-02')
+      .set('X-Admin-Role', 'master')
+      .set('X-Admin-Id', 'operator-master-02')
+      .send({ targetActorId: frozenActor, proposalId: unlockProposalId });
     expect(unlockRes.status).toBe(200);
     expect(unlockRes.body.success).toBe(true);
 
@@ -196,18 +227,38 @@ describe('school API', () => {
       Authorization: 'Bearer target-admin-token',
       'X-Admin-Id': 'target-admin-001',
     };
-    const operatorHeaders = {
-      Authorization: 'Bearer operator-admin-03',
-      'X-Admin-Role': 'admin',
-      'X-Admin-Id': 'operator-admin-03',
+    const operatorMaster1Headers = {
+      Authorization: 'Bearer operator-master-03',
+      'X-Admin-Role': 'master',
+      'X-Admin-Id': 'operator-master-03',
+    };
+    const operatorMaster2Headers = {
+      Authorization: 'Bearer operator-master-04',
+      'X-Admin-Role': 'master',
+      'X-Admin-Id': 'operator-master-04',
     };
 
-    const revokeRes = await request(app)
+    await request(app).get('/v1/school/admin/security/freeze-status').set(operatorMaster1Headers);
+    await request(app).get('/v1/school/admin/security/freeze-status').set(operatorMaster2Headers);
+
+    const revokeProposalRes = await request(app)
       .post('/v1/school/admin/security/revoke-access')
-      .set(operatorHeaders)
+      .set(operatorMaster1Headers)
       .send({
         targetActorId: 'admin:target-admin-001',
         reason: 'policy_violation',
+      });
+    expect(revokeProposalRes.status).toBe(202);
+    expect(revokeProposalRes.body.status).toBe('pending_consensus');
+    const revokeProposalId = revokeProposalRes.body.consensus?.proposalId as string | undefined;
+    expect(typeof revokeProposalId).toBe('string');
+
+    const revokeRes = await request(app)
+      .post('/v1/school/admin/security/revoke-access')
+      .set(operatorMaster2Headers)
+      .send({
+        targetActorId: 'admin:target-admin-001',
+        proposalId: revokeProposalId,
       });
     expect(revokeRes.status).toBe(200);
     expect(revokeRes.body.success).toBe(true);
@@ -226,17 +277,26 @@ describe('school API', () => {
 
     const obligationsRes = await request(app)
       .get('/v1/school/admin/security/report-obligations?status=required')
-      .set(operatorHeaders);
+      .set(operatorMaster1Headers);
     expect(obligationsRes.status).toBe(200);
     expect(Array.isArray(obligationsRes.body.items)).toBe(true);
     expect(obligationsRes.body.items.some((item: { type?: string; targetActorId?: string }) => (
       item.type === 'revoke_access' && item.targetActorId === 'admin:target-admin-001'
     ))).toBe(true);
 
+    const restoreProposalRes = await request(app)
+      .post('/v1/school/admin/security/restore-access')
+      .set(operatorMaster1Headers)
+      .send({ targetActorId: 'admin:target-admin-001' });
+    expect(restoreProposalRes.status).toBe(202);
+    expect(restoreProposalRes.body.status).toBe('pending_consensus');
+    const restoreProposalId = restoreProposalRes.body.consensus?.proposalId as string | undefined;
+    expect(typeof restoreProposalId).toBe('string');
+
     const restoreRes = await request(app)
       .post('/v1/school/admin/security/restore-access')
-      .set(operatorHeaders)
-      .send({ targetActorId: 'admin:target-admin-001' });
+      .set(operatorMaster2Headers)
+      .send({ targetActorId: 'admin:target-admin-001', proposalId: restoreProposalId });
     expect(restoreRes.status).toBe(200);
     expect(restoreRes.body.success).toBe(true);
 
@@ -249,6 +309,121 @@ describe('school API', () => {
         host: 'Student Council',
       });
     expect(afterRestoreRes.status).toBe(201);
+  });
+
+  it('operator revocation requires unanimous community approval excluding the target operator', async () => {
+    const master1 = {
+      Authorization: 'Bearer operator-master-07',
+      'X-Admin-Role': 'master',
+      'X-Admin-Id': 'operator-master-07',
+    };
+    const master2 = {
+      Authorization: 'Bearer operator-master-08',
+      'X-Admin-Role': 'master',
+      'X-Admin-Id': 'operator-master-08',
+    };
+    const master3 = {
+      Authorization: 'Bearer operator-master-09',
+      'X-Admin-Role': 'master',
+      'X-Admin-Id': 'operator-master-09',
+    };
+
+    await request(app).get('/v1/school/admin/security/freeze-status').set(master1);
+    await request(app).get('/v1/school/admin/security/freeze-status').set(master2);
+    await request(app).get('/v1/school/admin/security/freeze-status').set(master3);
+
+    const revokeProposalRes = await request(app)
+      .post('/v1/school/admin/security/operator/revoke')
+      .set(master1)
+      .send({
+        targetOperatorActorId: 'admin:operator-master-09',
+        reason: 'community_policy_violation',
+      });
+    expect(revokeProposalRes.status).toBe(202);
+    expect(revokeProposalRes.body.status).toBe('pending_consensus');
+    expect(revokeProposalRes.body.consensus?.requiredApproverIds).toEqual([
+      'admin:operator-master-07',
+      'admin:operator-master-08',
+    ]);
+    const proposalId = revokeProposalRes.body.consensus?.proposalId as string | undefined;
+    expect(typeof proposalId).toBe('string');
+
+    const revokeDoneRes = await request(app)
+      .post('/v1/school/admin/security/operator/revoke')
+      .set(master2)
+      .send({
+        targetOperatorActorId: 'admin:operator-master-09',
+        proposalId,
+      });
+    expect(revokeDoneRes.status).toBe(200);
+    expect(revokeDoneRes.body.success).toBe(true);
+
+    const revokedOperatorAccessRes = await request(app)
+      .get('/v1/school/admin/security/freeze-status')
+      .set(master3);
+    expect(revokedOperatorAccessRes.status).toBe(403);
+    expect(revokedOperatorAccessRes.body.code).toBe('operator_revoked');
+  });
+
+  it('operator community can freeze/delete users only with unanimous approvals', async () => {
+    await request(app)
+      .post('/api/users/register')
+      .send({ userId: 'freeze_user_01', displayName: 'Freeze User', pin: '1234' });
+
+    const master1 = {
+      Authorization: 'Bearer operator-master-05',
+      'X-Admin-Role': 'master',
+      'X-Admin-Id': 'operator-master-05',
+    };
+    const master2 = {
+      Authorization: 'Bearer operator-master-06',
+      'X-Admin-Role': 'master',
+      'X-Admin-Id': 'operator-master-06',
+    };
+    await request(app).get('/v1/school/admin/security/freeze-status').set(master1);
+    await request(app).get('/v1/school/admin/security/freeze-status').set(master2);
+
+    const freezeProposal = await request(app)
+      .post('/v1/school/admin/security/users/freeze')
+      .set(master1)
+      .send({ userId: 'freeze_user_01', reason: 'risk_detected' });
+    expect(freezeProposal.status).toBe(202);
+    const freezeProposalId = freezeProposal.body.consensus?.proposalId as string | undefined;
+    expect(typeof freezeProposalId).toBe('string');
+
+    const freezeDone = await request(app)
+      .post('/v1/school/admin/security/users/freeze')
+      .set(master2)
+      .send({ userId: 'freeze_user_01', proposalId: freezeProposalId });
+    expect(freezeDone.status).toBe(200);
+    expect(freezeDone.body.success).toBe(true);
+
+    const verifyBlocked = await request(app)
+      .post('/api/auth/verify')
+      .send({ userId: 'freeze_user_01', pin: '1234' });
+    expect(verifyBlocked.status).toBe(423);
+    expect(verifyBlocked.body.code).toBe('user_frozen');
+
+    const deleteProposal = await request(app)
+      .post('/v1/school/admin/security/users/delete')
+      .set(master1)
+      .send({ userId: 'freeze_user_01', reason: 'severe_violation' });
+    expect(deleteProposal.status).toBe(202);
+    const deleteProposalId = deleteProposal.body.consensus?.proposalId as string | undefined;
+    expect(typeof deleteProposalId).toBe('string');
+
+    const deleteDone = await request(app)
+      .post('/v1/school/admin/security/users/delete')
+      .set(master2)
+      .send({ userId: 'freeze_user_01', proposalId: deleteProposalId });
+    expect(deleteDone.status).toBe(200);
+    expect(deleteDone.body.success).toBe(true);
+
+    const registerBlocked = await request(app)
+      .post('/api/users/register')
+      .send({ userId: 'freeze_user_01', displayName: 'Freeze User', pin: '1234' });
+    expect(registerBlocked.status).toBe(403);
+    expect(registerBlocked.body.code).toBe('user_deleted');
   });
 
   it('POST /v1/school/claims evt-001 first time returns success', async () => {

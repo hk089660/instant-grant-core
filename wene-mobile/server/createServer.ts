@@ -8,6 +8,7 @@ import { createV1SchoolRouter } from './routes/v1School';
 import { createApiRouter } from './routes/api';
 import type { SchoolStorage } from './storage/MemoryStorage';
 import type { Clock } from './clock';
+import { createSharedSecurityState } from './security/sharedSecurityState';
 
 export interface CreateServerOptions {
   storage: SchoolStorage;
@@ -18,21 +19,25 @@ export interface CreateServerOptions {
 export function createServer(options: CreateServerOptions): Express {
   const { storage, logger = () => { } } = options;
   const app = express();
+  const sharedSecurity = createSharedSecurityState();
 
   app.use(express.json());
 
   app.use((_req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Admin-Role, X-Admin-Id, X-Admin-Name, X-Admin-Security-Override'
+    );
     next();
   });
   app.options('*', (_req, res) => res.sendStatus(204));
 
-  app.use('/v1/school', createV1SchoolRouter({ storage }));
+  app.use('/v1/school', createV1SchoolRouter({ storage, sharedSecurity }));
 
   // /api/users/register などの実装
-  app.use('/api', createApiRouter({ storage }));
+  app.use('/api', createApiRouter({ storage, sharedSecurity }));
 
   app.get('/health', (_req, res) => {
     res.json({ ok: true });
