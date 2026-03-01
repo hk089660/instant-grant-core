@@ -368,7 +368,7 @@ describe('master admin disclosure APIs', () => {
     expect(typeof revoked?.revokedAt).toBe('string');
   });
 
-  it('requires unanimous operator approvals to issue a new invite', async () => {
+  it('blocks invite-issued operators from issuing new operator codes', async () => {
     const firstInviteRes = await store.fetch(
       new Request('https://example.com/api/admin/invite', {
         method: 'POST',
@@ -384,9 +384,36 @@ describe('master admin disclosure APIs', () => {
     expect(typeof firstInviteBody.code).toBe('string');
     expect(typeof firstInviteBody.adminId).toBe('string');
     const firstAdminCode = firstInviteBody.code as string;
-    const firstAdminId = firstInviteBody.adminId as string;
 
-    const secondInviteRes = await store.fetch(
+    const inviteByInvitedOperatorRes = await store.fetch(
+      new Request('https://example.com/api/admin/invite', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${firstAdminCode}`,
+        },
+        body: JSON.stringify({ name: 'Admin Second' }),
+      })
+    );
+    expect(inviteByInvitedOperatorRes.status).toBe(403);
+    const inviteByInvitedOperatorBody = (await inviteByInvitedOperatorRes.json()) as { error?: string };
+    expect(inviteByInvitedOperatorBody.error).toBe('forbidden: master invite issuer only');
+
+    const approveByInvitedOperatorRes = await store.fetch(
+      new Request('https://example.com/api/admin/invite/approve', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${firstAdminCode}`,
+        },
+        body: JSON.stringify({ proposalId: crypto.randomUUID() }),
+      })
+    );
+    expect(approveByInvitedOperatorRes.status).toBe(403);
+    const approveByInvitedOperatorBody = (await approveByInvitedOperatorRes.json()) as { error?: string };
+    expect(approveByInvitedOperatorBody.error).toBe('forbidden: master invite issuer only');
+
+    const inviteByMasterRes = await store.fetch(
       new Request('https://example.com/api/admin/invite', {
         method: 'POST',
         headers: {
@@ -396,63 +423,10 @@ describe('master admin disclosure APIs', () => {
         body: JSON.stringify({ name: 'Admin Second' }),
       })
     );
-    expect(secondInviteRes.status).toBe(202);
-    const secondInviteBody = (await secondInviteRes.json()) as {
-      status?: string;
-      proposalId?: string;
-      approvedCount?: number;
-      requiredCount?: number;
-      missingApprovers?: Array<{ actorId?: string }>;
-    };
-    expect(secondInviteBody.status).toBe('pending_approval');
-    expect(secondInviteBody.approvedCount).toBe(1);
-    expect(secondInviteBody.requiredCount).toBe(2);
-    expect(secondInviteBody.missingApprovers?.some((item) => item.actorId === `admin:${firstAdminId}`)).toBe(true);
-    const proposalId = secondInviteBody.proposalId as string;
-    expect(typeof proposalId).toBe('string');
-
-    const pendingBeforeApproveRes = await store.fetch(
-      new Request('https://example.com/api/admin/invite/pending', {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${firstAdminCode}`,
-        },
-      })
-    );
-    expect(pendingBeforeApproveRes.status).toBe(200);
-    const pendingBeforeApproveBody = (await pendingBeforeApproveRes.json()) as {
-      proposals?: Array<{ proposalId: string }>;
-    };
-    expect(pendingBeforeApproveBody.proposals?.some((item) => item.proposalId === proposalId)).toBe(true);
-
-    const approveRes = await store.fetch(
-      new Request('https://example.com/api/admin/invite/approve', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          Authorization: `Bearer ${firstAdminCode}`,
-        },
-        body: JSON.stringify({ proposalId }),
-      })
-    );
-    expect(approveRes.status).toBe(200);
-    const approveBody = (await approveRes.json()) as { code?: string; adminId?: string };
-    expect(typeof approveBody.code).toBe('string');
-    expect(typeof approveBody.adminId).toBe('string');
-
-    const pendingAfterApproveRes = await store.fetch(
-      new Request('https://example.com/api/admin/invite/pending', {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${firstAdminCode}`,
-        },
-      })
-    );
-    expect(pendingAfterApproveRes.status).toBe(200);
-    const pendingAfterApproveBody = (await pendingAfterApproveRes.json()) as {
-      proposals?: Array<{ proposalId: string }>;
-    };
-    expect(pendingAfterApproveBody.proposals?.some((item) => item.proposalId === proposalId)).toBe(false);
+    expect(inviteByMasterRes.status).toBe(200);
+    const inviteByMasterBody = (await inviteByMasterRes.json()) as { code?: string; adminId?: string };
+    expect(typeof inviteByMasterBody.code).toBe('string');
+    expect(typeof inviteByMasterBody.adminId).toBe('string');
   });
 
   it('allows rejecting pending invite proposal with reason', async () => {
@@ -470,20 +444,29 @@ describe('master admin disclosure APIs', () => {
     const firstInviteBody = (await firstInviteRes.json()) as { code?: string };
     const firstAdminCode = firstInviteBody.code as string;
 
-    const secondInviteRes = await store.fetch(
-      new Request('https://example.com/api/admin/invite', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          Authorization: `Bearer ${masterToken}`,
-        },
-        body: JSON.stringify({ name: 'Rejected Candidate' }),
-      })
-    );
-    expect(secondInviteRes.status).toBe(202);
-    const secondInviteBody = (await secondInviteRes.json()) as { proposalId?: string };
-    const proposalId = secondInviteBody.proposalId as string;
-    expect(typeof proposalId).toBe('string');
+    const proposalId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    await state.storage.put(`admin_invite_proposal:${proposalId}`, {
+      proposalId,
+      name: 'Rejected Candidate',
+      createdAt: now,
+      requestedBy: {
+        actorId: 'master',
+        adminId: 'master',
+        role: 'master',
+        source: 'master',
+        name: 'Master Operator',
+      },
+      approvals: [],
+      status: 'pending',
+      issuedCode: null,
+      issuedAdminId: null,
+      issuedAt: null,
+      issuedByActorId: null,
+      cancelledAt: null,
+      cancelledByActorId: null,
+      cancelledReason: null,
+    });
 
     const rejectValidationRes = await store.fetch(
       new Request('https://example.com/api/admin/invite/reject', {
@@ -495,14 +478,16 @@ describe('master admin disclosure APIs', () => {
         body: JSON.stringify({ proposalId, reason: '' }),
       })
     );
-    expect(rejectValidationRes.status).toBe(400);
+    expect(rejectValidationRes.status).toBe(403);
+    const rejectValidationBody = (await rejectValidationRes.json()) as { error?: string };
+    expect(rejectValidationBody.error).toBe('forbidden: master invite issuer only');
 
     const rejectRes = await store.fetch(
       new Request('https://example.com/api/admin/invite/reject', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          Authorization: `Bearer ${firstAdminCode}`,
+          Authorization: `Bearer ${masterToken}`,
         },
         body: JSON.stringify({ proposalId, reason: 'Duplicate request' }),
       })
@@ -529,7 +514,7 @@ describe('master admin disclosure APIs', () => {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          Authorization: `Bearer ${firstAdminCode}`,
+          Authorization: `Bearer ${masterToken}`,
         },
         body: JSON.stringify({ proposalId }),
       })

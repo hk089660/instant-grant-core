@@ -2417,6 +2417,10 @@ export class SchoolStore implements DurableObject {
     return operator.source === 'master' || operator.source === 'invite';
   }
 
+  private hasAdminInviteIssuanceAuthority(operator: OperatorIdentity): boolean {
+    return operator.source === 'master' && operator.role === 'master';
+  }
+
   private toInviteConsensusOperator(operator: OperatorIdentity): InviteConsensusOperator | null {
     if (!this.isInviteConsensusEligibleOperator(operator)) return null;
     return {
@@ -2442,29 +2446,6 @@ export class SchoolStore implements DurableObject {
         },
         createdAtMs: 0,
       });
-    }
-
-    const adminRows = await this.ctx.storage.list({ prefix: ADMIN_CODE_PREFIX });
-    for (const [key, value] of adminRows.entries()) {
-      const code = key.slice(ADMIN_CODE_PREFIX.length);
-      const parsed = this.parseAdminCodeRecord(code, value);
-      if (!parsed || parsed.revokedAt) continue;
-      const actorId = `admin:${parsed.adminId}`;
-      const createdAtMs = Date.parse(parsed.createdAt);
-      const candidate: InviteConsensusOperator = {
-        actorId,
-        adminId: parsed.adminId,
-        role: 'admin',
-        source: 'invite',
-        name: parsed.name,
-      };
-      const existing = operators.get(actorId);
-      if (!existing || createdAtMs > existing.createdAtMs) {
-        operators.set(actorId, {
-          op: candidate,
-          createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : 0,
-        });
-      }
     }
 
     return Array.from(operators.values())
@@ -2609,8 +2590,8 @@ export class SchoolStore implements DurableObject {
     operator: OperatorIdentity,
     proposal: AdminInviteProposalRecord
   ): Promise<Response> {
-    if (!this.isInviteConsensusEligibleOperator(operator)) {
-      return Response.json({ error: 'forbidden: invite consensus approver only' }, { status: 403 });
+    if (!this.hasAdminInviteIssuanceAuthority(operator)) {
+      return Response.json({ error: 'forbidden: master invite issuer only' }, { status: 403 });
     }
     if (proposal.status === 'cancelled') {
       return Response.json({ error: 'invite proposal cancelled' }, { status: 409 });
@@ -2714,8 +2695,8 @@ export class SchoolStore implements DurableObject {
     proposal: AdminInviteProposalRecord,
     reasonInput: string
   ): Promise<Response> {
-    if (!this.isInviteConsensusEligibleOperator(operator)) {
-      return Response.json({ error: 'forbidden: invite consensus approver only' }, { status: 403 });
+    if (!this.hasAdminInviteIssuanceAuthority(operator)) {
+      return Response.json({ error: 'forbidden: master invite issuer only' }, { status: 403 });
     }
     const reason = reasonInput.trim();
     if (!reason) {
@@ -5558,14 +5539,14 @@ export class SchoolStore implements DurableObject {
       return Response.json(response);
     }
 
-    // POST /api/admin/invite (Operator auth required, unanimous approval required)
+    // POST /api/admin/invite (Master operator only)
     if (path === '/api/admin/invite' && request.method === 'POST') {
       const operator = await this.authenticateOperator(request);
       if (!operator) {
         return this.unauthorizedResponse();
       }
-      if (!this.isInviteConsensusEligibleOperator(operator)) {
-        return Response.json({ error: 'forbidden: invite consensus approver only' }, { status: 403 });
+      if (!this.hasAdminInviteIssuanceAuthority(operator)) {
+        return Response.json({ error: 'forbidden: master invite issuer only' }, { status: 403 });
       }
       let body: { name?: string; proposalId?: string };
       try {
@@ -5690,14 +5671,14 @@ export class SchoolStore implements DurableObject {
       });
     }
 
-    // POST /api/admin/invite/approve (Operator auth required)
+    // POST /api/admin/invite/approve (Master operator only)
     if (path === '/api/admin/invite/approve' && request.method === 'POST') {
       const operator = await this.authenticateOperator(request);
       if (!operator) {
         return this.unauthorizedResponse();
       }
-      if (!this.isInviteConsensusEligibleOperator(operator)) {
-        return Response.json({ error: 'forbidden: invite consensus approver only' }, { status: 403 });
+      if (!this.hasAdminInviteIssuanceAuthority(operator)) {
+        return Response.json({ error: 'forbidden: master invite issuer only' }, { status: 403 });
       }
 
       let body: { proposalId?: string };
@@ -5718,14 +5699,14 @@ export class SchoolStore implements DurableObject {
       return this.approveAdminInviteProposal(operator, proposal);
     }
 
-    // POST /api/admin/invite/reject (Operator auth required)
+    // POST /api/admin/invite/reject (Master operator only)
     if (path === '/api/admin/invite/reject' && request.method === 'POST') {
       const operator = await this.authenticateOperator(request);
       if (!operator) {
         return this.unauthorizedResponse();
       }
-      if (!this.isInviteConsensusEligibleOperator(operator)) {
-        return Response.json({ error: 'forbidden: invite consensus approver only' }, { status: 403 });
+      if (!this.hasAdminInviteIssuanceAuthority(operator)) {
+        return Response.json({ error: 'forbidden: master invite issuer only' }, { status: 403 });
       }
 
       let body: { proposalId?: string; reason?: string };
