@@ -27,6 +27,11 @@ import type { SchoolEvent } from '../../types/school';
 
 const SIGN_TIMEOUT_MS = 120_000;
 
+function firstParam(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
 function buildSendErrorDebugText(error: unknown): string {
   const lines: string[] = [];
   if (error && typeof error === 'object' && 'message' in error) {
@@ -49,7 +54,8 @@ function shouldRetryWithLegacyClaim(error: unknown): boolean {
 
 export const UserConfirmScreen: React.FC = () => {
   const router = useRouter();
-  const { mode: modeRaw } = useLocalSearchParams<{ mode?: string }>();
+  const { mode: modeParam } = useLocalSearchParams<{ mode?: string | string[] }>();
+  const modeRaw = firstParam(modeParam);
   const { eventId: targetEventId, isValid } = useEventIdFromParams({ redirectOnInvalid: true });
   const { userId, clearUser } = useAuth();
   const walletPubkey = useRecipientStore((s) => s.walletPubkey);
@@ -433,6 +439,10 @@ export const UserConfirmScreen: React.FC = () => {
               eventId: targetEventId,
               message: onchainMsg,
             });
+          }
+          // 「オンチェーンで受け取る」導線では、署名/送信失敗を握りつぶさず画面にエラー表示する。
+          if (forceOnchainMode && !onchainBlockedByPeriod) {
+            throw onchainError;
           }
         }
       } else if (__DEV__) {
