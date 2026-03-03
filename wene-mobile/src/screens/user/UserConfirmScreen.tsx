@@ -84,6 +84,7 @@ export const UserConfirmScreen: React.FC = () => {
   const dappEncryptionPublicKey = usePhantomStore((s) => s.dappEncryptionPublicKey);
   const dappSecretKey = usePhantomStore((s) => s.dappSecretKey);
   const phantomEncryptionPublicKey = usePhantomStore((s) => s.phantomEncryptionPublicKey);
+  const addTicket = useRecipientTicketStore((s) => s.addTicket);
   const getTicketByEventId = useRecipientTicketStore((s) => s.getTicketByEventId);
   const [event, setEvent] = useState<SchoolEvent | null>(null);
   const [eventLoading, setEventLoading] = useState(true);
@@ -446,6 +447,22 @@ export const UserConfirmScreen: React.FC = () => {
           popAuditHash = onchain.popAuditHash;
           popSigner = onchain.popSigner;
           tokenReflectedInWallet = await waitForMintReflection(onchain.mint, ownerWallet);
+          try {
+            await addTicket({
+              eventId: targetEventId,
+              eventName: event.title,
+              joinedAt: Date.now(),
+              txSignature: onchain.txSignature,
+              receiptPubkey: onchain.receiptPubkey,
+              mintAddress: onchain.mint,
+              popEntryHash: onchain.popEntryHash,
+              popAuditHash: onchain.popAuditHash,
+              popSigner: onchain.popSigner,
+              confirmationCode,
+            });
+          } catch (ticketPersistError) {
+            console.warn('[UserConfirmScreen] addTicket failed:', ticketPersistError);
+          }
 
           try {
             result = await claimEventWithUser(targetEventId, userId, pinVal, {
@@ -612,6 +629,7 @@ export const UserConfirmScreen: React.FC = () => {
     walletReady,
     runOnchainClaim,
     waitForMintReflection,
+    addTicket,
     getTicketByEventId,
     clearUser,
     router,

@@ -26,6 +26,11 @@ function shortenCode(value: string, head = 8, tail = 8): string {
   return `${normalized.slice(0, head)}...${normalized.slice(-tail)}`;
 }
 
+function firstParam(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
 export const UserSuccessScreen: React.FC = () => {
   const router = useRouter();
   const { userId } = useAuth();
@@ -46,19 +51,19 @@ export const UserSuccessScreen: React.FC = () => {
     auditReceiptId: auditReceiptIdRaw,
     auditReceiptHash: auditReceiptHashRaw,
   } = useLocalSearchParams<{
-    tx?: string;
-    receipt?: string;
-    already?: string;
-    confirmationCode?: string;
-    status?: string;
-    mint?: string;
-    reflected?: string;
-    onchainBlocked?: string;
-    popEntryHash?: string;
-    popAuditHash?: string;
-    popSigner?: string;
-    auditReceiptId?: string;
-    auditReceiptHash?: string;
+    tx?: string | string[];
+    receipt?: string | string[];
+    already?: string | string[];
+    confirmationCode?: string | string[];
+    status?: string | string[];
+    mint?: string | string[];
+    reflected?: string | string[];
+    onchainBlocked?: string | string[];
+    popEntryHash?: string | string[];
+    popAuditHash?: string | string[];
+    popSigner?: string | string[];
+    auditReceiptId?: string | string[];
+    auditReceiptHash?: string | string[];
   }>();
 
   const [event, setEvent] = useState<SchoolEvent | null>(null);
@@ -66,24 +71,37 @@ export const UserSuccessScreen: React.FC = () => {
   const [onchainReady, setOnchainReady] = useState<boolean>(false);
   const [onchainUnavailableReason, setOnchainUnavailableReason] = useState<string | null>(null);
   const { addTicket, getTicketByEventId } = useRecipientTicketStore();
-  const txSignature = typeof tx === 'string' && tx.trim() ? tx.trim() : undefined;
-  const receiptPubkey = typeof receipt === 'string' && receipt.trim() ? receipt.trim() : undefined;
-  const mintAddress = typeof mint === 'string' && mint.trim() ? mint.trim() : undefined;
-  const popEntryHash = typeof popEntryHashRaw === 'string' && popEntryHashRaw.trim() ? popEntryHashRaw.trim() : undefined;
-  const popAuditHash = typeof popAuditHashRaw === 'string' && popAuditHashRaw.trim() ? popAuditHashRaw.trim() : undefined;
-  const popSigner = typeof popSignerRaw === 'string' && popSignerRaw.trim() ? popSignerRaw.trim() : undefined;
+  const txParam = firstParam(tx);
+  const receiptParam = firstParam(receipt);
+  const alreadyParam = firstParam(already);
+  const statusParam = firstParam(status);
+  const confirmationCodeParam = firstParam(confirmationCode);
+  const mintParam = firstParam(mint);
+  const reflectedParam = firstParam(reflected);
+  const onchainBlockedParam = firstParam(onchainBlocked);
+  const popEntryHashParam = firstParam(popEntryHashRaw);
+  const popAuditHashParam = firstParam(popAuditHashRaw);
+  const popSignerParam = firstParam(popSignerRaw);
+  const auditReceiptIdParam = firstParam(auditReceiptIdRaw);
+  const auditReceiptHashParam = firstParam(auditReceiptHashRaw);
+  const txSignature = typeof txParam === 'string' && txParam.trim() ? txParam.trim() : undefined;
+  const receiptPubkey = typeof receiptParam === 'string' && receiptParam.trim() ? receiptParam.trim() : undefined;
+  const mintAddress = typeof mintParam === 'string' && mintParam.trim() ? mintParam.trim() : undefined;
+  const popEntryHash = typeof popEntryHashParam === 'string' && popEntryHashParam.trim() ? popEntryHashParam.trim() : undefined;
+  const popAuditHash = typeof popAuditHashParam === 'string' && popAuditHashParam.trim() ? popAuditHashParam.trim() : undefined;
+  const popSigner = typeof popSignerParam === 'string' && popSignerParam.trim() ? popSignerParam.trim() : undefined;
   const auditReceiptId =
-    typeof auditReceiptIdRaw === 'string' && auditReceiptIdRaw.trim() ? auditReceiptIdRaw.trim() : undefined;
+    typeof auditReceiptIdParam === 'string' && auditReceiptIdParam.trim() ? auditReceiptIdParam.trim() : undefined;
   const auditReceiptHash =
-    typeof auditReceiptHashRaw === 'string' && auditReceiptHashRaw.trim() ? auditReceiptHashRaw.trim() : undefined;
-  const reflectedOnchain = reflected === '1';
-  const onchainBlockedByPeriod = onchainBlocked === '1';
+    typeof auditReceiptHashParam === 'string' && auditReceiptHashParam.trim() ? auditReceiptHashParam.trim() : undefined;
+  const reflectedOnchain = reflectedParam === '1';
+  const onchainBlockedByPeriod = onchainBlockedParam === '1';
   const storedTicket = targetEventId ? getTicketByEventId(targetEventId) : undefined;
   const resolvedTx = txSignature ?? storedTicket?.txSignature;
   const resolvedReceipt = receiptPubkey ?? storedTicket?.receiptPubkey;
   const resolvedMintAddress = mintAddress ?? storedTicket?.mintAddress;
   const resolvedConfirmationCode =
-    (typeof confirmationCode === 'string' && confirmationCode.trim() ? confirmationCode.trim() : undefined) ??
+    (typeof confirmationCodeParam === 'string' && confirmationCodeParam.trim() ? confirmationCodeParam.trim() : undefined) ??
     storedTicket?.confirmationCode;
   const resolvedAuditReceiptId = auditReceiptId ?? storedTicket?.auditReceiptId;
   const resolvedAuditReceiptHash = auditReceiptHash ?? storedTicket?.auditReceiptHash;
@@ -178,15 +196,15 @@ export const UserSuccessScreen: React.FC = () => {
             eventId: ev.id,
             eventName: ev.title,
             joinedAt: Date.now(),
-            txSignature,
-            receiptPubkey,
-            popEntryHash,
-            popAuditHash,
-            popSigner,
-            mintAddress,
-            confirmationCode: typeof confirmationCode === 'string' ? confirmationCode : undefined,
-            auditReceiptId,
-            auditReceiptHash,
+            txSignature: resolvedTx,
+            receiptPubkey: resolvedReceipt,
+            popEntryHash: resolvedPopEntryHash,
+            popAuditHash: resolvedPopAuditHash,
+            popSigner: resolvedPopSigner,
+            mintAddress: resolvedMintAddress,
+            confirmationCode: resolvedConfirmationCode,
+            auditReceiptId: resolvedAuditReceiptId,
+            auditReceiptHash: resolvedAuditReceiptHash,
           });
         }
       })
@@ -195,18 +213,18 @@ export const UserSuccessScreen: React.FC = () => {
   }, [
     targetEventId,
     addTicket,
-    txSignature,
-    receiptPubkey,
-    popEntryHash,
-    popAuditHash,
-    popSigner,
-    mintAddress,
-    confirmationCode,
-    auditReceiptId,
-    auditReceiptHash,
+    resolvedTx,
+    resolvedReceipt,
+    resolvedPopEntryHash,
+    resolvedPopAuditHash,
+    resolvedPopSigner,
+    resolvedMintAddress,
+    resolvedConfirmationCode,
+    resolvedAuditReceiptId,
+    resolvedAuditReceiptHash,
   ]);
 
-  const isAlready = already === '1' || status === 'already';
+  const isAlready = alreadyParam === '1' || statusParam === 'already';
   const explorerTxUrl = resolvedTx ? `https://explorer.solana.com/tx/${resolvedTx}?cluster=devnet` : null;
   const explorerReceiptUrl = resolvedReceipt ? `https://explorer.solana.com/address/${resolvedReceipt}?cluster=devnet` : null;
   const explorerMintUrl = resolvedMintAddress ? `https://explorer.solana.com/address/${resolvedMintAddress}?cluster=devnet` : null;
