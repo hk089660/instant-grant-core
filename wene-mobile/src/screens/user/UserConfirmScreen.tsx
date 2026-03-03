@@ -274,7 +274,19 @@ export const UserConfirmScreen: React.FC = () => {
   }, []);
 
   const handleParticipate = useCallback(async () => {
-    if (!targetEventId || !userId || !event) return;
+    if (!targetEventId) {
+      setError('イベントIDが見つかりません。イベント一覧から再度選択してください。');
+      return;
+    }
+    if (!userId) {
+      setError('ログインが必要です。ログイン画面へ移動します。');
+      router.replace(schoolRoutes.login as any);
+      return;
+    }
+    if (!event) {
+      setError('イベント情報を読み込み中です。数秒後に再試行してください。');
+      return;
+    }
 
     // PIN が必要な場合は入力を促す
     if (!showPinInput) {

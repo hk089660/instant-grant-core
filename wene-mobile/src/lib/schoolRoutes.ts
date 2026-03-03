@@ -9,7 +9,7 @@ export const schoolRoutes = {
   scan: '/u/scan',
   register: '/u/register',
   login: '/u/login',
-  confirm: (eventId: string) => `/u/confirm?eventId=${eventId}`,
+  confirm: (eventId: string) => `/u/confirm?eventId=${encodeURIComponent(eventId)}`,
   success: (
     eventId: string,
     params?: {

@@ -84,6 +84,7 @@ export const UserSuccessScreen: React.FC = () => {
   const resolvedPopAuditHash = popAuditHash ?? storedTicket?.popAuditHash;
   const resolvedPopSigner = popSigner ?? storedTicket?.popSigner;
   const isWalletConnected = Boolean(walletPubkey);
+  const isUserLoggedIn = Boolean(userId);
   const checkScale = useRef(new Animated.Value(0.7)).current;
   const checkOpacity = useRef(new Animated.Value(0)).current;
   const ringScale = useRef(new Animated.Value(0.75)).current;
@@ -247,8 +248,12 @@ export const UserSuccessScreen: React.FC = () => {
 
   const handleNavigateOnchainReceive = useCallback(() => {
     if (!targetEventId) return;
+    if (!isUserLoggedIn) {
+      router.push(schoolRoutes.login as any);
+      return;
+    }
     router.push(schoolRoutes.confirm(targetEventId) as any);
-  }, [targetEventId, router]);
+  }, [targetEventId, isUserLoggedIn, router]);
 
   const handleConnectWallet = useCallback(() => {
     router.push('/wallet' as any);
@@ -318,9 +323,17 @@ export const UserSuccessScreen: React.FC = () => {
               この参加券はオフチェーン記録済みです。ウォレット受け取りを実行するとオンチェーンにも反映されます。
             </AppText>
             <Button
-              title={isWalletConnected ? 'オンチェーンで受け取る' : 'Walletを接続する'}
-              onPress={isWalletConnected ? handleNavigateOnchainReceive : handleConnectWallet}
-              variant={isWalletConnected ? 'primary' : 'secondary'}
+              title={
+                isWalletConnected
+                  ? (isUserLoggedIn ? 'オンチェーンで受け取る' : 'ログインして受け取る')
+                  : 'Walletを接続する'
+              }
+              onPress={
+                isWalletConnected
+                  ? handleNavigateOnchainReceive
+                  : handleConnectWallet
+              }
+              variant={isWalletConnected && isUserLoggedIn ? 'primary' : 'secondary'}
               style={styles.onchainReceiveButton}
             />
             {isWalletConnected ? (
