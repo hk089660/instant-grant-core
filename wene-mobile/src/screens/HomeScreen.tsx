@@ -11,7 +11,7 @@ import { useAuth } from '../contexts/AuthContext';
 export const HomeScreen: React.FC = () => {
   const router = useRouter();
   const { userId, displayName, clearUser } = useAuth();
-  const appIcon = require('../../assets/icon.png');
+  const appIcon = require('../../assets/user-symbol-circle.png');
   const logoIntro = useRef(new Animated.Value(0)).current;
   const logoFloat = useRef(new Animated.Value(0)).current;
   const floatLoopRef = useRef<Animated.CompositeAnimation | null>(null);
