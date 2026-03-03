@@ -191,6 +191,13 @@ function buildLegacyClaimGrantInstruction(params: {
 
 function shouldUseOnchainPopClaim(): boolean {
   const raw = (process.env.EXPO_PUBLIC_ENABLE_ONCHAIN_POP_CLAIM ?? '').trim().toLowerCase();
+  if (!raw) {
+    // 新しい Grant Program は claim_grant で PoP 関連アカウントを必須化しているため既定で有効化。
+    return true;
+  }
+  if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') {
+    return false;
+  }
   return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 }
 
@@ -318,10 +325,17 @@ export async function buildClaimTx(
   const popConfigInfo = onchainPopClaimEnabled
     ? await connection.getAccountInfo(popConfigPda, 'confirmed')
     : null;
-  const usePopProof = onchainPopClaimEnabled && Boolean(popConfigInfo);
-  if (onchainPopClaimEnabled && !popConfigInfo && typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.warn('[buildClaimTx] pop_config missing; fallback to legacy claim_grant flow');
+  if (onchainPopClaimEnabled) {
+    if (!popConfigInfo) {
+      throw new Error('PoP設定が未初期化です。運営側で pop_config を設定してください。');
+    }
+    if (!popConfigInfo.owner.equals(GRANT_PROGRAM_ID)) {
+      throw new Error(
+        `PoP設定アカウントの所有者が不正です: owner=${popConfigInfo.owner.toBase58()} expected=${GRANT_PROGRAM_ID.toBase58()}`
+      );
+    }
   }
+  const usePopProof = onchainPopClaimEnabled;
 
   // 既存レシートがある場合は、同一期間の再受給が不可能（Program仕様）なので事前に中断
   const existingReceipt = await connection.getAccountInfo(receiptPda, 'confirmed');
