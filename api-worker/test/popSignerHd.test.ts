@@ -47,6 +47,7 @@ class MockDurableObjectState {
 
 describe('PoP signer HD configuration', () => {
   let state: MockDurableObjectState;
+  const authHeaders = { Authorization: 'Bearer master-secret' };
 
   beforeEach(() => {
     state = new MockDurableObjectState();
@@ -65,7 +66,7 @@ describe('PoP signer HD configuration', () => {
     const store = new SchoolStore(state, env);
 
     const runtimeRes = await store.fetch(
-      new Request('https://example.com/v1/school/runtime-status', { method: 'GET' })
+      new Request('https://example.com/v1/school/runtime-status', { method: 'GET', headers: authHeaders })
     );
     expect(runtimeRes.status).toBe(200);
     const runtimeBody = (await runtimeRes.json()) as {
@@ -93,7 +94,7 @@ describe('PoP signer HD configuration', () => {
     expect((runtimeBody.blockingIssues ?? []).length).toBe(0);
 
     const popStatusRes = await store.fetch(
-      new Request('https://example.com/v1/school/pop-status', { method: 'GET' })
+      new Request('https://example.com/v1/school/pop-status', { method: 'GET', headers: authHeaders })
     );
     expect(popStatusRes.status).toBe(200);
     const popStatusBody = (await popStatusRes.json()) as {
@@ -130,7 +131,7 @@ describe('PoP signer HD configuration', () => {
     const store = new SchoolStore(state, env);
 
     const runtimeRes = await store.fetch(
-      new Request('https://example.com/v1/school/runtime-status', { method: 'GET' })
+      new Request('https://example.com/v1/school/runtime-status', { method: 'GET', headers: authHeaders })
     );
     expect(runtimeRes.status).toBe(200);
     const body = (await runtimeRes.json()) as {
@@ -159,7 +160,7 @@ describe('PoP signer HD configuration', () => {
     const store = new SchoolStore(state, env);
 
     const popStatusRes = await store.fetch(
-      new Request('https://example.com/v1/school/pop-status', { method: 'GET' })
+      new Request('https://example.com/v1/school/pop-status', { method: 'GET', headers: authHeaders })
     );
     expect(popStatusRes.status).toBe(200);
     const body = (await popStatusRes.json()) as {
@@ -195,7 +196,7 @@ describe('PoP signer HD configuration', () => {
     const store = new SchoolStore(state, env);
 
     const popResDay2 = await store.fetch(
-      new Request('https://example.com/v1/school/pop-status', { method: 'GET' })
+      new Request('https://example.com/v1/school/pop-status', { method: 'GET', headers: authHeaders })
     );
     expect(popResDay2.status).toBe(200);
     const day2 = (await popResDay2.json()) as {
@@ -215,7 +216,7 @@ describe('PoP signer HD configuration', () => {
 
     nowSpy.mockReturnValue(3 * 24 * 60 * 60 * 1000 + 1);
     const popResDay3 = await store.fetch(
-      new Request('https://example.com/v1/school/pop-status', { method: 'GET' })
+      new Request('https://example.com/v1/school/pop-status', { method: 'GET', headers: authHeaders })
     );
     expect(popResDay3.status).toBe(200);
     const day3 = (await popResDay3.json()) as {
@@ -245,7 +246,7 @@ describe('PoP signer HD configuration', () => {
     const store = new SchoolStore(state, env);
 
     const runtimeRes = await store.fetch(
-      new Request('https://example.com/v1/school/runtime-status', { method: 'GET' })
+      new Request('https://example.com/v1/school/runtime-status', { method: 'GET', headers: authHeaders })
     );
     expect(runtimeRes.status).toBe(200);
     const body = (await runtimeRes.json()) as {
@@ -262,5 +263,114 @@ describe('PoP signer HD configuration', () => {
     expect(body.checks?.popSignerLegacyEnabled).toBe(false);
     expect(body.checks?.popSignerError).toContain('legacy POP_SIGNER_* configuration is disabled');
     expect((body.blockingIssues ?? []).some((issue) => issue.includes('PoP signer configuration error'))).toBe(true);
+  });
+
+  it('does not require HD seed when rotation is explicitly disabled', async () => {
+    const env: Env = {
+      ADMIN_PASSWORD: 'master-secret',
+      POP_SIGNER_HD_ROTATION_ENABLED: 'false',
+      POP_SIGNER_HD_ROTATION_PATH_TEMPLATE: "m/44'/501'/{index}'/0'/0'",
+      POP_SIGNER_HD_ROTATION_INTERVAL_DAYS: '30',
+      POP_SIGNER_LEGACY_ENABLED: 'false',
+      AUDIT_IMMUTABLE_MODE: 'off',
+    };
+    // @ts-expect-error mock for DurableObjectState
+    const store = new SchoolStore(state, env);
+
+    const popStatusRes = await store.fetch(
+      new Request('https://example.com/v1/school/pop-status', { method: 'GET', headers: authHeaders })
+    );
+    expect(popStatusRes.status).toBe(200);
+    const body = (await popStatusRes.json()) as {
+      signerConfigured?: boolean;
+      legacySignerEnabled?: boolean;
+      error?: string | null;
+    };
+    expect(body.signerConfigured).toBe(false);
+    expect(body.legacySignerEnabled).toBe(false);
+    expect(body.error).toBeNull();
+  });
+
+  it('rejects fixed HD pubkey when rotation is enabled', async () => {
+    const hdSeed = new Uint8Array(64);
+    for (let i = 0; i < hdSeed.length; i += 1) hdSeed[i] = (i + 31) % 256;
+    const randomPubkey = bs58.encode(nacl.sign.keyPair().publicKey);
+    const env: Env = {
+      ADMIN_PASSWORD: 'master-secret',
+      POP_SIGNER_HD_MASTER_SEED_B64: Buffer.from(hdSeed).toString('base64'),
+      POP_SIGNER_HD_PUBKEY: randomPubkey,
+      POP_SIGNER_HD_ROTATION_ENABLED: 'true',
+      POP_SIGNER_HD_ROTATION_PATH_TEMPLATE: "m/44'/501'/{index}'/0'/0'",
+      POP_SIGNER_LEGACY_ENABLED: 'false',
+      AUDIT_IMMUTABLE_MODE: 'off',
+    };
+    // @ts-expect-error mock for DurableObjectState
+    const store = new SchoolStore(state, env);
+
+    const runtimeRes = await store.fetch(
+      new Request('https://example.com/v1/school/runtime-status', { method: 'GET', headers: authHeaders })
+    );
+    expect(runtimeRes.status).toBe(200);
+    const body = (await runtimeRes.json()) as {
+      checks?: {
+        popSignerConfigured?: boolean;
+        popSignerError?: string | null;
+      };
+      blockingIssues?: string[];
+    };
+    expect(body.checks?.popSignerConfigured).toBe(false);
+    expect(body.checks?.popSignerError).toContain('POP_SIGNER_HD_PUBKEY cannot be set when POP_SIGNER_HD_ROTATION_ENABLED=true');
+    expect((body.blockingIssues ?? []).some((issue) => issue.includes('PoP signer configuration error'))).toBe(true);
+  });
+
+  it('redacts signer internals from unauthenticated status endpoints', async () => {
+    const hdSeed = new Uint8Array(64);
+    for (let i = 0; i < hdSeed.length; i += 1) hdSeed[i] = (i + 41) % 256;
+    const env: Env = {
+      ADMIN_PASSWORD: 'master-secret',
+      POP_SIGNER_HD_MASTER_SEED_B64: Buffer.from(hdSeed).toString('base64'),
+      POP_SIGNER_HD_PATH: "m/44'/501'/0'/0'/5'",
+      AUDIT_IMMUTABLE_MODE: 'off',
+    };
+    // @ts-expect-error mock for DurableObjectState
+    const store = new SchoolStore(state, env);
+
+    const popStatusRes = await store.fetch(
+      new Request('https://example.com/v1/school/pop-status', { method: 'GET' })
+    );
+    expect(popStatusRes.status).toBe(200);
+    const popBody = (await popStatusRes.json()) as {
+      signerConfigured?: boolean;
+      detailsRedacted?: boolean;
+      signerMode?: string;
+      signerDerivationPath?: string | null;
+      signerRotation?: unknown;
+      error?: string | null;
+    };
+    expect(popBody.signerConfigured).toBe(true);
+    expect(popBody.detailsRedacted).toBe(true);
+    expect(popBody.signerMode).toBeUndefined();
+    expect(popBody.signerDerivationPath).toBeUndefined();
+    expect(popBody.signerRotation).toBeUndefined();
+    expect(popBody.error).toBeUndefined();
+
+    const runtimeRes = await store.fetch(
+      new Request('https://example.com/v1/school/runtime-status', { method: 'GET' })
+    );
+    expect(runtimeRes.status).toBe(200);
+    const runtimeBody = (await runtimeRes.json()) as {
+      checks?: {
+        popSignerMode?: string | null;
+        popSignerDerivationPath?: string | null;
+        popSignerRotation?: { enabled?: boolean };
+        popSignerError?: string | null;
+      };
+      warnings?: string[];
+    };
+    expect(runtimeBody.checks?.popSignerMode).toBeNull();
+    expect(runtimeBody.checks?.popSignerDerivationPath).toBeNull();
+    expect(runtimeBody.checks?.popSignerRotation?.enabled).toBe(false);
+    expect(runtimeBody.checks?.popSignerError).toBeNull();
+    expect((runtimeBody.warnings ?? []).some((warning) => warning.includes('redacted'))).toBe(true);
   });
 });

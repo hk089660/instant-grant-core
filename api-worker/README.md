@@ -36,11 +36,13 @@ Hono による最小構成の API。`wene-mobile`（Cloudflare Pages）から固
   - レスポンス: `{ ok, receipt, verification }`
   - 参加券のコードだけで第三者検証を実行できる（審査・監査導線向け）
 - `GET /v1/school/pop-status`
-  - レスポンス: `{ enforceOnchainPop: boolean; signerConfigured: boolean; signerPubkey?: string | null; signerMode?: 'legacy'|'hd'|null; signerDerivationPath?: string | null; signerRotation?: { enabled: boolean; index: number | null; intervalDays: number | null; startUnix: number | null; nextRotateAtUnix: number | null; pathTemplate: string | null }; legacySignerEnabled?: boolean; error?: string | null }`
+  - 未認証レスポンス: `{ enforceOnchainPop: boolean; signerConfigured: boolean; signerPubkey?: string | null; detailsRedacted: true }`
+  - `Authorization: Bearer <admin/master token>` 付きレスポンス: `{ enforceOnchainPop: boolean; signerConfigured: boolean; signerPubkey?: string | null; signerMode?: 'legacy'|'hd'|null; signerDerivationPath?: string | null; signerRotation?: { enabled: boolean; index: number | null; intervalDays: number | null; startUnix: number | null; nextRotateAtUnix: number | null; pathTemplate: string | null }; legacySignerEnabled?: boolean; error?: string | null }`
 - `GET /v1/school/audit-status`
   - レスポンス: `{ mode: 'off'|'best_effort'|'required'; failClosedForMutatingRequests: boolean; operationalReady: boolean; primaryImmutableSinkConfigured: boolean; sinks: { r2Configured: boolean; kvConfigured: boolean; ingestConfigured: boolean } }`
 - `GET /v1/school/runtime-status`
-  - レスポンス: `{ ready: boolean; checks: {...}; blockingIssues: string[]; warnings: string[] }`
+  - 未認証レスポンス: 機密項目をマスクした `{ ready: boolean; checks: {...}; blockingIssues: string[]; warnings: string[] }`
+  - `Authorization: Bearer <admin/master token>` 付きで完全な診断情報を返す
   - 実運用の前提（`ADMIN_PASSWORD`、PoP signer、監査 immutable sink）を一括で確認
 - `GET /api/master/audit-integrity`（Master Password 必須）
   - クエリ: `limit`（既定 50, 最大 200）, `verifyImmutable`（既定 true）

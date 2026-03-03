@@ -1020,15 +1020,16 @@ export class SchoolStore implements DurableObject {
     const hdMasterSeedB64 = this.env.POP_SIGNER_HD_MASTER_SEED_B64?.trim() ?? '';
     const hdPathRaw = this.env.POP_SIGNER_HD_PATH?.trim() ?? '';
     const hdPubkey = this.env.POP_SIGNER_HD_PUBKEY?.trim() ?? '';
+    const hdRotationEnabledRaw = this.env.POP_SIGNER_HD_ROTATION_ENABLED?.trim() ?? '';
+    const hdRotationEnabled = parseOptionalBooleanEnv(hdRotationEnabledRaw || undefined);
+    if (hdRotationEnabledRaw && hdRotationEnabled === null) {
+      throw new Error('POP_SIGNER_HD_ROTATION_ENABLED must be true/false');
+    }
     const hasAnyHdConfig = Boolean(
       hdMasterSeedB64 ||
       hdPathRaw ||
       hdPubkey ||
-      (this.env.POP_SIGNER_HD_ROTATION_ENABLED?.trim() ?? '') ||
-      (this.env.POP_SIGNER_HD_ROTATION_PATH_TEMPLATE?.trim() ?? '') ||
-      (this.env.POP_SIGNER_HD_ROTATION_INTERVAL_DAYS?.trim() ?? '') ||
-      (this.env.POP_SIGNER_HD_ROTATION_START_UNIX?.trim() ?? '') ||
-      (this.env.POP_SIGNER_HD_ROTATION_INDEX_OFFSET?.trim() ?? '')
+      hdRotationEnabled === true
     );
 
     if (hasAnyHdConfig) {
@@ -1045,6 +1046,9 @@ export class SchoolStore implements DurableObject {
 
       const pathResolution = this.resolvePopSignerHdDerivationPath(nowMs);
       const derivationPath = pathResolution.derivationPath;
+      if (pathResolution.rotation.enabled && hdPubkey) {
+        throw new Error('POP_SIGNER_HD_PUBKEY cannot be set when POP_SIGNER_HD_ROTATION_ENABLED=true');
+      }
       const cacheKey = `hd:${hdMasterSeedB64}:${hdPubkey}:${pathResolution.cacheKeyPart}`;
       if (this.popSignerCache?.cacheKey === cacheKey) {
         return this.popSignerCache.signer;
@@ -2642,6 +2646,7 @@ export class SchoolStore implements DurableObject {
       const prevHashHex = expectedPrevHashHex ?? storedPrevHashHex;
       const streamPrevHashHex = expectedStreamPrevHashHex ?? storedStreamPrevHashHex;
       const hashSource = expectedPrevHashHex ? 'client_onchain' : 'storage';
+      const popChainAdvanced = !expectedPrevHashHex;
       const prevHash = hexToBytes(prevHashHex);
       const streamPrevHash = hexToBytes(streamPrevHashHex);
       const issuedAt = BigInt(Math.floor(Date.now() / 1000));
@@ -2664,6 +2669,7 @@ export class SchoolStore implements DurableObject {
           prevHash: prevHashHex,
           streamPrevHash: streamPrevHashHex,
           hashSource,
+          popChainAdvanced,
           storedPrevHash: storedPrevHashHex,
           storedStreamPrevHash: storedStreamPrevHashHex,
         },
@@ -2681,8 +2687,10 @@ export class SchoolStore implements DurableObject {
       });
       const entryHashHex = bytesToHex(entryHash);
 
-      await this.ctx.storage.put(globalKey, entryHashHex);
-      await this.ctx.storage.put(streamKey, entryHashHex);
+      if (popChainAdvanced) {
+        await this.ctx.storage.put(globalKey, entryHashHex);
+        await this.ctx.storage.put(streamKey, entryHashHex);
+      }
       await this.ctx.storage.put(`pop_chain:history:${new Date().toISOString()}:${entryHashHex}`, {
         eventId,
         confirmationCode,
@@ -2695,6 +2703,7 @@ export class SchoolStore implements DurableObject {
         prevHash: prevHashHex,
         streamPrevHash: streamPrevHashHex,
         hashSource,
+        popChainAdvanced,
         storedPrevHash: storedPrevHashHex,
         storedStreamPrevHash: storedStreamPrevHashHex,
         auditHash: auditHashHex,
@@ -3399,6 +3408,33 @@ export class SchoolStore implements DurableObject {
         costOfForgeryOperationalReady: costOfForgeryStatus.operationalReady,
         costOfForgeryFailClosed: costOfForgeryAnyFailClosed,
         corsOrigin: corsOrigin || null,
+      },
+      blockingIssues,
+      warnings,
+    };
+  }
+
+  private getPublicRuntimeStatus(status: RuntimeStatusReport): RuntimeStatusReport {
+    const blockingIssues = status.blockingIssues.map((issue) =>
+      issue.startsWith('PoP signer configuration error:')
+        ? 'PoP signer configuration error (details redacted)'
+        : issue
+    );
+    const warnings = status.warnings.filter(
+      (warning) => !warning.includes('PoP legacy signer fallback') && !warning.includes('CORS_ORIGIN')
+    );
+    warnings.push('Some runtime details are redacted; use Authorization to view full diagnostics');
+
+    return {
+      ...status,
+      checks: {
+        ...status.checks,
+        popSignerMode: null,
+        popSignerDerivationPath: null,
+        popSignerRotation: this.emptyPopSignerRotation(),
+        popSignerLegacyEnabled: false,
+        popSignerError: status.checks.popSignerError ? 'redacted' : null,
+        corsOrigin: null,
       },
       blockingIssues,
       warnings,
@@ -6542,6 +6578,7 @@ export class SchoolStore implements DurableObject {
       let signerDerivationPath: string | null = null;
       let signerRotation: PopSignerRotation = this.emptyPopSignerRotation();
       let error: string | null = null;
+      const operator = await this.authenticateOperator(request);
       try {
         const signer = this.getPopSigner();
         signerConfigured = signer !== null;
@@ -6552,16 +6589,21 @@ export class SchoolStore implements DurableObject {
       } catch (err) {
         error = err instanceof Error ? err.message : String(err);
       }
-      return Response.json({
+      const body: Record<string, unknown> = {
         enforceOnchainPop: this.isOnchainPopEnforced(),
         signerConfigured,
         signerPubkey,
-        signerMode,
-        signerDerivationPath,
-        signerRotation,
-        legacySignerEnabled: this.isPopSignerLegacyEnabled(),
-        error,
-      });
+      };
+      if (operator) {
+        body.signerMode = signerMode;
+        body.signerDerivationPath = signerDerivationPath;
+        body.signerRotation = signerRotation;
+        body.legacySignerEnabled = this.isPopSignerLegacyEnabled();
+        body.error = error;
+      } else {
+        body.detailsRedacted = true;
+      }
+      return Response.json(body);
     }
 
     if (path === '/v1/school/audit-status' && request.method === 'GET') {
@@ -6569,7 +6611,9 @@ export class SchoolStore implements DurableObject {
     }
 
     if (path === '/v1/school/runtime-status' && request.method === 'GET') {
-      return Response.json(this.getRuntimeStatus());
+      const status = this.getRuntimeStatus();
+      const operator = await this.authenticateOperator(request);
+      return Response.json(operator ? status : this.getPublicRuntimeStatus(status));
     }
 
     if (path === '/api/cost-of-forgery/remediation/request' && request.method === 'POST') {
