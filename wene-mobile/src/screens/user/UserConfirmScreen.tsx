@@ -1,7 +1,7 @@
 import React, { useEffect, useCallback, useState } from 'react';
 import { View, StyleSheet, Alert, Platform, ToastAndroid, ScrollView, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { PublicKey } from '@solana/web3.js';
 import { AppText, Button, Card, Loading } from '../../ui/components';
 import { theme } from '../../ui/theme';
@@ -49,6 +49,7 @@ function shouldRetryWithLegacyClaim(error: unknown): boolean {
 
 export const UserConfirmScreen: React.FC = () => {
   const router = useRouter();
+  const { mode: modeRaw } = useLocalSearchParams<{ mode?: string }>();
   const { eventId: targetEventId, isValid } = useEventIdFromParams({ redirectOnInvalid: true });
   const { userId, clearUser } = useAuth();
   const walletPubkey = useRecipientStore((s) => s.walletPubkey);
@@ -69,6 +70,7 @@ export const UserConfirmScreen: React.FC = () => {
     ? null
     : (event?.maxClaimsPerInterval ?? 1);
   const eventHasOnchainConfig = Boolean(event?.solanaMint && event?.solanaAuthority && event?.solanaGrantId);
+  const forceOnchainMode = modeRaw === 'onchain';
   const onchainPolicyCompatible = claimIntervalDays === 30 && maxClaimsPerInterval === 1;
   const walletReady = Boolean(
     walletPubkey &&
@@ -300,19 +302,21 @@ export const UserConfirmScreen: React.FC = () => {
       return;
     }
 
+    const mobileWeb = Platform.OS === 'web' && isLikelyMobileWebBrowser();
     let skipOnchainByPopup = false;
     if (
       Platform.OS === 'web' &&
       walletReady &&
       walletPubkey &&
-      eventHasOnchainConfig &&
-      !isLikelyMobileWebBrowser()
+      eventHasOnchainConfig
     ) {
       const prepared = preparePhantomWebPopup();
       if (!prepared) {
-        skipOnchainByPopup = true;
+        if (!mobileWeb) {
+          skipOnchainByPopup = true;
+        }
         if (__DEV__) {
-          console.warn('[UserConfirmScreen] popup blocked; continue with off-chain claim');
+          console.warn('[UserConfirmScreen] popup prepare failed');
         }
       }
     }
@@ -361,6 +365,17 @@ export const UserConfirmScreen: React.FC = () => {
         eventHasOnchainConfig &&
         !skipOnchainByPopup
       );
+      if (forceOnchainMode && !shouldAttemptOnchain) {
+        if (!eventHasOnchainConfig) {
+          throw new Error('このイベントはオンチェーン受け取りに対応していません');
+        }
+        if (!walletReady || !walletPubkey) {
+          throw new Error('Phantomウォレットを接続してください');
+        }
+        if (skipOnchainByPopup) {
+          throw new Error('ブラウザのポップアップがブロックされています。許可後に再試行してください');
+        }
+      }
 
       if (shouldAttemptOnchain) {
         const ownerWallet = walletPubkey;
@@ -538,6 +553,7 @@ export const UserConfirmScreen: React.FC = () => {
     clearUser,
     router,
     eventHasOnchainConfig,
+    forceOnchainMode,
     onchainPolicyCompatible,
     claimIntervalDays,
     maxClaimsPerInterval,
@@ -657,8 +673,8 @@ export const UserConfirmScreen: React.FC = () => {
                   status === 'loading'
                     ? '処理中…'
                     : showPinInput
-                      ? '参加を確定する'
-                      : '参加する'
+                      ? (forceOnchainMode ? '受け取りを確定する' : '参加を確定する')
+                      : (forceOnchainMode ? 'オンチェーン受け取りへ進む' : '参加する')
                 }
                 onPress={handleParticipate}
                 loading={status === 'loading'}

@@ -252,7 +252,7 @@ export const UserSuccessScreen: React.FC = () => {
       router.push(schoolRoutes.login as any);
       return;
     }
-    router.push(schoolRoutes.confirm(targetEventId) as any);
+    router.push(schoolRoutes.confirm(targetEventId, { mode: 'onchain' }) as any);
   }, [targetEventId, isUserLoggedIn, router]);
 
   const handleConnectWallet = useCallback(() => {
