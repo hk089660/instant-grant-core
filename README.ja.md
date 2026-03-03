@@ -413,7 +413,7 @@ curl -s -X POST "$BASE/api/audit/receipts/verify-code" \
 - `runtime-status.ready=false`:
   - `blockingIssues` を見て `ADMIN_PASSWORD` / PoP signer / immutable sink 設定不足を特定。
 - `PoP署名者公開鍵...` エラー:
-  - Workerの `POP_SIGNER_*` と `EXPO_PUBLIC_POP_SIGNER_PUBKEY` を確認。
+  - Workerの `POP_SIGNER_HD_*`（`POP_SIGNER_LEGACY_ENABLED=false`）と `EXPO_PUBLIC_POP_SIGNER_PUBKEY` を確認。
 - `on-chain claim proof required` / `wallet_required`:
   - オンチェーン設定済み + 強制方針で、ウォレット/証跡が不足。
 - `/api/admin/*` や `/api/master/*` が `401`:

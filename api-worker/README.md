@@ -36,7 +36,7 @@ Hono による最小構成の API。`wene-mobile`（Cloudflare Pages）から固
   - レスポンス: `{ ok, receipt, verification }`
   - 参加券のコードだけで第三者検証を実行できる（審査・監査導線向け）
 - `GET /v1/school/pop-status`
-  - レスポンス: `{ enforceOnchainPop: boolean; signerConfigured: boolean; signerPubkey?: string | null; error?: string | null }`
+  - レスポンス: `{ enforceOnchainPop: boolean; signerConfigured: boolean; signerPubkey?: string | null; signerMode?: 'legacy'|'hd'|null; signerDerivationPath?: string | null; signerRotation?: { enabled: boolean; index: number | null; intervalDays: number | null; startUnix: number | null; nextRotateAtUnix: number | null; pathTemplate: string | null }; legacySignerEnabled?: boolean; error?: string | null }`
 - `GET /v1/school/audit-status`
   - レスポンス: `{ mode: 'off'|'best_effort'|'required'; failClosedForMutatingRequests: boolean; operationalReady: boolean; primaryImmutableSinkConfigured: boolean; sinks: { r2Configured: boolean; kvConfigured: boolean; ingestConfigured: boolean } }`
 - `GET /v1/school/runtime-status`
@@ -115,8 +115,19 @@ npx wrangler deploy
 
 L1 で PoP 検証を行うため、以下の Worker 変数を設定する:
 
-- `POP_SIGNER_SECRET_KEY_B64`: Ed25519 の 32byte seed または 64byte secret key を base64 で設定
-- `POP_SIGNER_PUBKEY`: 対応する公開鍵（base58）
+- 旧方式（後方互換）:
+  - `POP_SIGNER_SECRET_KEY_B64`: Ed25519 の 32byte seed または 64byte secret key を base64 で設定
+  - `POP_SIGNER_PUBKEY`: 対応する公開鍵（base58）
+- HD 方式（推奨）:
+  - `POP_SIGNER_HD_MASTER_SEED_B64`: マスターシード（base64, 16-128 bytes）
+  - `POP_SIGNER_HD_PATH`: 派生パス（SLIP-0010 Ed25519 hardened path, 例: `m/44'/501'/0'/0'/0'`）
+  - `POP_SIGNER_HD_PUBKEY`: 任意。派生結果の公開鍵（base58）を固定したい場合に設定
+  - `POP_SIGNER_HD_ROTATION_ENABLED`: HDローテーションを有効化（`true`/`false`）
+  - `POP_SIGNER_HD_ROTATION_PATH_TEMPLATE`: ローテーション用パステンプレート（`{index}` 必須、例: `m/44'/501'/{index}'/0'/0'`）
+  - `POP_SIGNER_HD_ROTATION_INTERVAL_DAYS`: ローテーション間隔（日、既定 30）
+  - `POP_SIGNER_HD_ROTATION_START_UNIX`: ローテーション起点UNIX秒（既定 0）
+  - `POP_SIGNER_HD_ROTATION_INDEX_OFFSET`: indexオフセット（既定 0）
+  - `POP_SIGNER_LEGACY_ENABLED`: 旧 `POP_SIGNER_*` フォールバック有効化（本番推奨 `false`）
 - `ENFORCE_ONCHAIN_POP`: on-chain 設定イベントで PoP 証跡を必須化（推奨: `true`、未設定時も強制）
 - `AUDIT_IMMUTABLE_MODE`: `required`（推奨） / `best_effort` / `off`
 - `AUDIT_IMMUTABLE_FETCH_TIMEOUT_MS`: immutable ingest 送信タイムアウト（ms、既定 5000）
@@ -124,6 +135,14 @@ L1 で PoP 検証を行うため、以下の Worker 変数を設定する:
 - `AUDIT_RANDOM_ANCHOR_ENABLED`: 定期ランダムアンカーの有効/無効（既定 `true`）
 - `AUDIT_RANDOM_ANCHOR_PERIOD_MINUTES`: latest hash を 1 回ランダム固定化する期間（分、既定 60）
 - `AUDIT_LOG_WRITE_TOKEN`: 任意。`POST /v1/audit/log` を有効化する場合の専用トークン
+
+#### HDローテーション本番移行（legacy廃止）
+
+1. `POP_SIGNER_HD_MASTER_SEED_B64` を secret に設定し、`POP_SIGNER_HD_ROTATION_PATH_TEMPLATE` + `POP_SIGNER_HD_ROTATION_*` を vars に設定。
+2. `GET /v1/school/pop-status` で `signerMode: "hd"` / `signerRotation.enabled: true` を確認。
+3. 管理者 authority 側で `upsert_pop_config` を実行し、`pop-status.signerPubkey` の公開鍵を on-chain `pop-config` に反映。
+4. `POP_SIGNER_LEGACY_ENABLED=false` を設定。
+5. Worker secret から `POP_SIGNER_SECRET_KEY_B64` / `POP_SIGNER_PUBKEY` を削除。
 
 ### Anti-Bot / DDoS ガードレール
 

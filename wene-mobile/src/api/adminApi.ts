@@ -970,6 +970,17 @@ export interface RuntimeStatusResponse {
     popEnforced: boolean;
     popSignerConfigured: boolean;
     popSignerPubkey: string | null;
+    popSignerMode?: 'legacy' | 'hd' | null;
+    popSignerDerivationPath?: string | null;
+    popSignerRotation?: {
+      enabled: boolean;
+      index: number | null;
+      intervalDays: number | null;
+      startUnix: number | null;
+      nextRotateAtUnix: number | null;
+      pathTemplate: string | null;
+    };
+    popSignerLegacyEnabled?: boolean;
     popSignerError: string | null;
     auditMode: 'off' | 'best_effort' | 'required';
     auditOperationalReady: boolean;
@@ -990,6 +1001,17 @@ export interface PopStatusResponse {
   enforceOnchainPop: boolean;
   signerConfigured: boolean;
   signerPubkey: string | null;
+  signerMode?: 'legacy' | 'hd' | null;
+  signerDerivationPath?: string | null;
+  signerRotation?: {
+    enabled: boolean;
+    index: number | null;
+    intervalDays: number | null;
+    startUnix: number | null;
+    nextRotateAtUnix: number | null;
+    pathTemplate: string | null;
+  };
+  legacySignerEnabled?: boolean;
   error: string | null;
 }
 

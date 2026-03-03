@@ -192,9 +192,9 @@ async function fetchPopSignerPubkeyFromRuntime(baseUrl: string): Promise<string 
 }
 
 async function resolvePopSignerPubkey(): Promise<PublicKey> {
+  const runtimeRaw = await fetchPopSignerPubkeyFromRuntime(resolveMetadataBaseUrl());
   const envRaw = normalizePubkeyString(process.env.EXPO_PUBLIC_POP_SIGNER_PUBKEY);
-  const runtimeRaw = envRaw ? null : await fetchPopSignerPubkeyFromRuntime(resolveMetadataBaseUrl());
-  const raw = envRaw ?? runtimeRaw;
+  const raw = runtimeRaw ?? envRaw;
   if (!raw) {
     throw new Error(
       'PoP署名者公開鍵が未設定です。EXPO_PUBLIC_POP_SIGNER_PUBKEY を設定するか、runtime-status で popSignerPubkey を返してください'

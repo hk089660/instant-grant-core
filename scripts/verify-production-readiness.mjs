@@ -88,7 +88,11 @@ async function main() {
 
   try {
     const pop = await fetchJson(`${WORKER_BASE_URL}/v1/school/pop-status`);
-    const ok = pop.enforceOnchainPop === true && pop.signerConfigured === true;
+    const ok =
+      pop.enforceOnchainPop === true &&
+      pop.signerConfigured === true &&
+      pop.signerMode === 'hd' &&
+      pop.legacySignerEnabled === false;
     addResult(ok, 'Worker PoP status', JSON.stringify(pop));
   } catch (err) {
     addResult(false, 'Worker PoP status', err instanceof Error ? err.message : String(err));

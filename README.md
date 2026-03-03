@@ -406,7 +406,7 @@ Expected: `ok=true` and a `verification.checks` object with chain/hash validatio
 - `runtime-status.ready=false`:
   - Check `blockingIssues` for `ADMIN_PASSWORD`, PoP signer, or immutable sink setup.
 - `PoP signer not configured` / `PoP署名者公開鍵...`:
-  - Check `POP_SIGNER_*` worker secrets and `EXPO_PUBLIC_POP_SIGNER_PUBKEY`.
+  - Check `POP_SIGNER_HD_*` worker config (`POP_SIGNER_LEGACY_ENABLED=false`) and `EXPO_PUBLIC_POP_SIGNER_PUBKEY`.
 - `on-chain claim proof required` / `wallet_required`:
   - Event is on-chain-configured + enforcement is on; wallet+proof fields are missing.
 - `401 Unauthorized` on `/api/admin/*` or `/api/master/*`:

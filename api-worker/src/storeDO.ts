@@ -95,6 +95,15 @@ export interface Env {
   ADMIN_DEMO_PASSWORD?: string;
   POP_SIGNER_SECRET_KEY_B64?: string;
   POP_SIGNER_PUBKEY?: string;
+  POP_SIGNER_HD_MASTER_SEED_B64?: string;
+  POP_SIGNER_HD_PATH?: string;
+  POP_SIGNER_HD_PUBKEY?: string;
+  POP_SIGNER_HD_ROTATION_ENABLED?: string;
+  POP_SIGNER_HD_ROTATION_PATH_TEMPLATE?: string;
+  POP_SIGNER_HD_ROTATION_INTERVAL_DAYS?: string;
+  POP_SIGNER_HD_ROTATION_START_UNIX?: string;
+  POP_SIGNER_HD_ROTATION_INDEX_OFFSET?: string;
+  POP_SIGNER_LEGACY_ENABLED?: string;
   ENFORCE_ONCHAIN_POP?: string;
   AUDIT_LOGS?: R2Bucket;
   AUDIT_INDEX?: KVNamespace;
@@ -195,6 +204,16 @@ const RANDOM_ANCHOR_DEFAULT_PERIOD_MINUTES = 60;
 const RANDOM_ANCHOR_MIN_PERIOD_MINUTES = 15;
 const RANDOM_ANCHOR_MAX_PERIOD_MINUTES = 24 * 60;
 const RANDOM_ANCHOR_EVENT = 'RANDOM_PERIODIC_ANCHOR';
+const POP_SIGNER_HD_DEFAULT_PATH = "m/44'/501'/0'/0'/0'";
+const POP_SIGNER_HD_MAX_PATH_DEPTH = 10;
+const POP_SIGNER_HD_MIN_SEED_BYTES = 16;
+const POP_SIGNER_HD_MAX_SEED_BYTES = 128;
+const POP_SIGNER_HD_HARDENED_OFFSET = 0x80000000;
+const HMAC_SHA512_BLOCK_SIZE = 128;
+const POP_SIGNER_HD_HMAC_KEY = new TextEncoder().encode('ed25519 seed');
+const POP_SIGNER_HD_ROTATION_DEFAULT_INTERVAL_DAYS = 30;
+const POP_SIGNER_HD_ROTATION_MAX_INTERVAL_DAYS = 3650;
+const POP_SIGNER_HD_ROTATION_MAX_INDEX_OFFSET = POP_SIGNER_HD_HARDENED_OFFSET - 1;
 
 type SecurityRatePolicy = {
   key: string;
@@ -345,6 +364,30 @@ type AuditIntegrityReport = {
   inspectedAt: string;
 };
 
+type PopSignerMode = 'legacy' | 'hd';
+
+type PopSignerRotation = {
+  enabled: boolean;
+  index: number | null;
+  intervalDays: number | null;
+  startUnix: number | null;
+  nextRotateAtUnix: number | null;
+  pathTemplate: string | null;
+};
+
+type PopSigner = {
+  secretKey: Uint8Array;
+  signerPubkey: string;
+  mode: PopSignerMode;
+  derivationPath: string | null;
+  rotation: PopSignerRotation;
+};
+
+type PopSignerCacheEntry = {
+  cacheKey: string;
+  signer: PopSigner | null;
+};
+
 type RuntimeStatusReport = {
   ready: boolean;
   checkedAt: string;
@@ -353,6 +396,10 @@ type RuntimeStatusReport = {
     popEnforced: boolean;
     popSignerConfigured: boolean;
     popSignerPubkey: string | null;
+    popSignerMode: PopSignerMode | null;
+    popSignerDerivationPath: string | null;
+    popSignerRotation: PopSignerRotation;
+    popSignerLegacyEnabled: boolean;
     popSignerError: string | null;
     auditMode: 'off' | 'best_effort' | 'required';
     auditOperationalReady: boolean;
@@ -654,6 +701,106 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
+function concatBytes(...chunks: Uint8Array[]): Uint8Array {
+  let total = 0;
+  for (const chunk of chunks) total += chunk.length;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
+function u32ToBeBytes(value: number): Uint8Array {
+  if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
+    throw new Error('invalid u32 value');
+  }
+  const out = new Uint8Array(4);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, value, false);
+  return out;
+}
+
+function hmacSha512(key: Uint8Array, data: Uint8Array): Uint8Array {
+  let keyMaterial = key;
+  if (keyMaterial.length > HMAC_SHA512_BLOCK_SIZE) {
+    keyMaterial = nacl.hash(keyMaterial);
+  }
+
+  const keyBlock = new Uint8Array(HMAC_SHA512_BLOCK_SIZE);
+  keyBlock.set(keyMaterial);
+
+  const innerPad = new Uint8Array(HMAC_SHA512_BLOCK_SIZE);
+  const outerPad = new Uint8Array(HMAC_SHA512_BLOCK_SIZE);
+  for (let i = 0; i < HMAC_SHA512_BLOCK_SIZE; i += 1) {
+    const b = keyBlock[i] ?? 0;
+    innerPad[i] = b ^ 0x36;
+    outerPad[i] = b ^ 0x5c;
+  }
+
+  const innerHash = nacl.hash(concatBytes(innerPad, data));
+  return nacl.hash(concatBytes(outerPad, innerHash));
+}
+
+function parsePopSignerHdPath(rawPath: string): { indices: number[]; normalizedPath: string } {
+  const path = rawPath.trim();
+  if (!path) {
+    throw new Error('POP_SIGNER_HD_PATH is empty');
+  }
+  const segments = path.split('/');
+  if (segments[0] !== 'm') {
+    throw new Error('POP_SIGNER_HD_PATH must start with m');
+  }
+
+  const pathSegments = segments.slice(1);
+  if (pathSegments.length > POP_SIGNER_HD_MAX_PATH_DEPTH) {
+    throw new Error(`POP_SIGNER_HD_PATH depth must be <= ${POP_SIGNER_HD_MAX_PATH_DEPTH}`);
+  }
+
+  const indices: number[] = [];
+  for (const segment of pathSegments) {
+    const match = segment.match(/^(\d+)'$/);
+    if (!match) {
+      throw new Error("POP_SIGNER_HD_PATH must use hardened indices only (example: m/44'/501'/0'/0'/0')");
+    }
+    const index = Number.parseInt(match[1], 10);
+    if (!Number.isSafeInteger(index) || index < 0 || index > (POP_SIGNER_HD_HARDENED_OFFSET - 1)) {
+      throw new Error('POP_SIGNER_HD_PATH index is out of range');
+    }
+    indices.push(index + POP_SIGNER_HD_HARDENED_OFFSET);
+  }
+
+  const normalizedPath =
+    indices.length === 0
+      ? 'm'
+      : `m/${indices.map((value) => `${value - POP_SIGNER_HD_HARDENED_OFFSET}'`).join('/')}`;
+  return { indices, normalizedPath };
+}
+
+function derivePopSignerHdSeed(masterSeed: Uint8Array, path: string): { seed: Uint8Array; normalizedPath: string } {
+  if (masterSeed.length < POP_SIGNER_HD_MIN_SEED_BYTES || masterSeed.length > POP_SIGNER_HD_MAX_SEED_BYTES) {
+    throw new Error(
+      `POP_SIGNER_HD_MASTER_SEED_B64 must decode to ${POP_SIGNER_HD_MIN_SEED_BYTES}-${POP_SIGNER_HD_MAX_SEED_BYTES} bytes`
+    );
+  }
+  const { indices, normalizedPath } = parsePopSignerHdPath(path);
+
+  let hmacOutput = hmacSha512(POP_SIGNER_HD_HMAC_KEY, masterSeed);
+  let privateKey = hmacOutput.slice(0, 32);
+  let chainCode = hmacOutput.slice(32, 64);
+
+  for (const index of indices) {
+    const data = concatBytes(new Uint8Array([0]), privateKey, u32ToBeBytes(index));
+    hmacOutput = hmacSha512(chainCode, data);
+    privateKey = hmacOutput.slice(0, 32);
+    chainCode = hmacOutput.slice(32, 64);
+  }
+
+  return { seed: privateKey, normalizedPath };
+}
+
 function readHashHex(raw: string | undefined | null): string {
   if (!raw || raw === 'GENESIS') return POP_HASH_GENESIS_HEX;
   const v = raw.trim().toLowerCase();
@@ -718,6 +865,20 @@ function parseOptionalBooleanEnv(raw: string | undefined): boolean | null {
   return null;
 }
 
+function parseNonNegativeIntEnv(
+  raw: string | undefined,
+  fallback: number,
+  max: number
+): number {
+  if (typeof raw !== 'string') return fallback;
+  const normalized = raw.trim();
+  if (!normalized) return fallback;
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) return fallback;
+  if (parsed > max) return max;
+  return parsed;
+}
+
 function u64ToLeBytes(value: bigint): Uint8Array {
   const out = new Uint8Array(8);
   const dv = new DataView(out.buffer);
@@ -759,22 +920,186 @@ export class SchoolStore implements DurableObject {
   private popProofLock: Promise<void> = Promise.resolve();
   private confirmationCodeLock: Promise<void> = Promise.resolve();
   private userIdRegistrationLock: Promise<void> = Promise.resolve();
-  private popSignerCache:
-    | { secretKey: Uint8Array; signerPubkey: string }
-    | null
-    | undefined;
+  private popSignerCache: PopSignerCacheEntry | undefined;
   private masterSearchIndexCache: MasterSearchIndexCache | null = null;
   private masterSearchSqlMetaCache: MasterSearchSqlIndexMeta | null = null;
   private masterSearchSqlTablesReady = false;
 
-  private getPopSigner(): { secretKey: Uint8Array; signerPubkey: string } | null {
-    if (this.popSignerCache !== undefined) return this.popSignerCache;
+  private emptyPopSignerRotation(): PopSignerRotation {
+    return {
+      enabled: false,
+      index: null,
+      intervalDays: null,
+      startUnix: null,
+      nextRotateAtUnix: null,
+      pathTemplate: null,
+    };
+  }
 
+  private isPopSignerLegacyEnabled(): boolean {
+    return parseBooleanEnv(this.env.POP_SIGNER_LEGACY_ENABLED, true);
+  }
+
+  private resolvePopSignerHdDerivationPath(nowMs: number): {
+    derivationPath: string;
+    rotation: PopSignerRotation;
+    cacheKeyPart: string;
+  } {
+    const staticPath = this.env.POP_SIGNER_HD_PATH?.trim() || POP_SIGNER_HD_DEFAULT_PATH;
+    const rotationEnabled = parseBooleanEnv(this.env.POP_SIGNER_HD_ROTATION_ENABLED, false);
+    if (!rotationEnabled) {
+      return {
+        derivationPath: staticPath,
+        rotation: this.emptyPopSignerRotation(),
+        cacheKeyPart: `static:${staticPath}`,
+      };
+    }
+
+    const pathTemplateRaw = this.env.POP_SIGNER_HD_ROTATION_PATH_TEMPLATE?.trim() ?? '';
+    const pathTemplate = pathTemplateRaw || staticPath;
+    if (!pathTemplate.includes('{index}')) {
+      throw new Error("POP_SIGNER_HD_ROTATION_PATH_TEMPLATE must include '{index}' placeholder when rotation is enabled");
+    }
+
+    const intervalDays = parseBoundedInt(
+      this.env.POP_SIGNER_HD_ROTATION_INTERVAL_DAYS ?? null,
+      POP_SIGNER_HD_ROTATION_DEFAULT_INTERVAL_DAYS,
+      1,
+      POP_SIGNER_HD_ROTATION_MAX_INTERVAL_DAYS
+    );
+    const startUnix = parseNonNegativeIntEnv(
+      this.env.POP_SIGNER_HD_ROTATION_START_UNIX,
+      0,
+      Number.MAX_SAFE_INTEGER
+    );
+    const indexOffset = parseNonNegativeIntEnv(
+      this.env.POP_SIGNER_HD_ROTATION_INDEX_OFFSET,
+      0,
+      POP_SIGNER_HD_ROTATION_MAX_INDEX_OFFSET
+    );
+    const intervalSeconds = intervalDays * 24 * 60 * 60;
+    const nowUnix = Math.floor(nowMs / 1000);
+    const rotationSlot = nowUnix <= startUnix
+      ? 0
+      : Math.floor((nowUnix - startUnix) / intervalSeconds);
+    const rotationIndex = indexOffset + rotationSlot;
+    if (rotationIndex > POP_SIGNER_HD_ROTATION_MAX_INDEX_OFFSET) {
+      throw new Error('POP_SIGNER_HD_ROTATION_INDEX_OFFSET + active slot is out of range');
+    }
+
+    const derivationPath = pathTemplate.replaceAll('{index}', String(rotationIndex));
+    const nextRotateAtUnix = startUnix + ((rotationSlot + 1) * intervalSeconds);
+
+    return {
+      derivationPath,
+      rotation: {
+        enabled: true,
+        index: rotationIndex,
+        intervalDays,
+        startUnix,
+        nextRotateAtUnix,
+        pathTemplate,
+      },
+      cacheKeyPart: `rotation:${rotationIndex}:${intervalDays}:${startUnix}:${indexOffset}:${pathTemplate}`,
+    };
+  }
+
+  private getPopSigner(): PopSigner | null {
+    const nowMs = Date.now();
+
+    const hdMasterSeedB64 = this.env.POP_SIGNER_HD_MASTER_SEED_B64?.trim() ?? '';
+    const hdPathRaw = this.env.POP_SIGNER_HD_PATH?.trim() ?? '';
+    const hdPubkey = this.env.POP_SIGNER_HD_PUBKEY?.trim() ?? '';
+    const hasAnyHdConfig = Boolean(
+      hdMasterSeedB64 ||
+      hdPathRaw ||
+      hdPubkey ||
+      (this.env.POP_SIGNER_HD_ROTATION_ENABLED?.trim() ?? '') ||
+      (this.env.POP_SIGNER_HD_ROTATION_PATH_TEMPLATE?.trim() ?? '') ||
+      (this.env.POP_SIGNER_HD_ROTATION_INTERVAL_DAYS?.trim() ?? '') ||
+      (this.env.POP_SIGNER_HD_ROTATION_START_UNIX?.trim() ?? '') ||
+      (this.env.POP_SIGNER_HD_ROTATION_INDEX_OFFSET?.trim() ?? '')
+    );
+
+    if (hasAnyHdConfig) {
+      if (!hdMasterSeedB64) {
+        throw new Error('POP_SIGNER_HD_MASTER_SEED_B64 is required when POP_SIGNER_HD_* is used');
+      }
+
+      let masterSeed: Uint8Array;
+      try {
+        masterSeed = decodeBase64(hdMasterSeedB64);
+      } catch {
+        throw new Error('POP_SIGNER_HD_MASTER_SEED_B64 is not base64');
+      }
+
+      const pathResolution = this.resolvePopSignerHdDerivationPath(nowMs);
+      const derivationPath = pathResolution.derivationPath;
+      const cacheKey = `hd:${hdMasterSeedB64}:${hdPubkey}:${pathResolution.cacheKeyPart}`;
+      if (this.popSignerCache?.cacheKey === cacheKey) {
+        return this.popSignerCache.signer;
+      }
+
+      const { seed: childSeed, normalizedPath } = derivePopSignerHdSeed(masterSeed, derivationPath);
+      const keypair = nacl.sign.keyPair.fromSeed(childSeed);
+      const signerPubkey = bs58.encode(keypair.publicKey);
+
+      if (hdPubkey) {
+        if (!MINT_BASE58_RE.test(hdPubkey)) {
+          throw new Error('POP_SIGNER_HD_PUBKEY is invalid');
+        }
+        let configuredPubkey: Uint8Array;
+        try {
+          configuredPubkey = bs58.decode(hdPubkey);
+        } catch {
+          throw new Error('POP_SIGNER_HD_PUBKEY is invalid');
+        }
+        if (configuredPubkey.length !== 32) {
+          throw new Error('POP_SIGNER_HD_PUBKEY must decode to 32 bytes');
+        }
+        if (!bytesEqual(configuredPubkey, keypair.publicKey)) {
+          throw new Error('POP signer keypair mismatch (POP_SIGNER_HD_MASTER_SEED_B64 / POP_SIGNER_HD_PATH / POP_SIGNER_HD_PUBKEY)');
+        }
+      }
+
+      const signer: PopSigner = {
+        secretKey: keypair.secretKey,
+        signerPubkey,
+        mode: 'hd',
+        derivationPath: normalizedPath,
+        rotation: pathResolution.rotation,
+      };
+      this.popSignerCache = { cacheKey, signer };
+      return signer;
+    }
+
+    const legacyEnabled = this.isPopSignerLegacyEnabled();
     const secretB64 = this.env.POP_SIGNER_SECRET_KEY_B64?.trim() ?? '';
     const signerPubkey = this.env.POP_SIGNER_PUBKEY?.trim() ?? '';
-    if (!secretB64 || !signerPubkey) {
-      this.popSignerCache = null;
+    if (!legacyEnabled) {
+      if (secretB64 || signerPubkey) {
+        throw new Error('legacy POP_SIGNER_* configuration is disabled; remove POP_SIGNER_SECRET_KEY_B64/POP_SIGNER_PUBKEY');
+      }
+      const cacheKey = 'none:legacy_disabled';
+      if (this.popSignerCache?.cacheKey === cacheKey) {
+        return this.popSignerCache.signer;
+      }
+      this.popSignerCache = { cacheKey, signer: null };
       return null;
+    }
+
+    if (!secretB64 || !signerPubkey) {
+      const cacheKey = 'none:legacy_enabled';
+      if (this.popSignerCache?.cacheKey === cacheKey) {
+        return this.popSignerCache.signer;
+      }
+      this.popSignerCache = { cacheKey, signer: null };
+      return null;
+    }
+
+    const cacheKey = `legacy:${secretB64}:${signerPubkey}`;
+    if (this.popSignerCache?.cacheKey === cacheKey) {
+      return this.popSignerCache.signer;
     }
 
     if (!MINT_BASE58_RE.test(signerPubkey)) {
@@ -811,8 +1136,15 @@ export class SchoolStore implements DurableObject {
       throw new Error('POP signer keypair mismatch (POP_SIGNER_SECRET_KEY_B64 / POP_SIGNER_PUBKEY)');
     }
 
-    this.popSignerCache = { secretKey, signerPubkey };
-    return this.popSignerCache;
+    const signer: PopSigner = {
+      secretKey,
+      signerPubkey,
+      mode: 'legacy',
+      derivationPath: null,
+      rotation: this.emptyPopSignerRotation(),
+    };
+    this.popSignerCache = { cacheKey, signer };
+    return signer;
   }
 
   private isOnchainPopEnforced(): boolean {
@@ -2978,13 +3310,20 @@ export class SchoolStore implements DurableObject {
     }
 
     const popEnforced = this.isOnchainPopEnforced();
+    const popSignerLegacyEnabled = this.isPopSignerLegacyEnabled();
     let popSignerConfigured = false;
     let popSignerPubkey: string | null = null;
+    let popSignerMode: PopSignerMode | null = null;
+    let popSignerDerivationPath: string | null = null;
+    let popSignerRotation: PopSignerRotation = this.emptyPopSignerRotation();
     let popSignerError: string | null = null;
     try {
       const signer = this.getPopSigner();
       popSignerConfigured = signer !== null;
       popSignerPubkey = signer?.signerPubkey ?? null;
+      popSignerMode = signer?.mode ?? null;
+      popSignerDerivationPath = signer?.derivationPath ?? null;
+      popSignerRotation = signer?.rotation ?? this.emptyPopSignerRotation();
     } catch (err) {
       popSignerError = err instanceof Error ? err.message : String(err);
     }
@@ -2995,6 +3334,9 @@ export class SchoolStore implements DurableObject {
       } else {
         blockingIssues.push('PoP signer is not configured');
       }
+    }
+    if (popSignerLegacyEnabled) {
+      warnings.push('PoP legacy signer fallback is enabled; set POP_SIGNER_LEGACY_ENABLED=false for HD-only production mode');
     }
 
     if (auditStatus.failClosedForMutatingRequests && !auditStatus.operationalReady) {
@@ -3021,6 +3363,10 @@ export class SchoolStore implements DurableObject {
         popEnforced,
         popSignerConfigured,
         popSignerPubkey,
+        popSignerMode,
+        popSignerDerivationPath,
+        popSignerRotation,
+        popSignerLegacyEnabled,
         popSignerError,
         auditMode: auditStatus.mode,
         auditOperationalReady: auditStatus.operationalReady,
@@ -6168,11 +6514,17 @@ export class SchoolStore implements DurableObject {
     if (path === '/v1/school/pop-status' && request.method === 'GET') {
       let signerConfigured = false;
       let signerPubkey: string | null = null;
+      let signerMode: PopSignerMode | null = null;
+      let signerDerivationPath: string | null = null;
+      let signerRotation: PopSignerRotation = this.emptyPopSignerRotation();
       let error: string | null = null;
       try {
         const signer = this.getPopSigner();
         signerConfigured = signer !== null;
         signerPubkey = signer?.signerPubkey ?? null;
+        signerMode = signer?.mode ?? null;
+        signerDerivationPath = signer?.derivationPath ?? null;
+        signerRotation = signer?.rotation ?? this.emptyPopSignerRotation();
       } catch (err) {
         error = err instanceof Error ? err.message : String(err);
       }
@@ -6180,6 +6532,10 @@ export class SchoolStore implements DurableObject {
         enforceOnchainPop: this.isOnchainPopEnforced(),
         signerConfigured,
         signerPubkey,
+        signerMode,
+        signerDerivationPath,
+        signerRotation,
+        legacySignerEnabled: this.isPopSignerLegacyEnabled(),
         error,
       });
     }
