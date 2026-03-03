@@ -18,6 +18,7 @@ import { signTransaction, initiatePhantomConnect, buildPhantomConnectUrl } from 
 import { rejectPendingSignTx } from '../utils/phantomSignTxPending';
 import { getLastPhantomDebug } from '../utils/phantomUrlDebug';
 import { setPhantomWebReturnPath } from '../utils/phantomWebReturnPath';
+import { isLikelyMobileWebBrowser, preparePhantomWebPopup } from '../utils/phantomWebPopup';
 import { sendSignedTx, isBlockhashExpiredError, isSimulationFailedError } from '../solana/sendTx';
 import { getConnection } from '../solana/anchorClient';
 import { RPC_URL } from '../solana/singleton';
@@ -479,6 +480,21 @@ ${st.balanceLamports ?? 'null'}
     };
   }, []);
 
+  const buildSignRedirectContext = (): { redirectLink: string; appUrl: string } => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && !!window.location?.origin) {
+      const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      setPhantomWebReturnPath(returnPath);
+      return {
+        redirectLink: `${window.location.origin}/phantom/signTransaction`,
+        appUrl: window.location.origin,
+      };
+    }
+    return {
+      redirectLink: 'wene://phantom/sign?cluster=devnet',
+      appUrl: 'https://wene.app',
+    };
+  };
+
   // DEV: Phantom URL をポーリングして画面表示（Connecting / Signing 中）
   useEffect(() => {
     if (!__DEV__) return;
@@ -521,6 +537,16 @@ ${st.balanceLamports ?? 'null'}
         setState('Idle');
         return;
       }
+      if (Platform.OS === 'web' && !isLikelyMobileWebBrowser()) {
+        const prepared = preparePhantomWebPopup();
+        if (!prepared) {
+          const popupErr = 'ブラウザでポップアップがブロックされました。Phantom署名を続行するにはポップアップを許可してください。';
+          setError(popupErr);
+          setState('Idle');
+          Alert.alert('Phantom署名を開始できません', popupErr, [{ text: 'OK' }]);
+          return;
+        }
+      }
 
       console.log('[CLAIM] checkpoint 3: guards passed, setState Signing');
       setState('Signing');
@@ -558,7 +584,7 @@ ${st.balanceLamports ?? 'null'}
       // --- Signing: Phantom で署名（成功を先に確定） ---
       let signed: Awaited<ReturnType<typeof signTransaction>>;
       try {
-        const signRedirectLink = 'wene://phantom/sign?cluster=devnet';
+        const { redirectLink: signRedirectLink, appUrl: signAppUrl } = buildSignRedirectContext();
         console.log('[PHANTOM] sign redirect_link:', signRedirectLink);
         console.log('[CLAIM] checkpoint 6: before signTransaction (Phantom起動)');
         const SIGN_TIMEOUT_MS = 120000;
@@ -571,7 +597,7 @@ ${st.balanceLamports ?? 'null'}
             phantomEncryptionPublicKey,
             redirectLink: signRedirectLink,
             cluster: 'devnet',
-            appUrl: 'https://wene.app',
+            appUrl: signAppUrl,
           }),
           new Promise<never>((_, reject) =>
             setTimeout(() => {
@@ -652,7 +678,7 @@ ${st.balanceLamports ?? 'null'}
                 solanaAuthority: grant?.solanaAuthority,
                 solanaGrantId: grant?.solanaGrantId,
               });
-              const signRedirectLink = 'wene://phantom/sign?cluster=devnet';
+              const { redirectLink: signRedirectLink, appUrl: signAppUrl } = buildSignRedirectContext();
               currentSigned = await Promise.race([
                 signTransaction({
                   tx: currentResult.tx,
@@ -662,7 +688,7 @@ ${st.balanceLamports ?? 'null'}
                   phantomEncryptionPublicKey,
                   redirectLink: signRedirectLink,
                   cluster: 'devnet',
-                  appUrl: 'https://wene.app',
+                  appUrl: signAppUrl,
                 }),
                 new Promise<never>((_, reject) =>
                   setTimeout(() => {

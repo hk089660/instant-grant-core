@@ -6,6 +6,8 @@ import { theme } from '../../src/ui/theme';
 import { processPhantomUrl } from '../../src/utils/phantomDeeplinkListener';
 import { rejectPendingSignTx } from '../../src/utils/phantomSignTxPending';
 import { consumePhantomWebReturnPath } from '../../src/utils/phantomWebReturnPath';
+import { sendSignedTx } from '../../src/solana/sendTx';
+import { useRecipientStore } from '../../src/store/recipientStore';
 import {
   publishPhantomWebSignError,
   publishPhantomWebSignSuccess,
@@ -99,12 +101,33 @@ export default function PhantomRedirectScreen() {
         }
 
         if (action.startsWith('sign') && Platform.OS === 'web' && processed?.kind === 'sign') {
-          if (processed.ok) {
-            publishPhantomWebSignSuccess(processed.tx);
-          } else {
+          if (!processed.ok) {
             publishPhantomWebSignError(processed.error);
             setSafeStatus('error', processed.error);
             return;
+          }
+
+          const hasOpener =
+            typeof window !== 'undefined' &&
+            Boolean(window.opener) &&
+            !window.opener.closed;
+
+          if (hasOpener) {
+            publishPhantomWebSignSuccess(processed.tx);
+          } else {
+            try {
+              setSafeStatus('loading', '署名済みトランザクションを送信しています…');
+              const signature = await sendSignedTx(processed.tx);
+              const recipientStore = useRecipientStore.getState();
+              recipientStore.setLastSignature(signature);
+              recipientStore.setLastDoneAt(Date.now());
+              recipientStore.setState('Done');
+            } catch (sendErr) {
+              const msg = sendErr instanceof Error ? sendErr.message : '署名後の送信に失敗しました';
+              publishPhantomWebSignError(msg);
+              setSafeStatus('error', msg);
+              return;
+            }
           }
         }
 
