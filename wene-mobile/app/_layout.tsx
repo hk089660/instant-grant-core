@@ -1,5 +1,5 @@
 import '../src/polyfills';
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { Linking } from 'react-native';
 import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -33,6 +33,8 @@ const headerPillStyle = {
 };
 
 export default function RootLayout() {
+  const pathname = usePathname();
+
   // コールドスタート時のdeeplink処理（listener は polyfills で登録済み）
   useEffect(() => {
     const checkInitialURL = async () => {
@@ -48,6 +50,24 @@ export default function RootLayout() {
     };
     checkInitialURL();
   }, []);
+
+  // Web: 管理者画面と利用者画面で favicon を切り替える
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const iconPath = pathname?.startsWith('/admin')
+      ? '/favicon-admin-circle.png'
+      : '/favicon-user-circle.png';
+    let iconLink = document.querySelector("link[rel='icon']") as HTMLLinkElement | null;
+    if (!iconLink) {
+      iconLink = document.createElement('link');
+      iconLink.rel = 'icon';
+      document.head.appendChild(iconLink);
+    }
+    if (iconLink.getAttribute('href') !== iconPath) {
+      iconLink.setAttribute('href', iconPath);
+      iconLink.setAttribute('type', 'image/png');
+    }
+  }, [pathname]);
 
   return (
     <SafeAreaProvider>
