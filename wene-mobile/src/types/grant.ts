@@ -7,6 +7,7 @@ export interface Grant {
   title: string;
   description: string;
   issuerName?: string;
+  state?: 'draft' | 'published' | 'ended';
   logoUrl?: string; // e.g. "https://..."
   solanaMint?: string;
   solanaAuthority?: string;

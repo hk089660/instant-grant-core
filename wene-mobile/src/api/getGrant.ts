@@ -21,6 +21,7 @@ export async function getGrantByCampaignId(campaignId: string): Promise<Grant | 
         title: schoolEvent.title,
         description: `${schoolEvent.datetime} に開催されるイベントの参加券です`,
         issuerName: schoolEvent.host,
+        state: schoolEvent.state,
         solanaMint: schoolEvent.solanaMint,
         solanaAuthority: schoolEvent.solanaAuthority,
         solanaGrantId: schoolEvent.solanaGrantId,

@@ -23,6 +23,27 @@ import { sendSignedTx, isBlockhashExpiredError, isSimulationFailedError } from '
 import { getConnection } from '../solana/anchorClient';
 import { RPC_URL } from '../solana/singleton';
 import { fetchSplBalance, fetchAnyPositiveSplBalance, formatAmountForDisplay, SPL_USDC_MINT } from '../solana/wallet';
+import {
+  fetchExpectedPopSignerPubkeyFromRuntime,
+  fetchPopConfigReadiness,
+  type PopConfigReadinessReason,
+} from '../solana/popConfigReadiness';
+
+function mapOnchainReadinessError(reason: PopConfigReadinessReason): string {
+  if (reason === 'missing') {
+    return 'このイベントのPoP設定が未初期化です。運営に再発行を依頼してください。';
+  }
+  if (reason === 'owner_mismatch') {
+    return 'このイベントのPoP設定アカウントが不整合です。運営に再発行を依頼してください。';
+  }
+  if (reason === 'signer_mismatch') {
+    return 'このイベントのPoP署名鍵が旧設定です。運営に再発行を依頼してください。';
+  }
+  if (reason === 'invalid_authority') {
+    return 'このイベントのオンチェーン設定が不正です。運営に再発行を依頼してください。';
+  }
+  return 'オンチェーン受け取りの準備状態を確認できませんでした。時間をおいて再試行してください。';
+}
 
 export const ReceiveScreen: React.FC = () => {
   const { campaignId, code } = useLocalSearchParams<{
@@ -536,6 +557,23 @@ ${st.balanceLamports ?? 'null'}
         setError('キャンペーンIDがありません');
         setState('Idle');
         return;
+      }
+      if (grant?.state && grant.state !== 'published') {
+        const stateLabel = grant.state === 'ended' ? '終了済み' : '未公開';
+        const msg = `このイベントは現在受付していません（${stateLabel}）。`;
+        setError(msg);
+        setState('Idle');
+        return;
+      }
+      if (grant?.solanaAuthority) {
+        const expectedSignerPubkey = await fetchExpectedPopSignerPubkeyFromRuntime();
+        const readiness = await fetchPopConfigReadiness(grant.solanaAuthority, { expectedSignerPubkey });
+        if (!readiness.ready) {
+          const msg = mapOnchainReadinessError(readiness.reason);
+          setError(msg);
+          setState('Idle');
+          return;
+        }
       }
       if (Platform.OS === 'web' && !isLikelyMobileWebBrowser()) {
         const prepared = preparePhantomWebPopup();
