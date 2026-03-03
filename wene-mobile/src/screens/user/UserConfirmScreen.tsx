@@ -50,9 +50,11 @@ function buildSendErrorDebugText(error: unknown): string {
 function shouldRetryWithLegacyClaim(error: unknown): boolean {
   const lower = buildSendErrorDebugText(error).toLowerCase();
   if (!lower) return false;
+  // 旧Program互換フォールバックは厳密条件のみに限定する。
+  // これ以外で legacy 命令へ切り替えると、account 並びがずれて pop_config owner mismatch を誘発し得る。
   if (lower.includes('instructionfallbacknotfound')) return true;
-  if (lower.includes('account: token_program') && lower.includes('invalidprogramid')) return true;
-  if (lower.includes('account: token_program') && lower.includes('program id was not as expected')) return true;
+  if (lower.includes('custom program error: 0x65')) return true;
+  if (lower.includes('fallback functions are not supported')) return true;
   return false;
 }
 
