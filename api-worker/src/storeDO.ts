@@ -808,6 +808,16 @@ function readHashHex(raw: string | undefined | null): string {
   throw new Error('invalid hash in storage');
 }
 
+function readOptionalHashHex(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const value = raw.trim().toLowerCase();
+  if (!value) return null;
+  if (!/^[0-9a-f]{64}$/.test(value)) {
+    throw new Error('invalid expected hash');
+  }
+  return value;
+}
+
 function isHashHex(raw: string): boolean {
   return /^[0-9a-f]{64}$/.test(raw.trim().toLowerCase());
 }
@@ -2622,8 +2632,16 @@ export class SchoolStore implements DurableObject {
 
       const globalKey = `${POP_CHAIN_GLOBAL_PREFIX}${grantRaw}`;
       const streamKey = `${POP_CHAIN_STREAM_PREFIX}${grantRaw}`;
-      const prevHashHex = readHashHex(await this.ctx.storage.get<string>(globalKey));
-      const streamPrevHashHex = readHashHex(await this.ctx.storage.get<string>(streamKey));
+      const expectedPrevHashHex = readOptionalHashHex(body?.expectedPrevHash);
+      const expectedStreamPrevHashHex = readOptionalHashHex(body?.expectedStreamPrevHash);
+      if (Boolean(expectedPrevHashHex) !== Boolean(expectedStreamPrevHashHex)) {
+        throw new Error('expected prev hashes must be provided together');
+      }
+      const storedPrevHashHex = readHashHex(await this.ctx.storage.get<string>(globalKey));
+      const storedStreamPrevHashHex = readHashHex(await this.ctx.storage.get<string>(streamKey));
+      const prevHashHex = expectedPrevHashHex ?? storedPrevHashHex;
+      const streamPrevHashHex = expectedStreamPrevHashHex ?? storedStreamPrevHashHex;
+      const hashSource = expectedPrevHashHex ? 'client_onchain' : 'storage';
       const prevHash = hexToBytes(prevHashHex);
       const streamPrevHash = hexToBytes(streamPrevHashHex);
       const issuedAt = BigInt(Math.floor(Date.now() / 1000));
@@ -2645,6 +2663,9 @@ export class SchoolStore implements DurableObject {
           periodIndex: periodIndex.toString(),
           prevHash: prevHashHex,
           streamPrevHash: streamPrevHashHex,
+          hashSource,
+          storedPrevHash: storedPrevHashHex,
+          storedStreamPrevHash: storedStreamPrevHashHex,
         },
         `pop:${eventId}`
       );
@@ -2673,6 +2694,9 @@ export class SchoolStore implements DurableObject {
         periodIndex: periodIndex.toString(),
         prevHash: prevHashHex,
         streamPrevHash: streamPrevHashHex,
+        hashSource,
+        storedPrevHash: storedPrevHashHex,
+        storedStreamPrevHash: storedStreamPrevHashHex,
         auditHash: auditHashHex,
         entryHash: entryHashHex,
         issuedAt: Number(issuedAt),

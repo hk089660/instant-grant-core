@@ -16,7 +16,12 @@ import { useRecipientStore } from '../../store/recipientStore';
 import { usePhantomStore } from '../../store/phantomStore';
 import { useRecipientTicketStore } from '../../store/recipientTicketStore';
 import { buildClaimTx } from '../../solana/txBuilders';
-import { sendSignedTx, isBlockhashExpiredError, isSimulationFailedError } from '../../solana/sendTx';
+import {
+  sendSignedTx,
+  isBlockhashExpiredError,
+  isRecoverableClaimBuildError,
+  buildSendErrorDebugText,
+} from '../../solana/sendTx';
 import { getConnection } from '../../solana/singleton';
 import { fetchSplBalance } from '../../solana/wallet';
 import { signTransaction } from '../../utils/phantom';
@@ -34,17 +39,6 @@ const SIGN_TIMEOUT_MS = 120_000;
 function firstParam(value: string | string[] | undefined): string | undefined {
   if (Array.isArray(value)) return value[0];
   return value;
-}
-
-function buildSendErrorDebugText(error: unknown): string {
-  const lines: string[] = [];
-  if (error && typeof error === 'object' && 'message' in error) {
-    lines.push(String((error as { message?: unknown }).message ?? ''));
-  }
-  if (isSimulationFailedError(error) && Array.isArray(error.simLogs) && error.simLogs.length > 0) {
-    lines.push(error.simLogs.join('\n'));
-  }
-  return lines.filter(Boolean).join('\n');
 }
 
 function shouldRetryWithLegacyClaim(error: unknown): boolean {
@@ -192,6 +186,7 @@ export const UserConfirmScreen: React.FC = () => {
     });
 
     let retriedForBlockhash = false;
+    let retriedForRecoverable = false;
     while (true) {
       const { redirectLink, appUrl } = buildSignRedirectContext();
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -236,9 +231,22 @@ export const UserConfirmScreen: React.FC = () => {
           popSigner: built.meta.popProofSignerPubkey,
         };
       } catch (sendError) {
-        const msg = sendError instanceof Error ? sendError.message : String(sendError);
-        if (!retriedForBlockhash && isBlockhashExpiredError(msg)) {
+        const debugText = buildSendErrorDebugText(sendError);
+        if (!retriedForBlockhash && isBlockhashExpiredError(debugText)) {
           retriedForBlockhash = true;
+          built = await buildClaimTx({
+            campaignId: targetEventId,
+            code: confirmationCode,
+            recipientPubkey,
+            solanaMint: event.solanaMint,
+            solanaAuthority: event.solanaAuthority,
+            solanaGrantId: event.solanaGrantId,
+            forceLegacyClaim,
+          });
+          continue;
+        }
+        if (!retriedForRecoverable && isRecoverableClaimBuildError(debugText)) {
+          retriedForRecoverable = true;
           built = await buildClaimTx({
             campaignId: targetEventId,
             code: confirmationCode,

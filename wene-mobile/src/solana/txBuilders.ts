@@ -30,6 +30,12 @@ import { RPC_URL } from './singleton';
 
 const CLAIM_GRANT_DISCRIMINATOR = Buffer.from([125, 134, 233, 135, 82, 18, 177, 8]);
 const SUPPORTED_POP_PROOF_MESSAGE_VERSIONS = new Set<number>([2]);
+const POP_HASH_HEX_RE = /^[0-9a-f]{64}$/;
+const POP_HASH_GENESIS_HEX = '0'.repeat(64);
+const POP_STATE_DATA_LEN = 8 + 32 + 32 + 32 + 8 + 8 + 1 + 1;
+const POP_STATE_LAST_GLOBAL_HASH_OFFSET = 8 + 32;
+const POP_STATE_LAST_STREAM_HASH_OFFSET = POP_STATE_LAST_GLOBAL_HASH_OFFSET + 32;
+const POP_STATE_INITIALIZED_OFFSET = POP_STATE_LAST_STREAM_HASH_OFFSET + 32 + 8 + 8;
 
 interface PopClaimProofResponse {
   signerPubkey: string;
@@ -74,6 +80,8 @@ async function fetchPopClaimProof(params: {
   grant: PublicKey;
   claimer: PublicKey;
   periodIndex: bigint;
+  expectedPrevHash?: string;
+  expectedStreamPrevHash?: string;
 }): Promise<PopClaimProofResponse> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/v1/school/pop-proof`, {
@@ -85,6 +93,8 @@ async function fetchPopClaimProof(params: {
       grant: params.grant.toBase58(),
       claimer: params.claimer.toBase58(),
       periodIndex: params.periodIndex.toString(),
+      expectedPrevHash: params.expectedPrevHash,
+      expectedStreamPrevHash: params.expectedStreamPrevHash,
     }),
   });
 
@@ -112,16 +122,73 @@ async function fetchPopClaimProof(params: {
     throw new Error('PoP証明レスポンスの形式が不正です');
   }
 
+  const prevHash = typeof parsed.prevHash === 'string' ? parsed.prevHash.trim().toLowerCase() : '';
+  const streamPrevHash = typeof parsed.streamPrevHash === 'string' ? parsed.streamPrevHash.trim().toLowerCase() : '';
+  if (!POP_HASH_HEX_RE.test(prevHash) || !POP_HASH_HEX_RE.test(streamPrevHash)) {
+    throw new Error('PoP証明レスポンスのハッシュ形式が不正です');
+  }
+  if (params.expectedPrevHash && prevHash !== params.expectedPrevHash) {
+    throw new Error('PoP証明チェーン同期に失敗しました（prev_hash mismatch）');
+  }
+  if (params.expectedStreamPrevHash && streamPrevHash !== params.expectedStreamPrevHash) {
+    throw new Error('PoP証明チェーン同期に失敗しました（stream_prev_hash mismatch）');
+  }
+
   return {
     signerPubkey: parsed.signerPubkey,
     messageBase64: parsed.messageBase64,
     signatureBase64: parsed.signatureBase64,
     auditHash: typeof parsed.auditHash === 'string' ? parsed.auditHash : '',
     entryHash: typeof parsed.entryHash === 'string' ? parsed.entryHash : '',
-    prevHash: typeof parsed.prevHash === 'string' ? parsed.prevHash : '',
-    streamPrevHash: typeof parsed.streamPrevHash === 'string' ? parsed.streamPrevHash : '',
+    prevHash,
+    streamPrevHash,
     issuedAt: typeof parsed.issuedAt === 'number' ? parsed.issuedAt : 0,
   };
+}
+
+async function getOnchainPopPrevHashes(popStatePda: PublicKey): Promise<{
+  prevHash: string;
+  streamPrevHash: string;
+  source: 'missing' | 'uninitialized' | 'initialized';
+}> {
+  const info = await getConnection().getAccountInfo(popStatePda, 'confirmed');
+  if (!info) {
+    return {
+      prevHash: POP_HASH_GENESIS_HEX,
+      streamPrevHash: POP_HASH_GENESIS_HEX,
+      source: 'missing',
+    };
+  }
+  if (!info.owner.equals(GRANT_PROGRAM_ID)) {
+    throw new Error(
+      `PoP状態アカウントの所有者が不正です: owner=${info.owner.toBase58()} expected=${GRANT_PROGRAM_ID.toBase58()}`
+    );
+  }
+  if (info.data.length < POP_STATE_DATA_LEN) {
+    return {
+      prevHash: POP_HASH_GENESIS_HEX,
+      streamPrevHash: POP_HASH_GENESIS_HEX,
+      source: 'uninitialized',
+    };
+  }
+  const initialized = info.data[POP_STATE_INITIALIZED_OFFSET] === 1;
+  if (!initialized) {
+    return {
+      prevHash: POP_HASH_GENESIS_HEX,
+      streamPrevHash: POP_HASH_GENESIS_HEX,
+      source: 'uninitialized',
+    };
+  }
+  const prevHash = Buffer.from(
+    info.data.slice(POP_STATE_LAST_GLOBAL_HASH_OFFSET, POP_STATE_LAST_GLOBAL_HASH_OFFSET + 32)
+  ).toString('hex').toLowerCase();
+  const streamPrevHash = Buffer.from(
+    info.data.slice(POP_STATE_LAST_STREAM_HASH_OFFSET, POP_STATE_LAST_STREAM_HASH_OFFSET + 32)
+  ).toString('hex').toLowerCase();
+  if (!POP_HASH_HEX_RE.test(prevHash) || !POP_HASH_HEX_RE.test(streamPrevHash)) {
+    throw new Error('PoP状態アカウントのハッシュ形式が不正です');
+  }
+  return { prevHash, streamPrevHash, source: 'initialized' };
 }
 
 function buildClaimGrantInstruction(params: {
@@ -199,6 +266,29 @@ function shouldUseOnchainPopClaim(): boolean {
     return false;
   }
   return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+/**
+ * period_index 算出に使うクラスター時刻を取得する。
+ * 取得できない場合のみクライアント時刻へフォールバックする。
+ */
+async function getClusterUnixTimestamp(): Promise<bigint | null> {
+  const connection = getConnection();
+  const commitments: Array<'confirmed' | 'finalized'> = ['confirmed', 'finalized'];
+  for (const commitment of commitments) {
+    try {
+      const slot = await connection.getSlot(commitment);
+      const blockTime = await connection.getBlockTime(slot);
+      if (typeof blockTime === 'number' && Number.isFinite(blockTime) && blockTime > 0) {
+        return BigInt(Math.trunc(blockTime));
+      }
+    } catch (error) {
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.warn(`[buildClaimTx] cluster clock fetch failed (${commitment})`, error);
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -314,14 +404,18 @@ export async function buildClaimTx(
     throw new Error('配布設定が不正です（period_seconds <= 0）');
   }
 
-  const periodIndex = calculatePeriodIndex(startTs, periodSeconds);
+  const clusterNowTs = await getClusterUnixTimestamp();
+  const periodIndex = calculatePeriodIndex(startTs, periodSeconds, clusterNowTs ?? undefined);
+  const periodClockSource = clusterNowTs == null ? 'clientClockFallback' : 'clusterClock';
 
   const [vaultPda] = getVaultPda(grantPda);
   const [receiptPda] = getReceiptPda(grantPda, recipientPubkey, periodIndex);
   const [popStatePda] = getPopStatePda(grantPda);
   const [popConfigPda] = getPopConfigPda(authority);
 
-  const onchainPopClaimEnabled = !params.forceLegacyClaim && shouldUseOnchainPopClaim();
+  const onchainPopClaimEnabled = hasExplicitGrantParams
+    ? !params.forceLegacyClaim
+    : (!params.forceLegacyClaim && shouldUseOnchainPopClaim());
   const popConfigInfo = onchainPopClaimEnabled
     ? await connection.getAccountInfo(popConfigPda, 'confirmed')
     : null;
@@ -385,7 +479,9 @@ export async function buildClaimTx(
         ' mint=' + mint.toBase58() +
         ' vault=' + vaultPda.toBase58() +
         ' vaultBalance=' + (vaultBalanceLog || '-') +
-        ' periodIndex=' + periodIndex.toString()
+        ' periodIndex=' + periodIndex.toString() +
+        ' periodClock=' + periodClockSource +
+        (clusterNowTs == null ? '' : ` clusterNowTs=${clusterNowTs.toString()}`)
       );
     }
   }
@@ -400,13 +496,24 @@ export async function buildClaimTx(
     if (!confirmationCode) {
       throw new Error('オンチェーン受け取りにはオフチェーン確認コードが必要です');
     }
+    const onchainPopHashes = await getOnchainPopPrevHashes(popStatePda);
     popProof = await fetchPopClaimProof({
       eventId: campaignId,
       confirmationCode,
       grant: grantPda,
       claimer: recipientPubkey,
       periodIndex,
+      expectedPrevHash: onchainPopHashes.prevHash,
+      expectedStreamPrevHash: onchainPopHashes.streamPrevHash,
     });
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log(
+        '[DEV_POP] popState=' + popStatePda.toBase58() +
+        ' source=' + onchainPopHashes.source +
+        ' prev=' + onchainPopHashes.prevHash.slice(0, 8) +
+        ' streamPrev=' + onchainPopHashes.streamPrevHash.slice(0, 8)
+      );
+    }
 
     signerPubkey = new PublicKey(popProof.signerPubkey);
     messageBytes = Buffer.from(popProof.messageBase64, 'base64');

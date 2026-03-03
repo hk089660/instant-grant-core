@@ -106,6 +106,8 @@ export interface PopProofBody {
   grant?: string;
   claimer?: string;
   periodIndex?: string | number;
+  expectedPrevHash?: string;
+  expectedStreamPrevHash?: string;
 }
 
 export interface PopProofResponse {

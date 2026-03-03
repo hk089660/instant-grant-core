@@ -19,7 +19,13 @@ import { rejectPendingSignTx } from '../utils/phantomSignTxPending';
 import { getLastPhantomDebug } from '../utils/phantomUrlDebug';
 import { setPhantomWebReturnPath } from '../utils/phantomWebReturnPath';
 import { isLikelyMobileWebBrowser, preparePhantomWebPopup } from '../utils/phantomWebPopup';
-import { sendSignedTx, isBlockhashExpiredError, isSimulationFailedError } from '../solana/sendTx';
+import {
+  sendSignedTx,
+  isBlockhashExpiredError,
+  isRecoverableClaimBuildError,
+  isSimulationFailedError,
+  buildSendErrorDebugText,
+} from '../solana/sendTx';
 import { getConnection } from '../solana/anchorClient';
 import { RPC_URL } from '../solana/singleton';
 import { fetchSplBalance, fetchAnyPositiveSplBalance, formatAmountForDisplay, SPL_USDC_MINT } from '../solana/wallet';
@@ -677,6 +683,7 @@ ${st.balanceLamports ?? 'null'}
       let currentResult = result;
       let currentSigned = signed;
       let hasRetriedBlockhash = false;
+      let hasRetriedRecoverable = false;
       let signature: string;
       try {
         while (true) {
@@ -690,18 +697,11 @@ ${st.balanceLamports ?? 'null'}
             console.log('[CLAIM] checkpoint 9: sendSignedTx done, txid=', signature);
             break;
           } catch (e) {
-            if (__DEV__ && isSimulationFailedError(e)) {
-              setSimulationFailed(
-                JSON.stringify(e.simErr),
-                e.simLogs ?? null,
-                e.unitsConsumed
-              );
-              throw e;
-            }
+            const errText = buildSendErrorDebugText(e);
             const errMsg = e instanceof Error ? e.message : String(e);
             console.error('[CLAIM] sendSignedTx failed:', e);
             console.error('[CLAIM] sendSignedTx error stack', (e as Error)?.stack);
-            if (isBlockhashExpiredError(errMsg) && !hasRetriedBlockhash) {
+            if (isBlockhashExpiredError(errText) && !hasRetriedBlockhash) {
               hasRetriedBlockhash = true;
               Alert.alert('再試行', '期限切れのため再試行します', [{ text: 'OK' }]);
               if (Platform.OS === 'android') {
@@ -737,6 +737,50 @@ ${st.balanceLamports ?? 'null'}
               ]);
               setState('Sending');
               continue;
+            }
+            if (isRecoverableClaimBuildError(errText) && !hasRetriedRecoverable) {
+              hasRetriedRecoverable = true;
+              Alert.alert('再試行', '受け取り状態を再同期して再試行します', [{ text: 'OK' }]);
+              if (Platform.OS === 'android') {
+                ToastAndroid.show('受け取り状態を再同期して再試行します', ToastAndroid.SHORT);
+              }
+              setState('Signing');
+              currentResult = await buildClaimTx({
+                campaignId: campaignId || '',
+                code,
+                recipientPubkey: new PublicKey(walletPubkey),
+                solanaMint: grant?.solanaMint,
+                solanaAuthority: grant?.solanaAuthority,
+                solanaGrantId: grant?.solanaGrantId,
+              });
+              const { redirectLink: signRedirectLink, appUrl: signAppUrl } = buildSignRedirectContext();
+              currentSigned = await Promise.race([
+                signTransaction({
+                  tx: currentResult.tx,
+                  session: phantomSession,
+                  dappEncryptionPublicKey,
+                  dappSecretKey,
+                  phantomEncryptionPublicKey,
+                  redirectLink: signRedirectLink,
+                  cluster: 'devnet',
+                  appUrl: signAppUrl,
+                }),
+                new Promise<never>((_, reject) =>
+                  setTimeout(() => {
+                    rejectPendingSignTx(new Error('Phantom署名がタイムアウトしました'));
+                    reject(new Error('Phantom署名がタイムアウトしました'));
+                  }, 120000)
+                ),
+              ]);
+              setState('Sending');
+              continue;
+            }
+            if (__DEV__ && isSimulationFailedError(e)) {
+              setSimulationFailed(
+                JSON.stringify(e.simErr),
+                e.simLogs ?? null,
+                e.unitsConsumed
+              );
             }
             setError(errMsg);
             const shortMsg = errMsg.length > 50 ? errMsg.substring(0, 50) + '…' : errMsg;

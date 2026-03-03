@@ -33,6 +33,35 @@ export const isSimulationFailedError = (e: unknown): e is SimulationFailedLike =
   'simLogs' in e;
 
 /**
+ * 送信エラー（simulate/raw/preflight）を再試行判定向けに展開する。
+ */
+export function buildSendErrorDebugText(error: unknown): string {
+  const lines: string[] = [];
+  if (error && typeof error === 'object' && 'message' in error) {
+    lines.push(String((error as { message?: unknown }).message ?? ''));
+  } else if (error != null) {
+    lines.push(String(error));
+  }
+  if (isSimulationFailedError(error)) {
+    if (error.simErr != null) {
+      if (typeof error.simErr === 'string') {
+        lines.push(error.simErr);
+      } else {
+        try {
+          lines.push(JSON.stringify(error.simErr));
+        } catch {
+          lines.push(String(error.simErr));
+        }
+      }
+    }
+    if (Array.isArray(error.simLogs) && error.simLogs.length > 0) {
+      lines.push(error.simLogs.join('\n'));
+    }
+  }
+  return lines.filter(Boolean).join('\n');
+}
+
+/**
  * 確定確認に使う blockhash / lastValidBlockHeight（buildClaimTx で取得したものを渡す）
  */
 export interface ConfirmContext {
@@ -55,6 +84,18 @@ export function formatSendError(message: string): string {
   }
   if (lower.includes('insufficient funds')) {
     return '手数料SOLが不足しています';
+  }
+  if (
+    lower.includes('popgenesismismatch') ||
+    lower.includes('pophashchainbroken') ||
+    lower.includes('popstreamchainbroken') ||
+    lower.includes('popproofexpired') ||
+    lower.includes('invalidperiodindex')
+  ) {
+    return '受け取り状態の同期で失敗しました。もう一度受け取りを実行してください';
+  }
+  if (lower.includes('accountownedbywrongprogram') && lower.includes('pop_config')) {
+    return 'PoP設定の整合性確認に失敗しました。受け取りを再試行してください';
   }
   if (lower.includes('blockhash not found') || lower.includes('block height exceeded') || lower.includes('blockhash expired')) {
     return '署名後に期限切れになりました。もう一度お試しください';
@@ -153,6 +194,37 @@ export function isBlockhashExpiredError(message: string): boolean {
     lower.includes('block height exceeded') ||
     lower.includes('blockhash expired') ||
     lower.includes('署名後に期限切れ')
+  );
+}
+
+/**
+ * 事前検証エラーのうち、buildClaimTx から再構築・再署名で回復できる可能性が高いもの。
+ */
+export function isRecoverableClaimBuildError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('invalidperiodindex') ||
+    lower.includes('error code: invalidperiodindex') ||
+    lower.includes('error number: 6005') ||
+    lower.includes('popproofexpired') ||
+    lower.includes('error code: popproofexpired') ||
+    lower.includes('error number: 6024') ||
+    lower.includes('pophashchainbroken') ||
+    lower.includes('error code: pophashchainbroken') ||
+    lower.includes('error number: 6026') ||
+    lower.includes('popstreamchainbroken') ||
+    lower.includes('error code: popstreamchainbroken') ||
+    lower.includes('error number: 6027') ||
+    lower.includes('popgenesismismatch') ||
+    lower.includes('error code: popgenesismismatch') ||
+    lower.includes('error number: 6028') ||
+    lower.includes('custom program error: 0x1788') ||
+    lower.includes('custom program error: 0x178a') ||
+    lower.includes('custom program error: 0x178b') ||
+    lower.includes('custom program error: 0x178c') ||
+    (lower.includes('accountownedbywrongprogram') && lower.includes('pop_config')) ||
+    (lower.includes('error number: 3007') && lower.includes('pop_config')) ||
+    lower.includes('custom program error: 0xbbf')
   );
 }
 
