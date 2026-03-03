@@ -80,11 +80,6 @@ export async function openPhantomConnect(url: string, options: OpenPhantomOption
     typeof window !== 'undefined' &&
     typeof window.open === 'function'
   ) {
-    const openedPopup = openPhantomWebPopup(url);
-    if (openedPopup) {
-      console.log('[openPhantomConnect] web popup open/reuse succeeded');
-      return;
-    }
     if (isLikelyMobileWebBrowser()) {
       // モバイルWebはまず同一タブの universal link を優先（OSがPhantomアプリへ遷移しやすい）
       try {
@@ -93,7 +88,18 @@ export async function openPhantomConnect(url: string, options: OpenPhantomOption
         return;
       } catch (e) {
         console.warn('[openPhantomConnect] mobile-web direct deeplink failed, fallback popup:', e);
+        const mobilePopupOpened = openPhantomWebPopup(url);
+        if (mobilePopupOpened) {
+          console.log('[openPhantomConnect] mobile-web popup open/reuse succeeded');
+          return;
+        }
       }
+      throw new Error('Phantomを起動できませんでした。ブラウザ設定で外部アプリ起動を許可して再試行してください。');
+    }
+    const openedPopup = openPhantomWebPopup(url);
+    if (openedPopup) {
+      console.log('[openPhantomConnect] web popup open/reuse succeeded');
+      return;
     }
     throw new Error('ポップアップがブロックされました。ブラウザでこのサイトのポップアップを許可してください。');
   }

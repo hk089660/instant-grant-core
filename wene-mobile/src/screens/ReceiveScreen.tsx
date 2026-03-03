@@ -537,9 +537,9 @@ ${st.balanceLamports ?? 'null'}
         setState('Idle');
         return;
       }
-      if (Platform.OS === 'web') {
+      if (Platform.OS === 'web' && !isLikelyMobileWebBrowser()) {
         const prepared = preparePhantomWebPopup();
-        if (!prepared && !isLikelyMobileWebBrowser()) {
+        if (!prepared) {
           const popupErr = 'ブラウザでポップアップがブロックされました。Phantom署名を続行するにはポップアップを許可してください。';
           setError(popupErr);
           setState('Idle');

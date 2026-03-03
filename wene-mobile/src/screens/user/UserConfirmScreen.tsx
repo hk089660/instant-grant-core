@@ -308,13 +308,12 @@ export const UserConfirmScreen: React.FC = () => {
       Platform.OS === 'web' &&
       walletReady &&
       walletPubkey &&
-      eventHasOnchainConfig
+      eventHasOnchainConfig &&
+      !mobileWeb
     ) {
       const prepared = preparePhantomWebPopup();
       if (!prepared) {
-        if (!mobileWeb) {
-          skipOnchainByPopup = true;
-        }
+        skipOnchainByPopup = true;
         if (__DEV__) {
           console.warn('[UserConfirmScreen] popup prepare failed');
         }
