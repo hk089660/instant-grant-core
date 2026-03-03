@@ -86,7 +86,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ],
   },
   web: {
-    favicon: './assets/favicon-user-circle.png',
+    favicon: './assets/user-symbol-circle.png',
     bundler: 'metro',
   },
   plugins: [

@@ -56,7 +56,7 @@ export default function RootLayout() {
     if (typeof document === 'undefined') return;
     const iconPath = pathname?.startsWith('/admin')
       ? '/favicon-admin-circle.png'
-      : '/favicon-user-circle.png';
+      : '/ticket-token-symbol-circle.png';
     let iconLink = document.querySelector("link[rel='icon']") as HTMLLinkElement | null;
     if (!iconLink) {
       iconLink = document.createElement('link');
