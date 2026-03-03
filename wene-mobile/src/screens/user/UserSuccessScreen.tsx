@@ -14,6 +14,10 @@ import { useAuth } from '../../contexts/AuthContext';
 import { getSchoolDeps } from '../../api/createSchoolDeps';
 import type { SchoolEvent } from '../../types/school';
 import { copyTextWithFeedback } from '../../utils/copyText';
+import {
+  fetchExpectedPopSignerPubkeyFromRuntime,
+  fetchPopConfigReadiness,
+} from '../../solana/popConfigReadiness';
 
 function shortenCode(value: string, head = 8, tail = 8): string {
   const normalized = value.trim();
@@ -58,6 +62,9 @@ export const UserSuccessScreen: React.FC = () => {
   }>();
 
   const [event, setEvent] = useState<SchoolEvent | null>(null);
+  const [onchainReadinessChecked, setOnchainReadinessChecked] = useState(false);
+  const [onchainReady, setOnchainReady] = useState<boolean>(false);
+  const [onchainUnavailableReason, setOnchainUnavailableReason] = useState<string | null>(null);
   const { addTicket, getTicketByEventId } = useRecipientTicketStore();
   const txSignature = typeof tx === 'string' && tx.trim() ? tx.trim() : undefined;
   const receiptPubkey = typeof receipt === 'string' && receipt.trim() ? receipt.trim() : undefined;
@@ -210,11 +217,78 @@ export const UserSuccessScreen: React.FC = () => {
   const eventSupportsOnchainReceive = Boolean(
     event?.solanaMint && event?.solanaAuthority && event?.solanaGrantId
   );
+  useEffect(() => {
+    let cancelled = false;
+    const authority = event?.solanaAuthority?.trim() ?? '';
+    if (!eventSupportsOnchainReceive || !authority) {
+      setOnchainReadinessChecked(false);
+      setOnchainReady(false);
+      setOnchainUnavailableReason(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setOnchainReadinessChecked(false);
+    setOnchainReady(false);
+    setOnchainUnavailableReason(null);
+    fetchExpectedPopSignerPubkeyFromRuntime()
+      .then((expectedSignerPubkey) => fetchPopConfigReadiness(authority, { expectedSignerPubkey }))
+      .then((status) => {
+        if (cancelled) return;
+        setOnchainReadinessChecked(true);
+        setOnchainReady(status.ready);
+        if (status.ready) {
+          setOnchainUnavailableReason(null);
+          return;
+        }
+        if (status.reason === 'missing') {
+          setOnchainUnavailableReason('このイベントのPoP設定が未初期化です。運営に再発行を依頼してください。');
+          return;
+        }
+        if (status.reason === 'owner_mismatch') {
+          setOnchainUnavailableReason('このイベントのPoP設定が不整合です。運営に再発行を依頼してください。');
+          return;
+        }
+        if (status.reason === 'signer_mismatch') {
+          setOnchainUnavailableReason('このイベントのPoP署名鍵が旧設定です。運営に再発行を依頼してください。');
+          return;
+        }
+        setOnchainUnavailableReason('オンチェーン受け取りの準備状態を確認できませんでした。時間をおいて再試行してください。');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOnchainReadinessChecked(true);
+        setOnchainReady(false);
+        setOnchainUnavailableReason('オンチェーン受け取りの準備状態を確認できませんでした。時間をおいて再試行してください。');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [event?.solanaAuthority, eventSupportsOnchainReceive]);
   const showOnchainReceiveCard = Boolean(
     targetEventId &&
     hasOffchainReceipt &&
     !hasOnchainReceipt &&
-    eventSupportsOnchainReceive
+    eventSupportsOnchainReceive &&
+    onchainReadinessChecked &&
+    onchainReady
+  );
+  const showOnchainReadinessChecking = Boolean(
+    targetEventId &&
+    hasOffchainReceipt &&
+    !hasOnchainReceipt &&
+    eventSupportsOnchainReceive &&
+    !onchainReadinessChecked
+  );
+  const showOnchainUnavailableCard = Boolean(
+    targetEventId &&
+    hasOffchainReceipt &&
+    !hasOnchainReceipt &&
+    eventSupportsOnchainReceive &&
+    onchainReadinessChecked &&
+    !onchainReady
   );
 
   const handleCopyPopProof = useCallback(async () => {
@@ -341,6 +415,31 @@ export const UserSuccessScreen: React.FC = () => {
                 次の画面でPINを入力して受け取りを確定してください。
               </AppText>
             ) : null}
+          </Card>
+        )}
+
+        {showOnchainReadinessChecking && (
+          <Card style={styles.card}>
+            <AppText variant="caption" style={styles.label}>
+              オンチェーン受け取り
+            </AppText>
+            <AppText variant="small" style={styles.codeHint}>
+              受け取り準備を確認中です…
+            </AppText>
+          </Card>
+        )}
+
+        {showOnchainUnavailableCard && (
+          <Card style={styles.card}>
+            <AppText variant="caption" style={styles.label}>
+              オンチェーン受け取り
+            </AppText>
+            <AppText variant="small" style={styles.warningText}>
+              {onchainUnavailableReason ?? 'オンチェーン受け取りを開始できません。'}
+            </AppText>
+            <AppText variant="small" style={styles.codeHint}>
+              オフチェーン参加券は有効です。運営側の設定完了後に再試行してください。
+            </AppText>
           </Card>
         )}
 
@@ -591,6 +690,11 @@ const styles = StyleSheet.create({
   },
   codeHint: {
     color: theme.colors.textTertiary,
+    marginTop: theme.spacing.xs,
+  },
+  warningText: {
+    color: theme.colors.error,
+    textAlign: 'center',
     marginTop: theme.spacing.xs,
   },
   secondaryButton: {

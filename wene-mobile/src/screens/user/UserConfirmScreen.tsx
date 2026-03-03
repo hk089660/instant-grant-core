@@ -24,6 +24,10 @@ import { rejectPendingSignTx } from '../../utils/phantomSignTxPending';
 import { setPhantomWebReturnPath } from '../../utils/phantomWebReturnPath';
 import { isLikelyMobileWebBrowser, preparePhantomWebPopup } from '../../utils/phantomWebPopup';
 import type { SchoolEvent } from '../../types/school';
+import {
+  fetchExpectedPopSignerPubkeyFromRuntime,
+  fetchPopConfigReadiness,
+} from '../../solana/popConfigReadiness';
 
 const SIGN_TIMEOUT_MS = 120_000;
 
@@ -50,6 +54,27 @@ function shouldRetryWithLegacyClaim(error: unknown): boolean {
   if (lower.includes('account: token_program') && lower.includes('invalidprogramid')) return true;
   if (lower.includes('account: token_program') && lower.includes('program id was not as expected')) return true;
   return false;
+}
+
+function mapOnchainReadinessError(
+  reason: 'ready' | 'missing' | 'owner_mismatch' | 'signer_mismatch' | 'invalid_authority' | 'rpc_error'
+): string {
+  if (reason === 'ready') {
+    return 'オンチェーン受け取りの準備状態を確認できませんでした。時間をおいて再試行してください。';
+  }
+  if (reason === 'missing') {
+    return 'このイベントのPoP設定が未初期化です。運営に再発行を依頼してください。';
+  }
+  if (reason === 'owner_mismatch') {
+    return 'このイベントのPoP設定アカウントが不整合です。運営に再発行を依頼してください。';
+  }
+  if (reason === 'signer_mismatch') {
+    return 'このイベントのPoP署名鍵が旧設定です。運営に再発行を依頼してください。';
+  }
+  if (reason === 'invalid_authority') {
+    return 'このイベントのオンチェーン設定が不正です。運営に再発行を依頼してください。';
+  }
+  return 'オンチェーン受け取りの準備状態を確認できませんでした。時間をおいて再試行してください。';
 }
 
 export const UserConfirmScreen: React.FC = () => {
@@ -363,19 +388,34 @@ export const UserConfirmScreen: React.FC = () => {
       let popSigner: string | undefined;
       let tokenReflectedInWallet = false;
       let onchainBlockedByPeriod = false;
-      const shouldAttemptOnchain = Boolean(
+      const shouldAttemptOnchainBase = Boolean(
         receiptCheckOk &&
         walletReady &&
         walletPubkey &&
         eventHasOnchainConfig &&
         !skipOnchainByPopup
       );
+      let onchainReadyForClaim = true;
+      let onchainReadyErrorMessage: string | null = null;
+      if (eventHasOnchainConfig && (forceOnchainMode || shouldAttemptOnchainBase)) {
+        const authority = event.solanaAuthority?.trim() ?? '';
+        const expectedSignerPubkey = await fetchExpectedPopSignerPubkeyFromRuntime();
+        const readiness = await fetchPopConfigReadiness(authority, { expectedSignerPubkey });
+        onchainReadyForClaim = readiness.ready;
+        if (!readiness.ready) {
+          onchainReadyErrorMessage = mapOnchainReadinessError(readiness.reason);
+        }
+      }
+      const shouldAttemptOnchain = shouldAttemptOnchainBase && onchainReadyForClaim;
       if (forceOnchainMode && !shouldAttemptOnchain) {
         if (!eventHasOnchainConfig) {
           throw new Error('このイベントはオンチェーン受け取りに対応していません');
         }
         if (!walletReady || !walletPubkey) {
           throw new Error('Phantomウォレットを接続してください');
+        }
+        if (onchainReadyErrorMessage) {
+          throw new Error(onchainReadyErrorMessage);
         }
         if (skipOnchainByPopup) {
           throw new Error('ブラウザのポップアップがブロックされています。許可後に再試行してください');
@@ -526,6 +566,10 @@ export const UserConfirmScreen: React.FC = () => {
           setError('PINが正しくありません');
         } else if (msg.includes('PoP設定が未初期化')) {
           setError('このイベントのPoP設定が未初期化です。運営に再発行を依頼してください。');
+        } else if (msg.includes('PoP設定アカウントが不整合')) {
+          setError('このイベントのPoP設定が不整合です。運営に再発行を依頼してください。');
+        } else if (msg.includes('PoP署名鍵が旧設定')) {
+          setError('このイベントのPoP署名鍵が旧設定です。運営に再発行を依頼してください。');
         } else if (msg.includes('PoP証明の取得に失敗')) {
           setError(msg);
         } else if (msg.includes('PoP') || msg.includes('pop')) {

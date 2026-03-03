@@ -250,7 +250,77 @@ function isUnsupportedUpsertPopConfigError(error: unknown): boolean {
 
 function shouldAttemptPopConfigUpsert(): boolean {
   const raw = (process.env.EXPO_PUBLIC_ENABLE_POP_CONFIG_UPSERT ?? '').trim().toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+  if (!raw) {
+    // 新Programでは claim_grant 側で pop_config が実質必須のため既定で有効化する。
+    return true;
+  }
+  if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') return false;
+  if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') return true;
+  // 不正値は fail-open（有効）として扱い、イベントを壊さない。
+  return true;
+}
+
+interface PopConfigAccountState {
+  exists: boolean;
+  ownerMatchesProgram: boolean;
+  owner: string | null;
+  configuredSignerPubkey: string | null;
+  expectedSignerPubkey: string;
+}
+
+async function readPopConfigAccountState(
+  popConfigPda: PublicKey,
+  expectedSignerPubkey: PublicKey
+): Promise<PopConfigAccountState> {
+  const connection = getConnection();
+  const accountInfo = await connection.getAccountInfo(popConfigPda, 'confirmed');
+  if (!accountInfo) {
+    return {
+      exists: false,
+      ownerMatchesProgram: false,
+      owner: null,
+      configuredSignerPubkey: null,
+      expectedSignerPubkey: expectedSignerPubkey.toBase58(),
+    };
+  }
+  const ownerMatchesProgram = accountInfo.owner.equals(GRANT_PROGRAM_ID);
+  let configuredSignerPubkey: string | null = null;
+  if (accountInfo.data.length >= 72) {
+    try {
+      configuredSignerPubkey = new PublicKey(accountInfo.data.slice(40, 72)).toBase58();
+    } catch {
+      configuredSignerPubkey = null;
+    }
+  }
+  return {
+    exists: true,
+    ownerMatchesProgram,
+    owner: accountInfo.owner.toBase58(),
+    configuredSignerPubkey,
+    expectedSignerPubkey: expectedSignerPubkey.toBase58(),
+  };
+}
+
+function ensurePopConfigReadyOrThrow(
+  step: string,
+  popConfigPda: PublicKey,
+  state: PopConfigAccountState
+): void {
+  if (!state.exists) {
+    throw new Error(
+      `[${step}] PoP設定が未初期化です。popConfigPda=${popConfigPda.toBase58()} を初期化してから再試行してください。`
+    );
+  }
+  if (!state.ownerMatchesProgram) {
+    throw new Error(
+      `[${step}] PoP設定アカウントの所有者が不正です。owner=${state.owner ?? '-'} expected=${GRANT_PROGRAM_ID.toBase58()}`
+    );
+  }
+  if (state.configuredSignerPubkey && state.configuredSignerPubkey !== state.expectedSignerPubkey) {
+    throw new Error(
+      `[${step}] PoP署名者が不一致です。configured=${state.configuredSignerPubkey} expected=${state.expectedSignerPubkey}`
+    );
+  }
 }
 
 function wrapSetupStepError(step: string, error: unknown): never {
@@ -350,9 +420,10 @@ export async function issueEventTicketToken(
   );
   const setupSignatures: string[] = [];
   const popConfigUpsertEnabled = shouldAttemptPopConfigUpsert();
+  let popConfigUpsertWasUnsupported = false;
 
-  // Tx0: PoP設定（デフォルト無効。必要時のみ有効化）
-  // EXPO_PUBLIC_ENABLE_POP_CONFIG_UPSERT=true の場合のみ実行。
+  // Tx0: PoP設定（既定有効。必要時のみ環境変数で無効化）
+  // EXPO_PUBLIC_ENABLE_POP_CONFIG_UPSERT=false でスキップ可能。
   if (popConfigUpsertEnabled) {
     const upsertPopConfigIx = buildUpsertPopConfigInstruction({
       authority,
@@ -364,13 +435,29 @@ export async function issueEventTicketToken(
       setupSignatures.push(await signAndSendTx(tx0, params.phantom));
     } catch (error) {
       if (isUnsupportedUpsertPopConfigError(error)) {
-        console.warn('[issueEventTicketToken] upsert_pop_config unsupported on deployed program; continue without pop-config upsert');
+        popConfigUpsertWasUnsupported = true;
+        console.warn('[issueEventTicketToken] upsert_pop_config unsupported on deployed program');
       } else {
         wrapSetupStepError('tx0-pop-config', error);
       }
     }
   } else {
-    console.warn('[issueEventTicketToken] pop-config upsert skipped (EXPO_PUBLIC_ENABLE_POP_CONFIG_UPSERT is not enabled)');
+    console.warn('[issueEventTicketToken] pop-config upsert skipped (EXPO_PUBLIC_ENABLE_POP_CONFIG_UPSERT=false)');
+  }
+
+  // pop_config はユーザー受け取り時に必須。Tx1/Tx2 の前に必ず整合性を確認する。
+  {
+    const state = await readPopConfigAccountState(popConfigPda, popSignerPubkey);
+    try {
+      ensurePopConfigReadyOrThrow('tx0-pop-config-verify', popConfigPda, state);
+    } catch (error) {
+      if (popConfigUpsertWasUnsupported) {
+        throw new Error(
+          '[tx0-pop-config-verify] upsert_pop_config を使えないProgramのため自動初期化できません。運営で upsert-pop-config-authorities.mjs を先に実行してください。'
+        );
+      }
+      throw error;
+    }
   }
 
   // Tx1: 新規mint作成 + admin ATA作成 + 初期供給mint
