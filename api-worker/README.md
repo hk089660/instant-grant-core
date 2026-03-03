@@ -140,9 +140,39 @@ L1 で PoP 検証を行うため、以下の Worker 変数を設定する:
 
 1. `POP_SIGNER_HD_MASTER_SEED_B64` を secret に設定し、`POP_SIGNER_HD_ROTATION_PATH_TEMPLATE` + `POP_SIGNER_HD_ROTATION_*` を vars に設定。
 2. `GET /v1/school/pop-status` で `signerMode: "hd"` / `signerRotation.enabled: true` を確認。
-3. 管理者 authority 側で `upsert_pop_config` を実行し、`pop-status.signerPubkey` の公開鍵を on-chain `pop-config` に反映。
+3. 管理者 authority 側で `upsert_pop_config` を **strict 実行**し、`pop-status.signerPubkey` の公開鍵を on-chain `pop-config` に反映。
 4. `POP_SIGNER_LEGACY_ENABLED=false` を設定。
 5. Worker secret から `POP_SIGNER_SECRET_KEY_B64` / `POP_SIGNER_PUBKEY` を削除。
+
+#### 次期デプロイの運用ガード（推奨）
+
+1. デプロイ前に `upsert_pop_config` strict チェックを実行（missing keypair で失敗させる）。
+
+```bash
+cd wene-mobile
+WORKER_BASE_URL="https://instant-grant-core.haruki-kira3.workers.dev" \
+SOLANA_RPC_URL="https://api.devnet.solana.com" \
+STRICT_MODE=true \
+TARGET_EVENT_STATES=published \
+AUTHORITY_KEYPAIRS_JSON='{"<authority-pubkey>":"~/.config/solana/<authority>.json"}' \
+node scripts/upsert-pop-config-authorities.mjs
+```
+
+- `STRICT_MODE=true`（既定）では、`skipped_missing_keypair` / `skipped_keypair_mismatch` / `failed` が 1 件でもあれば非0終了。
+- `TARGET_EVENT_STATES` は既定 `published`。運用ポリシーに応じて `published,ended` のように指定可能。
+
+2. デプロイ後に本番 readiness を実行（on-chain pop-config 整合まで検証）。
+
+```bash
+cd ..
+WORKER_BASE_URL="https://instant-grant-core.haruki-kira3.workers.dev" \
+PAGES_BASE_URL="https://instant-grant-core.pages.dev" \
+SOLANA_RPC_URL="https://api.devnet.solana.com" \
+npm run verify:production
+```
+
+- `verify:production` は `published` な on-chain イベントを対象に、`authority -> pop-config signer` が `pop-status.signerPubkey` と一致するかを検証する。
+- 不一致（未設定/ミスマッチ/重複）があれば FAIL となり、該当 authority と eventId が出力される。
 
 ### Anti-Bot / DDoS ガードレール
 

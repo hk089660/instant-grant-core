@@ -20,6 +20,7 @@ const POP_CONFIG_DISCRIMINATOR = Buffer.from([206, 210, 2, 223, 123, 112, 177, 1
 
 const DEFAULT_WORKER_BASE_URL = 'https://instant-grant-core.haruki-kira3.workers.dev';
 const DEFAULT_RPC_URL = 'https://api.devnet.solana.com';
+const DEFAULT_TARGET_EVENT_STATES = 'published';
 
 function expandHome(inputPath) {
   if (!inputPath) return inputPath;
@@ -34,6 +35,26 @@ function loadKeypair(keypairPath) {
   const raw = fs.readFileSync(fullPath, 'utf8');
   const secret = Uint8Array.from(JSON.parse(raw));
   return Keypair.fromSecretKey(secret);
+}
+
+function parseBooleanEnv(raw, fallback) {
+  if (typeof raw !== 'string') return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
+  return fallback;
+}
+
+function parseEventStates(raw) {
+  const out = new Set();
+  const source = typeof raw === 'string' ? raw : '';
+  for (const part of source.split(',')) {
+    const state = part.trim().toLowerCase();
+    if (!state) continue;
+    out.add(state);
+  }
+  return out;
 }
 
 function parseAuthorityKeypairMap() {
@@ -111,6 +132,8 @@ async function main() {
   const workerBase = (process.env.WORKER_BASE_URL ?? DEFAULT_WORKER_BASE_URL).trim().replace(/\/$/, '');
   const rpcUrl = (process.env.SOLANA_RPC_URL ?? DEFAULT_RPC_URL).trim();
   const dryRun = (process.env.DRY_RUN ?? '').trim().toLowerCase() === 'true';
+  const strictMode = parseBooleanEnv(process.env.STRICT_MODE, true);
+  const targetStates = parseEventStates(process.env.TARGET_EVENT_STATES ?? DEFAULT_TARGET_EVENT_STATES);
   const defaultKeypairPath = (process.env.DEFAULT_AUTHORITY_KEYPAIR ?? '~/.config/solana/id.json').trim();
 
   const popStatus = await fetchJson(`${workerBase}/v1/school/pop-status`);
@@ -122,12 +145,25 @@ async function main() {
 
   const eventsBody = await fetchJson(`${workerBase}/v1/school/events`);
   const events = Array.isArray(eventsBody?.items) ? eventsBody.items : [];
-  const authoritySet = new Set(
-    events
-      .map((item) => (typeof item?.solanaAuthority === 'string' ? item.solanaAuthority.trim() : ''))
-      .filter((v) => v.length > 0)
-  );
-  const authorities = Array.from(authoritySet).sort();
+  const authorityToEvents = new Map();
+  for (const item of events) {
+    const authority = typeof item?.solanaAuthority === 'string' ? item.solanaAuthority.trim() : '';
+    const mint = typeof item?.solanaMint === 'string' ? item.solanaMint.trim() : '';
+    const grantId = typeof item?.solanaGrantId === 'string' ? item.solanaGrantId.trim() : '';
+    const state = typeof item?.state === 'string' ? item.state.trim().toLowerCase() : '';
+    const eventId = typeof item?.id === 'string' ? item.id.trim() : '';
+    if (!authority || !mint || !grantId || !eventId) continue;
+    if (targetStates.size > 0 && !targetStates.has(state)) continue;
+
+    const prev = authorityToEvents.get(authority) ?? [];
+    prev.push({
+      eventId,
+      state,
+      title: typeof item?.title === 'string' ? item.title.trim() : '',
+    });
+    authorityToEvents.set(authority, prev);
+  }
+  const authorities = Array.from(authorityToEvents.keys()).sort();
 
   const connection = new Connection(rpcUrl, 'confirmed');
   const defaultKeypair = loadKeypair(defaultKeypairPath);
@@ -138,12 +174,15 @@ async function main() {
   const results = [];
 
   for (const authorityRaw of authorities) {
+    const linkedEvents = authorityToEvents.get(authorityRaw) ?? [];
+    const eventIds = linkedEvents.map((event) => event.eventId);
     const authority = new PublicKey(authorityRaw);
     const keypairPath = keypairMap.get(authorityRaw);
     if (!keypairPath) {
       results.push({
         authority: authorityRaw,
         status: 'skipped_missing_keypair',
+        eventIds,
       });
       continue;
     }
@@ -154,6 +193,7 @@ async function main() {
       results.push({
         authority: authorityRaw,
         status: 'skipped_keypair_mismatch',
+        eventIds,
         detail: `signer=${signerAuthority} keypairPath=${expandHome(keypairPath)}`,
       });
       continue;
@@ -166,6 +206,7 @@ async function main() {
       results.push({
         authority: authorityRaw,
         status: 'dry_run',
+        eventIds,
         popConfigPda: popConfigPda.toBase58(),
       });
       continue;
@@ -181,6 +222,7 @@ async function main() {
       results.push({
         authority: authorityRaw,
         status: 'updated',
+        eventIds,
         signature,
         popConfigPda: popConfigPda.toBase58(),
         onchainSignerPubkey: decoded?.signerPubkey ?? null,
@@ -189,19 +231,29 @@ async function main() {
       results.push({
         authority: authorityRaw,
         status: 'failed',
+        eventIds,
         detail: err instanceof Error ? err.message : String(err),
       });
     }
   }
 
+  const unresolved = results.filter(
+    (r) => r.status === 'skipped_missing_keypair' || r.status === 'skipped_keypair_mismatch' || r.status === 'failed'
+  );
+
   const summary = {
     workerBase,
     rpcUrl,
     targetSignerPubkey: signerPubkey.toBase58(),
+    strictMode,
+    targetEventStates: Array.from(targetStates),
     authoritiesTotal: authorities.length,
     updated: results.filter((r) => r.status === 'updated').length,
+    dryRun: results.filter((r) => r.status === 'dry_run').length,
     skippedMissingKeypair: results.filter((r) => r.status === 'skipped_missing_keypair').length,
+    skippedKeypairMismatch: results.filter((r) => r.status === 'skipped_keypair_mismatch').length,
     failed: results.filter((r) => r.status === 'failed').length,
+    unresolvedCount: unresolved.length,
     results,
   };
 
@@ -209,6 +261,9 @@ async function main() {
 
   if (summary.failed > 0) {
     process.exit(2);
+  }
+  if (strictMode && summary.unresolvedCount > 0) {
+    process.exit(3);
   }
 }
 

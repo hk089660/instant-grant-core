@@ -4,6 +4,11 @@ const WORKER_BASE_URL = (process.env.WORKER_BASE_URL || 'https://instant-grant-c
 const PAGES_BASE_URL = (process.env.PAGES_BASE_URL || 'https://instant-grant-core.pages.dev').replace(/\/$/, '');
 const MASTER_TOKEN = (process.env.MASTER_TOKEN || '').trim();
 const FETCH_TIMEOUT_MS = Number.parseInt(process.env.FETCH_TIMEOUT_MS || '8000', 10);
+const SOLANA_RPC_URL = (process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com').trim();
+const POP_CONFIG_PROGRAM_ID = (process.env.POP_CONFIG_PROGRAM_ID || 'GZcUoGHk8SfAArTKicL1jiRHZEQa3EuzgYcC2u4yWfSR').trim();
+const POP_CONFIG_CHECK_ENABLED = parseBooleanEnv(process.env.POP_CONFIG_CHECK_ENABLED, true);
+const POP_CONFIG_EVENT_STATES = parseCsvSet(process.env.POP_CONFIG_EVENT_STATES || 'published');
+const POP_CONFIG_ACCOUNT_DATA_SIZE = 73;
 
 const results = [];
 
@@ -11,6 +16,25 @@ function addResult(ok, name, detail) {
   results.push({ ok, name, detail });
   const mark = ok ? 'PASS' : 'FAIL';
   console.log(`[${mark}] ${name}: ${detail}`);
+}
+
+function parseBooleanEnv(raw, fallback) {
+  if (typeof raw !== 'string') return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
+  return fallback;
+}
+
+function parseCsvSet(raw) {
+  const out = new Set();
+  for (const chunk of String(raw || '').split(',')) {
+    const normalized = chunk.trim().toLowerCase();
+    if (!normalized) continue;
+    out.add(normalized);
+  }
+  return out;
 }
 
 async function fetchJson(url, expectedStatus = 200) {
@@ -69,11 +93,133 @@ async function fetchWithStatus(url, expectedStatus, options = {}) {
   return res;
 }
 
+async function rpcCall(url, method, params) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method,
+      params,
+    }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+
+  const text = await res.text();
+  let body = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = null;
+  }
+
+  if (!res.ok) {
+    throw new Error(`rpc http ${res.status}: ${text}`);
+  }
+  if (!body || typeof body !== 'object') {
+    throw new Error('rpc response is not valid JSON');
+  }
+  if (body.error) {
+    throw new Error(`rpc error: ${JSON.stringify(body.error)}`);
+  }
+  if (!('result' in body)) {
+    throw new Error('rpc response has no result');
+  }
+  return body.result;
+}
+
+async function getProgramAccounts({ rpcUrl, programId, filters }) {
+  const result = await rpcCall(rpcUrl, 'getProgramAccounts', [
+    programId,
+    {
+      commitment: 'confirmed',
+      encoding: 'base64',
+      filters,
+    },
+  ]);
+  return Array.isArray(result) ? result : [];
+}
+
+function collectOnchainAuthorityMap(events, targetStates) {
+  const out = new Map();
+  for (const event of events) {
+    const eventId = typeof event?.id === 'string' ? event.id.trim() : '';
+    const state = typeof event?.state === 'string' ? event.state.trim().toLowerCase() : '';
+    const authority = typeof event?.solanaAuthority === 'string' ? event.solanaAuthority.trim() : '';
+    const mint = typeof event?.solanaMint === 'string' ? event.solanaMint.trim() : '';
+    const grantId = typeof event?.solanaGrantId === 'string' ? event.solanaGrantId.trim() : '';
+    if (!eventId || !authority || !mint || !grantId) continue;
+    if (targetStates.size > 0 && !targetStates.has(state)) continue;
+
+    const entry = out.get(authority) || [];
+    entry.push(eventId);
+    out.set(authority, entry);
+  }
+  return out;
+}
+
+async function verifyAuthorityPopConfig({ rpcUrl, programId, authority, signerPubkey }) {
+  const exactMatches = await getProgramAccounts({
+    rpcUrl,
+    programId,
+    filters: [
+      { dataSize: POP_CONFIG_ACCOUNT_DATA_SIZE },
+      { memcmp: { offset: 8, bytes: authority } },
+      { memcmp: { offset: 40, bytes: signerPubkey } },
+    ],
+  });
+
+  if (exactMatches.length === 1) {
+    return {
+      authority,
+      status: 'ok',
+      popConfigAccounts: exactMatches.map((item) => item?.pubkey).filter(Boolean),
+    };
+  }
+
+  if (exactMatches.length > 1) {
+    return {
+      authority,
+      status: 'duplicate',
+      popConfigAccounts: exactMatches.map((item) => item?.pubkey).filter(Boolean),
+    };
+  }
+
+  const byAuthority = await getProgramAccounts({
+    rpcUrl,
+    programId,
+    filters: [
+      { dataSize: POP_CONFIG_ACCOUNT_DATA_SIZE },
+      { memcmp: { offset: 8, bytes: authority } },
+    ],
+  });
+
+  if (byAuthority.length === 0) {
+    return {
+      authority,
+      status: 'missing',
+      popConfigAccounts: [],
+    };
+  }
+
+  return {
+    authority,
+    status: 'mismatch',
+    popConfigAccounts: byAuthority.map((item) => item?.pubkey).filter(Boolean),
+  };
+}
+
 async function main() {
   console.log('=== Asuka/We-ne Production Readiness Check ===');
   console.log(`WORKER_BASE_URL=${WORKER_BASE_URL}`);
   console.log(`PAGES_BASE_URL=${PAGES_BASE_URL}`);
   console.log(`FETCH_TIMEOUT_MS=${FETCH_TIMEOUT_MS}`);
+  console.log(`SOLANA_RPC_URL=${SOLANA_RPC_URL}`);
+  console.log(`POP_CONFIG_PROGRAM_ID=${POP_CONFIG_PROGRAM_ID}`);
 
   try {
     const workerRoot = await fetchJson(`${WORKER_BASE_URL}/`);
@@ -118,6 +264,71 @@ async function main() {
     addResult(pagesRuntime.ready === true, 'Pages runtime status', JSON.stringify(pagesRuntime));
   } catch (err) {
     addResult(false, 'Pages runtime status', err instanceof Error ? err.message : String(err));
+  }
+
+  if (POP_CONFIG_CHECK_ENABLED) {
+    try {
+      const popStatus = await fetchJson(`${WORKER_BASE_URL}/v1/school/pop-status`);
+      const signerConfigured = popStatus?.signerConfigured === true;
+      const signerPubkey = typeof popStatus?.signerPubkey === 'string' ? popStatus.signerPubkey.trim() : '';
+      if (!signerConfigured || !signerPubkey) {
+        addResult(
+          false,
+          'On-chain pop-config alignment',
+          `PoP signer not configured (signerConfigured=${String(signerConfigured)} signerPubkey=${signerPubkey || 'null'})`
+        );
+      } else {
+        const eventsBody = await fetchJson(`${WORKER_BASE_URL}/v1/school/events`);
+        const events = Array.isArray(eventsBody?.items) ? eventsBody.items : [];
+        const authorityMap = collectOnchainAuthorityMap(events, POP_CONFIG_EVENT_STATES);
+        const authorities = Array.from(authorityMap.keys()).sort();
+
+        if (authorities.length === 0) {
+          addResult(
+            true,
+            'On-chain pop-config alignment',
+            `no on-chain events for states=${Array.from(POP_CONFIG_EVENT_STATES).join(',') || '(all)'}`
+          );
+        } else {
+          const checks = await Promise.all(
+            authorities.map((authority) =>
+              verifyAuthorityPopConfig({
+                rpcUrl: SOLANA_RPC_URL,
+                programId: POP_CONFIG_PROGRAM_ID,
+                authority,
+                signerPubkey,
+              })
+            )
+          );
+
+          const issues = checks
+            .filter((item) => item.status !== 'ok')
+            .map((item) => ({
+              authority: item.authority,
+              status: item.status,
+              eventIds: authorityMap.get(item.authority) || [],
+              popConfigAccounts: item.popConfigAccounts,
+            }));
+          const ok = issues.length === 0;
+          addResult(
+            ok,
+            'On-chain pop-config alignment',
+            JSON.stringify({
+              signerPubkey,
+              eventStates: Array.from(POP_CONFIG_EVENT_STATES),
+              authorityCount: authorities.length,
+              okAuthorities: checks.filter((item) => item.status === 'ok').length,
+              issueCount: issues.length,
+              issues,
+            })
+          );
+        }
+      }
+    } catch (err) {
+      addResult(false, 'On-chain pop-config alignment', err instanceof Error ? err.message : String(err));
+    }
+  } else {
+    addResult(true, 'On-chain pop-config alignment', 'skipped (set POP_CONFIG_CHECK_ENABLED=true to enable)');
   }
 
   if (MASTER_TOKEN) {
