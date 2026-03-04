@@ -481,6 +481,98 @@ export const UserSuccessScreen: React.FC = () => {
           </Card>
         )}
 
+        {/* 優先表示: 監査レシート */}
+        {(resolvedAuditReceiptId || resolvedAuditReceiptHash) && (
+          <Card style={styles.card}>
+            <AppText variant="caption" style={styles.label}>
+              監査レシート（参加券）
+            </AppText>
+            {resolvedAuditReceiptId && (
+              <AppText variant="small" style={styles.value}>
+                receipt_id: {shortenCode(resolvedAuditReceiptId)}
+              </AppText>
+            )}
+            {resolvedAuditReceiptHash && (
+              <AppText variant="small" style={styles.value}>
+                receipt_hash: {shortenCode(resolvedAuditReceiptHash)}
+              </AppText>
+            )}
+            <AppText variant="small" style={styles.codeHint}>
+              第三者は verify-code API で監査チェーン整合性を検証できます。
+            </AppText>
+            <Button
+              title="監査レシートをコピー"
+              variant="secondary"
+              size="medium"
+              onPress={handleCopyAuditReceipt}
+              style={styles.copyButton}
+            />
+          </Card>
+        )}
+
+        {/* Solana オンチェーン受け取り履歴（受け取り済み時は最優先で表示） */}
+        {onchainTxHistory.length > 0 && (
+          <Card style={styles.card}>
+            <AppText variant="caption" style={styles.label}>
+              オンチェーン受け取り署名
+            </AppText>
+            <View style={styles.onchainTabs}>
+              <TouchableOpacity
+                onPress={() => setOnchainTxTab('tx_hash')}
+                style={[styles.onchainTabButton, onchainTxTab === 'tx_hash' && styles.onchainTabButtonActive]}
+              >
+                <AppText
+                  variant="small"
+                  style={[styles.onchainTabLabel, onchainTxTab === 'tx_hash' && styles.onchainTabLabelActive]}
+                >
+                  tx hash
+                </AppText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setOnchainTxTab('explorer')}
+                style={[styles.onchainTabButton, onchainTxTab === 'explorer' && styles.onchainTabButtonActive]}
+              >
+                <AppText
+                  variant="small"
+                  style={[styles.onchainTabLabel, onchainTxTab === 'explorer' && styles.onchainTabLabelActive]}
+                >
+                  explorer
+                </AppText>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.onchainTabPanel}>
+              {onchainTxTab === 'tx_hash'
+                ? onchainTxHistory.map((item) => (
+                    <View key={item.txSignature} style={styles.onchainCompactRow}>
+                      <AppText variant="small" style={styles.onchainCompactMono}>
+                        {shortenCode(item.txSignature, 10, 8)}
+                      </AppText>
+                    </View>
+                  ))
+                : onchainTxHistory.map((item, idx) => (
+                    <TouchableOpacity
+                      key={item.txSignature}
+                      onPress={() => Linking.openURL(item.txExplorerUrl)}
+                      style={styles.onchainExplorerRow}
+                    >
+                      <AppText variant="small" style={styles.onchainExplorerLabel}>
+                        #{idx + 1} {shortenCode(item.txSignature, 7, 6)}
+                      </AppText>
+                      <Ionicons name="open-outline" size={14} color={theme.colors.textSecondary} />
+                    </TouchableOpacity>
+                  ))}
+            </View>
+            {onchainTxTab === 'explorer' && explorerTxUrl && (
+              <Button
+                title="最新TxをExplorerで開く"
+                variant="secondary"
+                onPress={() => Linking.openURL(explorerTxUrl)}
+                style={styles.explorerButton}
+              />
+            )}
+          </Card>
+        )}
+
         {showOnchainReceiveCard && (
           <Card style={styles.card}>
             <AppText variant="caption" style={styles.label}>
@@ -546,97 +638,6 @@ export const UserSuccessScreen: React.FC = () => {
             <AppText variant="small" style={styles.codeHint}>
               このコードは後で確認に使えます
             </AppText>
-          </Card>
-        )}
-
-        {(resolvedAuditReceiptId || resolvedAuditReceiptHash) && (
-          <Card style={styles.card}>
-            <AppText variant="caption" style={styles.label}>
-              監査レシート（参加券）
-            </AppText>
-            {resolvedAuditReceiptId && (
-              <AppText variant="small" style={styles.value}>
-                receipt_id: {shortenCode(resolvedAuditReceiptId)}
-              </AppText>
-            )}
-            {resolvedAuditReceiptHash && (
-              <AppText variant="small" style={styles.value}>
-                receipt_hash: {shortenCode(resolvedAuditReceiptHash)}
-              </AppText>
-            )}
-            <AppText variant="small" style={styles.codeHint}>
-              第三者は verify-code API で監査チェーン整合性を検証できます。
-            </AppText>
-            <Button
-              title="監査レシートをコピー"
-              variant="secondary"
-              size="medium"
-              onPress={handleCopyAuditReceipt}
-              style={styles.copyButton}
-            />
-          </Card>
-        )}
-
-        {/* Solana オンチェーン受け取り履歴 */}
-        {onchainTxHistory.length > 0 && (
-          <Card style={styles.card}>
-            <AppText variant="caption" style={styles.label}>
-              オンチェーン受け取り署名
-            </AppText>
-            <View style={styles.onchainTabs}>
-              <TouchableOpacity
-                onPress={() => setOnchainTxTab('tx_hash')}
-                style={[styles.onchainTabButton, onchainTxTab === 'tx_hash' && styles.onchainTabButtonActive]}
-              >
-                <AppText
-                  variant="small"
-                  style={[styles.onchainTabLabel, onchainTxTab === 'tx_hash' && styles.onchainTabLabelActive]}
-                >
-                  tx hash
-                </AppText>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setOnchainTxTab('explorer')}
-                style={[styles.onchainTabButton, onchainTxTab === 'explorer' && styles.onchainTabButtonActive]}
-              >
-                <AppText
-                  variant="small"
-                  style={[styles.onchainTabLabel, onchainTxTab === 'explorer' && styles.onchainTabLabelActive]}
-                >
-                  explorer
-                </AppText>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.onchainTabPanel}>
-              {onchainTxTab === 'tx_hash'
-                ? onchainTxHistory.map((item) => (
-                    <View key={item.txSignature} style={styles.onchainCompactRow}>
-                      <AppText variant="small" style={styles.onchainCompactMono}>
-                        {shortenCode(item.txSignature, 10, 8)}
-                      </AppText>
-                    </View>
-                  ))
-                : onchainTxHistory.map((item, idx) => (
-                    <TouchableOpacity
-                      key={item.txSignature}
-                      onPress={() => Linking.openURL(item.txExplorerUrl)}
-                      style={styles.onchainExplorerRow}
-                    >
-                      <AppText variant="small" style={styles.onchainExplorerLabel}>
-                        #{idx + 1} {shortenCode(item.txSignature, 7, 6)}
-                      </AppText>
-                      <Ionicons name="open-outline" size={14} color={theme.colors.textSecondary} />
-                    </TouchableOpacity>
-                  ))}
-            </View>
-            {onchainTxTab === 'explorer' && explorerTxUrl && (
-              <Button
-                title="最新TxをExplorerで開く"
-                variant="secondary"
-                onPress={() => Linking.openURL(explorerTxUrl)}
-                style={styles.explorerButton}
-              />
-            )}
           </Card>
         )}
 
