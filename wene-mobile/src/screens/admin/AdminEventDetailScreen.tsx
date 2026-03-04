@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { View, StyleSheet, ScrollView, Platform, TextInput } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as QRCode from 'qrcode';
@@ -6,6 +6,7 @@ import { AppText, Button, Card, AdminShell, Loading } from '../../ui/components'
 import { adminTheme } from '../../ui/adminTheme';
 import { closeAdminEvent, fetchAdminEvent, fetchAdminTransferLogs, fetchClaimants, type Claimant, type TransferLogEntry } from '../../api/adminApi';
 import type { SchoolEvent } from '../../types/school';
+import { usePolling } from '../../hooks/usePolling';
 
 function isOnchainTransfer(item: TransferLogEntry): boolean {
   return (
@@ -30,6 +31,8 @@ export const AdminEventDetailScreen: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [closingEvent, setClosingEvent] = useState(false);
+  const [lastPolledAt, setLastPolledAt] = useState<string | null>(null);
+  const initialLoadDone = useRef(false);
 
   useEffect(() => {
     if (!eventId) return;
@@ -69,11 +72,42 @@ export const AdminEventDetailScreen: React.FC = () => {
         }
       })
       .finally(() => {
-        if (!cancelled) setTransferLoading(false);
+        if (!cancelled) {
+          setTransferLoading(false);
+          initialLoadDone.current = true;
+        }
       });
 
     return () => { cancelled = true; };
   }, [eventId]);
+
+  // ポーリング: 15秒間隔でtransfer logsと参加者データをバックグラウンド更新
+  const pollData = useCallback(async () => {
+    if (!eventId || !initialLoadDone.current) return;
+    try {
+      const [claimRes, transferRes] = await Promise.allSettled([
+        fetchClaimants(eventId),
+        fetchAdminTransferLogs({ eventId, limit: 50 }),
+      ]);
+      if (claimRes.status === 'fulfilled') {
+        setClaimants(claimRes.value.items);
+      }
+      if (transferRes.status === 'fulfilled') {
+        setTransfers(transferRes.value.items ?? []);
+        setTransferCheckedAt(transferRes.value.checkedAt ?? null);
+        setTransferStrictLevel(transferRes.value.strictLevel ?? null);
+      }
+      const now = new Date();
+      setLastPolledAt(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`);
+    } catch {
+      // ポーリングエラーは無視（既存データを維持）
+    }
+  }, [eventId]);
+
+  usePolling(pollData, {
+    intervalMs: 15_000,
+    enabled: Boolean(eventId),
+  });
 
   // QR 生成
   const scanUrl = useMemo(() => {
@@ -338,6 +372,11 @@ export const AdminEventDetailScreen: React.FC = () => {
           <AppText variant="small" style={styles.muted}>
             最終取得: {formatTime(transferCheckedAt ?? undefined)}
           </AppText>
+          {lastPolledAt && (
+            <AppText variant="small" style={styles.muted}>
+              自動更新: {lastPolledAt}
+            </AppText>
+          )}
         </View>
 
         {transferError && (

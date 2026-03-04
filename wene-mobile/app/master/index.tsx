@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, StyleSheet, FlatList, TextInput, Alert, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText, Button, Card } from '../../src/ui/components';
@@ -22,6 +22,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MASTER_AUTH_KEY } from './_layout';
 import { useRouter } from 'expo-router';
+import { usePolling } from '../../src/hooks/usePolling';
 
 export default function MasterDashboard() {
     const router = useRouter();
@@ -67,6 +68,52 @@ export default function MasterDashboard() {
             loadInvites();
         }
     }, [activeTab]);
+
+    // ポーリング: loggingタブがアクティブな間は15秒間隔で自動更新
+    const pollAuditLogs = useCallback(async () => {
+        try {
+            const password = await AsyncStorage.getItem(MASTER_AUTH_KEY);
+            if (!password) return;
+
+            const [logsResult, transfersResult] = await Promise.allSettled([
+                fetchMasterAuditLogs(password),
+                fetchMasterTransferLogs(password, { limit: 50 }),
+            ]);
+            if (logsResult.status === 'fulfilled') {
+                setAuditLogs(logsResult.value);
+            }
+            if (transfersResult.status === 'fulfilled') {
+                setTransferLogs(transfersResult.value.items || []);
+            }
+        } catch {
+            // ポーリングエラーは無視（既存データを維持）
+        }
+    }, []);
+
+    usePolling(pollAuditLogs, {
+        intervalMs: 15_000,
+        enabled: activeTab === 'logging',
+    });
+
+    // ポーリング: disclosureタブがアクティブな間は30秒間隔で自動更新
+    const pollDisclosures = useCallback(async () => {
+        try {
+            const password = await AsyncStorage.getItem(MASTER_AUTH_KEY);
+            if (!password) return;
+            const disclosure = await fetchMasterAdminDisclosures(password, {
+                includeRevoked: true,
+                transferLimit: 1000,
+            });
+            setAdminDisclosures(disclosure.admins || []);
+        } catch {
+            // ポーリングエラーは無視
+        }
+    }, []);
+
+    usePolling(pollDisclosures, {
+        intervalMs: 30_000,
+        enabled: activeTab === 'disclosure',
+    });
 
     const isSessionExpiredError = (error: unknown): boolean => {
         const message = error instanceof Error ? error.message : String(error ?? '');
@@ -737,8 +784,8 @@ export default function MasterDashboard() {
                                 searchLoading
                                     ? <AppText style={styles.emptyText}>Searching...</AppText>
                                     : searchQuery.trim()
-                                    ? <AppText style={styles.emptyText}>No matches found.</AppText>
-                                    : <AppText style={styles.emptyText}>Enter a search query.</AppText>
+                                        ? <AppText style={styles.emptyText}>No matches found.</AppText>
+                                        : <AppText style={styles.emptyText}>Enter a search query.</AppText>
                             }
                         />
                     </View>

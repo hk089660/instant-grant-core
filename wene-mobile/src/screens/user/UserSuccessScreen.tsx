@@ -18,6 +18,7 @@ import {
   fetchExpectedPopSignerPubkeyFromRuntime,
   fetchPopConfigReadiness,
 } from '../../solana/popConfigReadiness';
+import { usePolling } from '../../hooks/usePolling';
 
 function shortenCode(value: string, head = 8, tail = 8): string {
   const normalized = value.trim();
@@ -450,6 +451,21 @@ export const UserSuccessScreen: React.FC = () => {
     }
   }, [onchainTxHistory.length, onchainTxTab]);
 
+  // ポーリング: 15秒間隔でストアのチケットデータを再読み込み
+  const { loadTickets } = useRecipientTicketStore();
+  const pollTickets = useCallback(async () => {
+    try {
+      await loadTickets();
+    } catch {
+      // ポーリングエラーは無視（既存データを維持）
+    }
+  }, [loadTickets]);
+
+  usePolling(pollTickets, {
+    intervalMs: 15_000,
+    enabled: Boolean(targetEventId),
+  });
+
   const handleCopyPopProof = useCallback(async () => {
     const payload = [
       'PoP Proof',
@@ -610,12 +626,12 @@ export const UserSuccessScreen: React.FC = () => {
               {onchainTxTab === 'tx_hash'
                 ? onchainTxHistory.length > 0
                   ? onchainTxHistory.map((item) => (
-                      <View key={item.txSignature} style={styles.onchainCompactRow}>
-                        <AppText variant="small" style={styles.onchainCompactMono}>
-                          {shortenCode(item.txSignature, 10, 8)}
-                        </AppText>
-                      </View>
-                    ))
+                    <View key={item.txSignature} style={styles.onchainCompactRow}>
+                      <AppText variant="small" style={styles.onchainCompactMono}>
+                        {shortenCode(item.txSignature, 10, 8)}
+                      </AppText>
+                    </View>
+                  ))
                   : (
                     <AppText variant="small" style={styles.codeHint}>
                       tx hash を取得中です。しばらくしてから再表示してください。
@@ -623,17 +639,17 @@ export const UserSuccessScreen: React.FC = () => {
                   )
                 : onchainTxHistory.length > 0
                   ? onchainTxHistory.map((item, idx) => (
-                      <TouchableOpacity
-                        key={item.txSignature}
-                        onPress={() => Linking.openURL(item.txExplorerUrl)}
-                        style={styles.onchainExplorerRow}
-                      >
-                        <AppText variant="small" style={styles.onchainExplorerLabel}>
-                          #{idx + 1} {shortenCode(item.txSignature, 7, 6)}
-                        </AppText>
-                        <Ionicons name="open-outline" size={14} color={theme.colors.textSecondary} />
-                      </TouchableOpacity>
-                    ))
+                    <TouchableOpacity
+                      key={item.txSignature}
+                      onPress={() => Linking.openURL(item.txExplorerUrl)}
+                      style={styles.onchainExplorerRow}
+                    >
+                      <AppText variant="small" style={styles.onchainExplorerLabel}>
+                        #{idx + 1} {shortenCode(item.txSignature, 7, 6)}
+                      </AppText>
+                      <Ionicons name="open-outline" size={14} color={theme.colors.textSecondary} />
+                    </TouchableOpacity>
+                  ))
                   : null}
             </View>
             {onchainTxTab === 'explorer' && explorerTxUrl && (
