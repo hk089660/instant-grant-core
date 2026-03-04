@@ -36,12 +36,55 @@ function firstParam(value: string | string[] | undefined): string | undefined {
   return value;
 }
 
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  return normalized || undefined;
+}
+
+function safeDecodeUrlComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function parseTxSignatureFromExplorerUrl(value: string | undefined): string | undefined {
   if (!value) return undefined;
-  const matched = value.match(/\/tx\/([^/?#]+)/i);
-  if (!matched?.[1]) return undefined;
-  const candidate = decodeURIComponent(matched[1]).trim();
-  return candidate || undefined;
+  try {
+    const parsed = new URL(value);
+    const fromPath = parsed.pathname.match(/\/tx\/([^/?#]+)/i)?.[1];
+    if (fromPath) {
+      const candidate = safeDecodeUrlComponent(fromPath).trim();
+      if (candidate) return candidate;
+    }
+    const fromQuery =
+      parsed.searchParams.get('signature') ??
+      parsed.searchParams.get('tx') ??
+      parsed.searchParams.get('txSignature');
+    if (fromQuery?.trim()) return fromQuery.trim();
+  } catch {
+    // URL constructor が使えない値は下の正規表現フォールバックで処理する
+  }
+
+  const fromPathFallback = value.match(/\/tx\/([^/?#]+)/i)?.[1];
+  if (fromPathFallback) {
+    const candidate = safeDecodeUrlComponent(fromPathFallback).trim();
+    if (candidate) return candidate;
+  }
+  const fromQueryFallback = value.match(/[?&#](?:signature|tx|txSignature)=([^&#]+)/i)?.[1];
+  if (fromQueryFallback) {
+    const candidate = safeDecodeUrlComponent(fromQueryFallback).trim();
+    if (candidate) return candidate;
+  }
+  return undefined;
+}
+
+function buildExplorerTxUrl(txSignature: string | undefined): string | undefined {
+  const normalized = txSignature?.trim();
+  if (!normalized) return undefined;
+  return `https://explorer.solana.com/tx/${normalized}?cluster=devnet`;
 }
 
 type OnchainTxTab = 'tx_hash' | 'explorer';
@@ -132,38 +175,34 @@ export const UserSuccessScreen: React.FC = () => {
   const [onchainUnavailableReason, setOnchainUnavailableReason] = useState<string | null>(null);
   const [onchainTxTab, setOnchainTxTab] = useState<OnchainTxTab>('tx_hash');
   const { addTicket, getTicketByEventId } = useRecipientTicketStore();
-  const txParam = firstParam(tx) ?? firstParam(txSignatureRaw);
-  const receiptParam = firstParam(receipt) ?? firstParam(receiptPubkeyRaw);
+  const txParam = normalizeOptionalString(firstParam(tx) ?? firstParam(txSignatureRaw));
+  const receiptParam = normalizeOptionalString(firstParam(receipt) ?? firstParam(receiptPubkeyRaw));
   const alreadyParam = firstParam(already);
   const statusParam = firstParam(status);
   const confirmationCodeParam = firstParam(confirmationCode);
   const mintParam = firstParam(mint);
   const reflectedParam = firstParam(reflected);
   const onchainBlockedParam = firstParam(onchainBlocked);
-  const explorerTxUrlParam = firstParam(explorerTxUrlRaw);
+  const explorerTxUrlParam = normalizeOptionalString(firstParam(explorerTxUrlRaw));
   const popEntryHashParam = firstParam(popEntryHashRaw);
   const popAuditHashParam = firstParam(popAuditHashRaw);
   const popSignerParam = firstParam(popSignerRaw);
   const auditReceiptIdParam = firstParam(auditReceiptIdRaw);
   const auditReceiptHashParam = firstParam(auditReceiptHashRaw);
   const txSignatureFromExplorer = parseTxSignatureFromExplorerUrl(explorerTxUrlParam);
-  const txSignature =
-    (typeof txParam === 'string' && txParam.trim() ? txParam.trim() : undefined) ??
-    txSignatureFromExplorer;
-  const receiptPubkey = typeof receiptParam === 'string' && receiptParam.trim() ? receiptParam.trim() : undefined;
-  const mintAddress = typeof mintParam === 'string' && mintParam.trim() ? mintParam.trim() : undefined;
-  const popEntryHash = typeof popEntryHashParam === 'string' && popEntryHashParam.trim() ? popEntryHashParam.trim() : undefined;
-  const popAuditHash = typeof popAuditHashParam === 'string' && popAuditHashParam.trim() ? popAuditHashParam.trim() : undefined;
-  const popSigner = typeof popSignerParam === 'string' && popSignerParam.trim() ? popSignerParam.trim() : undefined;
-  const auditReceiptId =
-    typeof auditReceiptIdParam === 'string' && auditReceiptIdParam.trim() ? auditReceiptIdParam.trim() : undefined;
-  const auditReceiptHash =
-    typeof auditReceiptHashParam === 'string' && auditReceiptHashParam.trim() ? auditReceiptHashParam.trim() : undefined;
+  const txSignature = txParam ?? txSignatureFromExplorer;
+  const receiptPubkey = receiptParam;
+  const mintAddress = normalizeOptionalString(mintParam);
+  const popEntryHash = normalizeOptionalString(popEntryHashParam);
+  const popAuditHash = normalizeOptionalString(popAuditHashParam);
+  const popSigner = normalizeOptionalString(popSignerParam);
+  const auditReceiptId = normalizeOptionalString(auditReceiptIdParam);
+  const auditReceiptHash = normalizeOptionalString(auditReceiptHashParam);
   const reflectedOnchain = reflectedParam === '1';
   const onchainBlockedByPeriod = onchainBlockedParam === '1';
   const storedTicket = targetEventId ? getTicketByEventId(targetEventId) : undefined;
-  const fallbackTx = txSignature ?? storedTicket?.txSignature;
-  const fallbackReceipt = receiptPubkey ?? storedTicket?.receiptPubkey;
+  const fallbackTx = txSignature ?? normalizeOptionalString(storedTicket?.txSignature);
+  const fallbackReceipt = receiptPubkey ?? normalizeOptionalString(storedTicket?.receiptPubkey);
   const resolvedMintAddress = mintAddress ?? storedTicket?.mintAddress;
   const resolvedConfirmationCode =
     (typeof confirmationCodeParam === 'string' && confirmationCodeParam.trim() ? confirmationCodeParam.trim() : undefined) ??
@@ -318,13 +357,17 @@ export const UserSuccessScreen: React.FC = () => {
   ]);
 
   const isAlready = alreadyParam === '1' || statusParam === 'already';
-  const explorerTxUrl = onchainTxHistory[0]?.txExplorerUrl ?? (resolvedTx ? `https://explorer.solana.com/tx/${resolvedTx}?cluster=devnet` : null);
+  const explorerTxUrl =
+    onchainTxHistory[0]?.txExplorerUrl ??
+    explorerTxUrlParam ??
+    buildExplorerTxUrl(resolvedTx) ??
+    null;
   const explorerReceiptUrl = resolvedReceipt ? `https://explorer.solana.com/address/${resolvedReceipt}?cluster=devnet` : null;
   const explorerMintUrl = resolvedMintAddress ? `https://explorer.solana.com/address/${resolvedMintAddress}?cluster=devnet` : null;
   const hasOffchainReceipt = Boolean(
     resolvedConfirmationCode || resolvedAuditReceiptId || resolvedAuditReceiptHash
   );
-  const hasOnchainReceipt = onchainTxHistory.length > 0;
+  const hasOnchainReceipt = onchainTxHistory.length > 0 || Boolean(explorerTxUrl);
   const eventSupportsOnchainReceive = Boolean(
     event?.solanaMint && event?.solanaAuthority && event?.solanaGrantId
   );
@@ -534,7 +577,7 @@ export const UserSuccessScreen: React.FC = () => {
         )}
 
         {/* Solana オンチェーン受け取り履歴（受け取り済み時は最優先で表示） */}
-        {onchainTxHistory.length > 0 && (
+        {(onchainTxHistory.length > 0 || explorerTxUrl) && (
           <Card style={styles.card}>
             <AppText variant="caption" style={styles.label}>
               オンチェーン受け取り署名
@@ -565,25 +608,33 @@ export const UserSuccessScreen: React.FC = () => {
             </View>
             <View style={styles.onchainTabPanel}>
               {onchainTxTab === 'tx_hash'
-                ? onchainTxHistory.map((item) => (
-                    <View key={item.txSignature} style={styles.onchainCompactRow}>
-                      <AppText variant="small" style={styles.onchainCompactMono}>
-                        {shortenCode(item.txSignature, 10, 8)}
-                      </AppText>
-                    </View>
-                  ))
-                : onchainTxHistory.map((item, idx) => (
-                    <TouchableOpacity
-                      key={item.txSignature}
-                      onPress={() => Linking.openURL(item.txExplorerUrl)}
-                      style={styles.onchainExplorerRow}
-                    >
-                      <AppText variant="small" style={styles.onchainExplorerLabel}>
-                        #{idx + 1} {shortenCode(item.txSignature, 7, 6)}
-                      </AppText>
-                      <Ionicons name="open-outline" size={14} color={theme.colors.textSecondary} />
-                    </TouchableOpacity>
-                  ))}
+                ? onchainTxHistory.length > 0
+                  ? onchainTxHistory.map((item) => (
+                      <View key={item.txSignature} style={styles.onchainCompactRow}>
+                        <AppText variant="small" style={styles.onchainCompactMono}>
+                          {shortenCode(item.txSignature, 10, 8)}
+                        </AppText>
+                      </View>
+                    ))
+                  : (
+                    <AppText variant="small" style={styles.codeHint}>
+                      tx hash を取得中です。しばらくしてから再表示してください。
+                    </AppText>
+                  )
+                : onchainTxHistory.length > 0
+                  ? onchainTxHistory.map((item, idx) => (
+                      <TouchableOpacity
+                        key={item.txSignature}
+                        onPress={() => Linking.openURL(item.txExplorerUrl)}
+                        style={styles.onchainExplorerRow}
+                      >
+                        <AppText variant="small" style={styles.onchainExplorerLabel}>
+                          #{idx + 1} {shortenCode(item.txSignature, 7, 6)}
+                        </AppText>
+                        <Ionicons name="open-outline" size={14} color={theme.colors.textSecondary} />
+                      </TouchableOpacity>
+                    ))
+                  : null}
             </View>
             {onchainTxTab === 'explorer' && explorerTxUrl && (
               <Button

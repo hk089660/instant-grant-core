@@ -73,6 +73,9 @@ export const UserEventsScreen: React.FC = () => {
       router.push(
         schoolRoutes.success(eventId, {
           tx: joinedTicket?.txSignature,
+          explorerTxUrl: joinedTicket?.txSignature
+            ? `https://explorer.solana.com/tx/${joinedTicket.txSignature}?cluster=devnet`
+            : undefined,
           receipt: joinedTicket?.receiptPubkey,
           confirmationCode: joinedTicket?.confirmationCode,
           mint: joinedTicket?.mintAddress,

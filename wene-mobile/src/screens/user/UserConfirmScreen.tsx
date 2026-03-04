@@ -43,6 +43,57 @@ function firstParam(value: string | string[] | undefined): string | undefined {
   return value;
 }
 
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  return normalized || undefined;
+}
+
+function safeDecodeUrlComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function parseTxSignatureFromExplorerUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = new URL(value);
+    const fromPath = parsed.pathname.match(/\/tx\/([^/?#]+)/i)?.[1];
+    if (fromPath) {
+      const normalized = safeDecodeUrlComponent(fromPath).trim();
+      if (normalized) return normalized;
+    }
+    const fromQuery =
+      parsed.searchParams.get('signature') ??
+      parsed.searchParams.get('tx') ??
+      parsed.searchParams.get('txSignature');
+    if (fromQuery?.trim()) return fromQuery.trim();
+  } catch {
+    // URL constructor が使えない環境や相対URLでは下の正規表現フォールバックを使う
+  }
+
+  const fromPathFallback = value.match(/\/tx\/([^/?#]+)/i)?.[1];
+  if (fromPathFallback) {
+    const normalized = safeDecodeUrlComponent(fromPathFallback).trim();
+    if (normalized) return normalized;
+  }
+  const fromQueryFallback = value.match(/[?&#](?:signature|tx|txSignature)=([^&#]+)/i)?.[1];
+  if (fromQueryFallback) {
+    const normalized = safeDecodeUrlComponent(fromQueryFallback).trim();
+    if (normalized) return normalized;
+  }
+  return undefined;
+}
+
+function buildExplorerTxUrl(txSignature: string | undefined): string | undefined {
+  const normalized = txSignature?.trim();
+  if (!normalized) return undefined;
+  return `https://explorer.solana.com/tx/${normalized}?cluster=devnet`;
+}
+
 function shouldRetryWithLegacyClaim(error: unknown): boolean {
   const lower = buildSendErrorDebugText(error).toLowerCase();
   if (!lower) return false;
@@ -486,12 +537,29 @@ export const UserConfirmScreen: React.FC = () => {
       // 3) on-chain claim（レシート検証済みの場合のみ許可）
       let txSignature: string | undefined;
       let receiptPubkey: string | undefined;
+      let explorerTxUrl: string | undefined;
       let distributedMint: string | undefined;
       let popEntryHash: string | undefined;
       let popAuditHash: string | undefined;
       let popSigner: string | undefined;
       let tokenReflectedInWallet = false;
       let onchainBlockedByPeriod = false;
+      const resultExplorerTxUrl = normalizeOptionalString(result?.explorerTxUrl);
+      const resultTxSignature =
+        normalizeOptionalString(result?.txSignature) ??
+        parseTxSignatureFromExplorerUrl(resultExplorerTxUrl);
+      const resultReceiptPubkey = normalizeOptionalString(result?.receiptPubkey);
+      if (resultTxSignature) {
+        txSignature = resultTxSignature;
+      }
+      if (resultReceiptPubkey) {
+        receiptPubkey = resultReceiptPubkey;
+      }
+      if (resultExplorerTxUrl) {
+        explorerTxUrl = resultExplorerTxUrl;
+      } else if (resultTxSignature) {
+        explorerTxUrl = buildExplorerTxUrl(resultTxSignature);
+      }
       const shouldAttemptOnchainBase = Boolean(
         offchainReceiptReady &&
         walletReady &&
@@ -535,6 +603,7 @@ export const UserConfirmScreen: React.FC = () => {
           const onchain = await runOnchainClaim(confirmationCode);
           txSignature = onchain.txSignature;
           receiptPubkey = onchain.receiptPubkey;
+          explorerTxUrl = buildExplorerTxUrl(onchain.txSignature);
           distributedMint = onchain.mint;
           popEntryHash = onchain.popEntryHash;
           popAuditHash = onchain.popAuditHash;
@@ -563,6 +632,20 @@ export const UserConfirmScreen: React.FC = () => {
               txSignature: onchain.txSignature,
               receiptPubkey: onchain.receiptPubkey,
             });
+            const syncedExplorerTxUrl = normalizeOptionalString(result?.explorerTxUrl);
+            const syncedTxSignature =
+              normalizeOptionalString(result?.txSignature) ??
+              parseTxSignatureFromExplorerUrl(syncedExplorerTxUrl);
+            const syncedReceiptPubkey = normalizeOptionalString(result?.receiptPubkey);
+            if (!txSignature && syncedTxSignature) {
+              txSignature = syncedTxSignature;
+            }
+            if (!receiptPubkey && syncedReceiptPubkey) {
+              receiptPubkey = syncedReceiptPubkey;
+            }
+            if (!explorerTxUrl) {
+              explorerTxUrl = syncedExplorerTxUrl ?? buildExplorerTxUrl(txSignature);
+            }
           } catch (syncError) {
             if (syncError instanceof HttpError && syncError.status === 401) {
               throw syncError;
@@ -583,6 +666,7 @@ export const UserConfirmScreen: React.FC = () => {
             if (attemptContext.txSignature) {
               txSignature = attemptContext.txSignature;
               receiptPubkey = attemptContext.receiptPubkey;
+              explorerTxUrl = buildExplorerTxUrl(attemptContext.txSignature);
               popEntryHash = attemptContext.popEntryHash;
               popAuditHash = attemptContext.popAuditHash;
               popSigner = attemptContext.popSigner;
@@ -605,6 +689,7 @@ export const UserConfirmScreen: React.FC = () => {
             } else if (storedTicket?.txSignature) {
               txSignature = storedTicket.txSignature;
               receiptPubkey = storedTicket.receiptPubkey;
+              explorerTxUrl = buildExplorerTxUrl(storedTicket.txSignature);
               popEntryHash = storedTicket.popEntryHash;
               popAuditHash = storedTicket.popAuditHash;
               popSigner = storedTicket.popSigner;
@@ -651,12 +736,26 @@ export const UserConfirmScreen: React.FC = () => {
         throw new Error('オンチェーン上限に達しています。管理者の受給設定とオンチェーン設定を確認してください。');
       }
 
+      const latestStoredTicket = getTicketByEventId(targetEventId);
+      if (!txSignature) {
+        txSignature = normalizeOptionalString(latestStoredTicket?.txSignature);
+      }
+      if (!receiptPubkey) {
+        receiptPubkey = normalizeOptionalString(latestStoredTicket?.receiptPubkey);
+      }
+      if (!explorerTxUrl) {
+        explorerTxUrl =
+          normalizeOptionalString(result?.explorerTxUrl) ??
+          buildExplorerTxUrl(txSignature);
+      }
+
       router.push(
         schoolRoutes.success(targetEventId, {
           already: result?.status === 'already',
           status: result?.status ?? 'created',
           confirmationCode: result?.confirmationCode,
           tx: txSignature,
+          explorerTxUrl,
           receipt: receiptPubkey,
           mint: distributedMint,
           reflected: tokenReflectedInWallet,

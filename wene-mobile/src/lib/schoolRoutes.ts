@@ -20,6 +20,7 @@ export const schoolRoutes = {
     eventId: string,
     params?: {
       tx?: string;
+      explorerTxUrl?: string;
       receipt?: string;
       already?: boolean;
       /** userId+pin フロー: created | already */
@@ -38,6 +39,7 @@ export const schoolRoutes = {
     const base = `/u/success?eventId=${encodeURIComponent(eventId)}`;
     const query: string[] = [];
     if (params?.tx) query.push(`tx=${encodeURIComponent(params.tx)}`);
+    if (params?.explorerTxUrl) query.push(`explorerTxUrl=${encodeURIComponent(params.explorerTxUrl)}`);
     if (params?.receipt) query.push(`receipt=${encodeURIComponent(params.receipt)}`);
     if (params?.already) query.push('already=1');
     if (params?.status) query.push(`status=${encodeURIComponent(params.status)}`);

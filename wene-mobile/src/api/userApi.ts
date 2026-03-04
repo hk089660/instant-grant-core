@@ -29,6 +29,9 @@ export interface UserClaimResponse {
   status: 'created' | 'already';
   confirmationCode: string;
   ticketReceipt?: ParticipationTicketReceipt;
+  txSignature?: string;
+  receiptPubkey?: string;
+  explorerTxUrl?: string;
 }
 
 export interface UserClaimOnchainProof {
