@@ -16,7 +16,16 @@ export async function submitSchoolClaim(
 ): Promise<SchoolClaimResult> {
   const { claimClient } = getSchoolDeps();
   const walletPubkey = useRecipientStore.getState().walletPubkey ?? undefined;
-  return claimClient.submit(eventId, { walletAddress: walletPubkey, ...options });
+  const normalizedOptionWallet =
+    typeof options?.walletAddress === 'string' && options.walletAddress.trim()
+      ? options.walletAddress.trim()
+      : undefined;
+  const resolvedWalletAddress = normalizedOptionWallet ?? walletPubkey;
+  const payload: SchoolClaimSubmitOptions = {
+    ...(options ?? {}),
+    ...(resolvedWalletAddress ? { walletAddress: resolvedWalletAddress } : {}),
+  };
+  return claimClient.submit(eventId, payload);
 }
 
 export type { SchoolClaimResult } from '../types/school';

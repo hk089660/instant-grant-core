@@ -90,6 +90,31 @@ function buildExplorerTxUrl(txSignature: string): string {
   return `https://explorer.solana.com/tx/${encodeURIComponent(txSignature)}?cluster=devnet`;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  return normalized || undefined;
+}
+
+function deriveWalletAddressFromSignedTx(tx: {
+  feePayer?: { toBase58: () => string } | null;
+  signatures?: Array<{ publicKey?: { toBase58: () => string } | null }>;
+}): string | undefined {
+  const fromFeePayer = normalizeOptionalString(tx.feePayer?.toBase58());
+  if (fromFeePayer) return fromFeePayer;
+  if (Array.isArray(tx.signatures)) {
+    for (const signatureEntry of tx.signatures) {
+      const candidate = normalizeOptionalString(signatureEntry.publicKey?.toBase58());
+      if (candidate) return candidate;
+    }
+  }
+  return undefined;
+}
+
 export default function PhantomRedirectScreen() {
   const rawParams = useLocalSearchParams();
   const params = rawParams as Record<string, string | string[] | undefined>;
@@ -172,6 +197,7 @@ export default function PhantomRedirectScreen() {
             try {
               setSafeStatus('loading', '署名済みトランザクションを送信しています…');
               const signature = await sendSignedTx(processed.tx);
+              const fallbackWalletAddressFromTx = deriveWalletAddressFromSignedTx(processed.tx);
               const recipientStore = useRecipientStore.getState();
               recipientStore.setLastSignature(signature);
               recipientStore.setLastDoneAt(Date.now());
@@ -212,19 +238,45 @@ export default function PhantomRedirectScreen() {
 
                 let syncedClaimResult: Awaited<ReturnType<typeof claimEventWithUser>> | null = null;
                 if (resolvedUserSyncContext) {
+                  const syncWalletAddress =
+                    resolvedUserSyncContext.walletAddress ??
+                    recipientStore.walletPubkey ??
+                    fallbackWalletAddressFromTx ??
+                    undefined;
+                  const syncConfirmationCode =
+                    resolvedUserSyncContext.confirmationCode ??
+                    existing?.confirmationCode;
+                  const syncReceiptPubkey =
+                    resolvedUserSyncContext.receiptPubkey ??
+                    existing?.receiptPubkey;
+                  let lastSyncError: unknown = null;
                   try {
-                    syncedClaimResult = await claimEventWithUser(
-                      eventId,
-                      resolvedUserSyncContext.userId,
-                      resolvedUserSyncContext.pin,
-                      {
-                        walletAddress: resolvedUserSyncContext.walletAddress,
-                        txSignature: signature,
-                        receiptPubkey: resolvedUserSyncContext.receiptPubkey,
+                    for (let attempt = 0; attempt < 2; attempt += 1) {
+                      try {
+                        syncedClaimResult = await claimEventWithUser(
+                          eventId,
+                          resolvedUserSyncContext.userId,
+                          resolvedUserSyncContext.pin,
+                          {
+                            walletAddress: syncWalletAddress,
+                            confirmationCode: syncConfirmationCode,
+                            txSignature: signature,
+                            receiptPubkey: syncReceiptPubkey,
+                          }
+                        );
+                        break;
+                      } catch (syncErr) {
+                        lastSyncError = syncErr;
+                        if (attempt === 0) {
+                          await sleep(250);
+                        }
                       }
-                    );
+                    }
                   } catch (syncErr) {
-                    console.warn('[phantom callback] failed to sync user on-chain proof:', syncErr);
+                    lastSyncError = syncErr;
+                  }
+                  if (!syncedClaimResult && lastSyncError) {
+                    console.warn('[phantom callback] failed to sync user on-chain proof:', lastSyncError);
                   }
                 }
 
@@ -295,6 +347,7 @@ export default function PhantomRedirectScreen() {
                 const walletAddress =
                   resolvedWalletSyncContext?.walletAddress ??
                   recipientStore.walletPubkey ??
+                  fallbackWalletAddressFromTx ??
                   undefined;
                 const receiptPubkeyCandidate =
                   resolvedWalletSyncContext?.receiptPubkey ??
@@ -302,14 +355,28 @@ export default function PhantomRedirectScreen() {
                   undefined;
 
                 let syncedClaimResult: Awaited<ReturnType<typeof submitSchoolClaim>> | null = null;
-                try {
-                  syncedClaimResult = await submitSchoolClaim(campaignId, {
-                    walletAddress,
-                    txSignature: signature,
-                    receiptPubkey: receiptPubkeyCandidate,
-                  });
-                } catch (syncErr) {
-                  console.warn('[phantom callback] failed to sync wallet on-chain proof:', syncErr);
+                let lastSyncError: unknown = null;
+                for (let attempt = 0; attempt < 2; attempt += 1) {
+                  try {
+                    const syncCandidate = await submitSchoolClaim(campaignId, {
+                      walletAddress,
+                      txSignature: signature,
+                      receiptPubkey: receiptPubkeyCandidate,
+                    });
+                    if (syncCandidate.success) {
+                      syncedClaimResult = syncCandidate;
+                      break;
+                    }
+                    lastSyncError = syncCandidate.error;
+                  } catch (syncErr) {
+                    lastSyncError = syncErr;
+                  }
+                  if (attempt === 0) {
+                    await sleep(250);
+                  }
+                }
+                if (!syncedClaimResult && lastSyncError) {
+                  console.warn('[phantom callback] failed to sync wallet on-chain proof:', lastSyncError);
                 }
 
                 const syncedReceiptPubkey =

@@ -7342,6 +7342,7 @@ export class SchoolStore implements DurableObject {
       }
       const proofFields = this.getOnchainProofFields(body);
       const hasOnchainProof = this.hasAnyOnchainProofField(proofFields);
+      const requestedConfirmationCode = this.normalizeStringField(body?.confirmationCode);
       const onchainResponseFields = this.buildOnchainClaimResponseFields({
         txSignature: proofFields.txSignature,
         receiptPubkey: proofFields.receiptPubkey,
@@ -7364,10 +7365,67 @@ export class SchoolStore implements DurableObject {
       }
       const already = await this.store.hasClaimed(eventId, userId, event);
       if (!already && hasOnchainProof) {
+        if (!requestedConfirmationCode) {
+          return Response.json({
+            error: 'on-chain claim requires off-chain receipt verification first',
+            code: 'offchain_receipt_required',
+          }, { status: 409 });
+        }
+
+        let ticketReceipt = await this.getParticipationTicketReceipt(eventId, userId, requestedConfirmationCode);
+        if (!ticketReceipt) {
+          return Response.json({
+            error: 'off-chain receipt not found for this participation',
+            code: 'offchain_receipt_not_found',
+          }, { status: 409 });
+        }
+        let needsTicketReceiptBackfill = false;
+        const verification = await this.verifyParticipationTicketReceipt(ticketReceipt);
+        if (!verification.ok) {
+          // 旧データで receipt が壊れている場合は on-chain 監査を優先して復旧する。
+          needsTicketReceiptBackfill = true;
+        }
+
+        const displayName = this.normalizeStringField((userRaw as { displayName?: unknown }).displayName);
+        const recipient: TransferParty = proofFields.walletAddress
+          ? { type: 'wallet', id: proofFields.walletAddress }
+          : { type: 'user', id: userId };
+        const pii: Record<string, string> = { userId };
+        if (proofFields.walletAddress) pii.walletAddress = proofFields.walletAddress;
+        if (displayName) pii.displayName = displayName;
+        const onchainAuditEntry = await this.appendAuditLog(
+          'USER_CLAIM',
+          { type: 'user', id: userId },
+          {
+            eventId,
+            status: 'already',
+            confirmationCode: requestedConfirmationCode,
+            transfer: this.buildClaimTransferPayload({
+              eventId,
+              event,
+              recipient,
+              txSignature: proofFields.txSignature,
+              receiptPubkey: proofFields.receiptPubkey,
+            }),
+            pii,
+          },
+          eventId
+        );
+        if (needsTicketReceiptBackfill) {
+          ticketReceipt = await this.buildParticipationTicketReceipt({
+            eventId,
+            subject: userId,
+            confirmationCode: requestedConfirmationCode,
+            auditEntry: onchainAuditEntry,
+          });
+          await this.storeParticipationTicketReceipt(eventId, userId, ticketReceipt);
+        }
         return Response.json({
-          error: 'on-chain claim requires off-chain receipt verification first',
-          code: 'offchain_receipt_required',
-        }, { status: 409 });
+          status: 'already',
+          confirmationCode: requestedConfirmationCode,
+          ...(ticketReceipt ? { ticketReceipt } : {}),
+          ...onchainResponseFields,
+        } as UserClaimResponse);
       }
       if (!already) {
         const costOfForgeryError = await this.enforceCostOfForgeryRisk({

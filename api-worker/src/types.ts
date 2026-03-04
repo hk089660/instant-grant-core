@@ -159,6 +159,7 @@ export interface UserClaimBody {
   userId?: string;
   pin?: string;
   walletAddress?: string;
+  confirmationCode?: string;
   txSignature?: string;
   receiptPubkey?: string;
   costOfForgeryToken?: string;

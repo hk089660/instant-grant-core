@@ -400,6 +400,105 @@ describe('participation audit receipt', () => {
     expect(body.code).toBe('offchain_receipt_required');
   });
 
+  it('links on-chain proof to existing confirmation code even when policy still allows additional claims', async () => {
+    const createRes = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'policy sync event',
+          datetime: '2026/02/24 10:00',
+          host: 'admin',
+          ticketTokenAmount: 1,
+          claimIntervalDays: 30,
+          maxClaimsPerInterval: 2,
+        }),
+      })
+    );
+    expect(createRes.status).toBe(201);
+    const event = (await createRes.json()) as { id: string };
+
+    const registerRes = await store.fetch(
+      new Request('https://example.com/api/users/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: 'policy-user',
+          displayName: 'Policy User',
+          pin: '1234',
+        }),
+      })
+    );
+    expect(registerRes.status).toBe(200);
+
+    const firstClaimRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(event.id)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: 'policy-user',
+          pin: '1234',
+        }),
+      })
+    );
+    expect(firstClaimRes.status).toBe(200);
+    const firstClaimBody = (await firstClaimRes.json()) as {
+      status?: string;
+      confirmationCode?: string;
+      ticketReceipt?: ParticipationTicketReceipt;
+    };
+    expect(firstClaimBody.status).toBe('created');
+    expect(typeof firstClaimBody.confirmationCode).toBe('string');
+
+    const onchainSyncRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(event.id)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: 'policy-user',
+          pin: '1234',
+          walletAddress: '4'.repeat(32),
+          confirmationCode: firstClaimBody.confirmationCode,
+          txSignature: '5'.repeat(64),
+          receiptPubkey: '6'.repeat(32),
+        }),
+      })
+    );
+    expect(onchainSyncRes.status).toBe(200);
+    const onchainSyncBody = (await onchainSyncRes.json()) as {
+      status?: string;
+      confirmationCode?: string;
+      txSignature?: string;
+      receiptPubkey?: string;
+    };
+    expect(onchainSyncBody.status).toBe('already');
+    expect(onchainSyncBody.confirmationCode).toBe(firstClaimBody.confirmationCode);
+    expect(onchainSyncBody.txSignature).toBe('5'.repeat(64));
+    expect(onchainSyncBody.receiptPubkey).toBe('6'.repeat(32));
+
+    const transferRes = await store.fetch(
+      new Request(`https://example.com/api/admin/transfers?eventId=${encodeURIComponent(event.id)}&limit=50`, {
+        method: 'GET',
+        headers: { Authorization: 'Bearer master-secret' },
+      })
+    );
+    expect(transferRes.status).toBe(200);
+    const transferBody = (await transferRes.json()) as {
+      items?: Array<{
+        event: string;
+        transfer: {
+          txSignature: string | null;
+          receiptPubkey: string | null;
+        };
+      }>;
+    };
+    const onchainUserClaim = transferBody.items?.find(
+      (item) => item.event === 'USER_CLAIM' && item.transfer.txSignature === '5'.repeat(64)
+    );
+    expect(onchainUserClaim).toBeTruthy();
+    expect(onchainUserClaim?.transfer.receiptPubkey).toBe('6'.repeat(32));
+  });
+
   it('returns ticket receipt on /v1/school/claims and supports verify-by-code', async () => {
     const createRes = await store.fetch(
       new Request('https://example.com/v1/school/events', {

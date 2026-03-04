@@ -660,6 +660,7 @@ export const UserConfirmScreen: React.FC = () => {
           try {
             result = await claimEventWithUser(targetEventId, userId, pinVal, {
               walletAddress: ownerWallet,
+              confirmationCode,
               txSignature: onchain.txSignature,
               receiptPubkey: onchain.receiptPubkey,
             });

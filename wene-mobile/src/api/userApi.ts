@@ -36,6 +36,7 @@ export interface UserClaimResponse {
 
 export interface UserClaimOnchainProof {
   walletAddress?: string;
+  confirmationCode?: string;
   txSignature?: string;
   receiptPubkey?: string;
 }
@@ -114,6 +115,7 @@ export async function claimEventWithUser(
     userId,
     pin,
     walletAddress: proof?.walletAddress,
+    confirmationCode: proof?.confirmationCode,
     txSignature: proof?.txSignature,
     receiptPubkey: proof?.receiptPubkey,
     costOfForgeryToken,
