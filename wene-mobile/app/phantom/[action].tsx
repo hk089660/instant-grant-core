@@ -8,6 +8,10 @@ import { rejectPendingSignTx } from '../../src/utils/phantomSignTxPending';
 import { consumePhantomWebReturnPath } from '../../src/utils/phantomWebReturnPath';
 import { sendSignedTx } from '../../src/solana/sendTx';
 import { useRecipientStore } from '../../src/store/recipientStore';
+import { useRecipientTicketStore } from '../../src/store/recipientTicketStore';
+import { schoolRoutes } from '../../src/lib/schoolRoutes';
+import { claimEventWithUser } from '../../src/api/userApi';
+import { consumePhantomWebUserOnchainSyncContext } from '../../src/utils/phantomWebUserOnchainSync';
 import {
   publishPhantomWebSignError,
   publishPhantomWebSignSuccess,
@@ -34,6 +38,24 @@ function buildPhantomDeepLinkFromParams(params: Record<string, string | string[]
     .join('&');
 
   return query ? `wene://phantom/${actionRaw}?${query}` : `wene://phantom/${actionRaw}`;
+}
+
+function parseEventIdFromReturnPath(path: string): string | null {
+  const trimmed = path.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed, 'https://wene.local');
+    const normalizedPath = parsed.pathname.replace(/\/+$/, '');
+    if (normalizedPath !== '/u/confirm') return null;
+    const eventId = parsed.searchParams.get('eventId')?.trim() ?? '';
+    return eventId || null;
+  } catch {
+    return null;
+  }
+}
+
+function buildExplorerTxUrl(txSignature: string): string {
+  return `https://explorer.solana.com/tx/${encodeURIComponent(txSignature)}?cluster=devnet`;
 }
 
 export default function PhantomRedirectScreen() {
@@ -122,6 +144,96 @@ export default function PhantomRedirectScreen() {
               recipientStore.setLastSignature(signature);
               recipientStore.setLastDoneAt(Date.now());
               recipientStore.setState('Done');
+
+              // same-tab 復帰では元画面の Promise が失われる場合があるため、
+              // callback 側でチケット反映と成功画面遷移を完了させる。
+              const eventIdFromReturnPath = parseEventIdFromReturnPath(returnPath);
+              const syncContext = consumePhantomWebUserOnchainSyncContext({
+                eventId: eventIdFromReturnPath ?? undefined,
+              });
+              const eventId = eventIdFromReturnPath ?? syncContext?.eventId ?? null;
+              if (eventId) {
+                const ticketStore = useRecipientTicketStore.getState();
+                if (syncContext?.userId && ticketStore.activeUserId !== syncContext.userId) {
+                  await ticketStore.setActiveUser(syncContext.userId);
+                }
+                const scopedTicketStore = useRecipientTicketStore.getState();
+                const existing = scopedTicketStore.getTicketByEventId(eventId);
+
+                let syncedClaimResult: Awaited<ReturnType<typeof claimEventWithUser>> | null = null;
+                if (syncContext) {
+                  try {
+                    syncedClaimResult = await claimEventWithUser(
+                      eventId,
+                      syncContext.userId,
+                      syncContext.pin,
+                      {
+                        walletAddress: syncContext.walletAddress,
+                        txSignature: signature,
+                        receiptPubkey: syncContext.receiptPubkey,
+                      }
+                    );
+                  } catch (syncErr) {
+                    console.warn('[phantom callback] failed to sync user on-chain proof:', syncErr);
+                  }
+                }
+
+                const receiptPubkey =
+                  syncedClaimResult?.receiptPubkey ??
+                  existing?.receiptPubkey ??
+                  syncContext?.receiptPubkey;
+                const confirmationCode =
+                  syncedClaimResult?.confirmationCode ??
+                  existing?.confirmationCode ??
+                  syncContext?.confirmationCode;
+                const auditReceiptId =
+                  syncedClaimResult?.ticketReceipt?.receiptId ??
+                  existing?.auditReceiptId ??
+                  syncContext?.auditReceiptId;
+                const auditReceiptHash =
+                  syncedClaimResult?.ticketReceipt?.receiptHash ??
+                  existing?.auditReceiptHash ??
+                  syncContext?.auditReceiptHash;
+                const mintAddress = existing?.mintAddress ?? syncContext?.mintAddress;
+                const popEntryHash = existing?.popEntryHash ?? syncContext?.popEntryHash;
+                const popAuditHash = existing?.popAuditHash ?? syncContext?.popAuditHash;
+                const popSigner = existing?.popSigner ?? syncContext?.popSigner;
+                const explorerTxUrl = syncedClaimResult?.explorerTxUrl ?? buildExplorerTxUrl(signature);
+
+                await scopedTicketStore.addTicket({
+                  eventId,
+                  eventName: existing?.eventName ?? syncContext?.eventName ?? eventId,
+                  joinedAt: Date.now(),
+                  txSignature: signature,
+                  receiptPubkey,
+                  confirmationCode,
+                  mintAddress,
+                  popEntryHash,
+                  popAuditHash,
+                  popSigner,
+                  auditReceiptId,
+                  auditReceiptHash,
+                });
+                setSafeStatus('done', '署名と送信が完了しました。結果画面へ移動します…');
+                setTimeout(() => {
+                  if (cancelled) return;
+                  router.replace(
+                    schoolRoutes.success(eventId, {
+                      tx: signature,
+                      explorerTxUrl,
+                      receipt: receiptPubkey,
+                      confirmationCode,
+                      mint: mintAddress,
+                      popEntryHash,
+                      popAuditHash,
+                      popSigner,
+                      auditReceiptId,
+                      auditReceiptHash,
+                    }) as any
+                  );
+                }, 200);
+                return;
+              }
             } catch (sendErr) {
               const msg = sendErr instanceof Error ? sendErr.message : '署名後の送信に失敗しました';
               publishPhantomWebSignError(msg);

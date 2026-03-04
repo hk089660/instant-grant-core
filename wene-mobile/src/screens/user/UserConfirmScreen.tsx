@@ -30,6 +30,11 @@ import { signTransaction } from '../../utils/phantom';
 import { rejectPendingSignTx } from '../../utils/phantomSignTxPending';
 import { setPhantomWebReturnPath } from '../../utils/phantomWebReturnPath';
 import { isLikelyMobileWebBrowser, preparePhantomWebPopup } from '../../utils/phantomWebPopup';
+import {
+  clearPhantomWebUserOnchainSyncContext,
+  patchPhantomWebUserOnchainSyncContext,
+  savePhantomWebUserOnchainSyncContext,
+} from '../../utils/phantomWebUserOnchainSync';
 import type { SchoolEvent } from '../../types/school';
 import {
   fetchExpectedPopSignerPubkeyFromRuntime,
@@ -303,6 +308,17 @@ export const UserConfirmScreen: React.FC = () => {
     let retriedForBlockhash = false;
     let retriedForRecoverable = false;
     while (true) {
+      if (Platform.OS === 'web') {
+        patchPhantomWebUserOnchainSyncContext({
+          walletAddress: walletPubkey,
+          receiptPubkey: built.meta.receiptPda.toBase58(),
+          mintAddress: built.meta.mint.toBase58(),
+          popEntryHash: built.meta.popProofEntryHash,
+          popAuditHash: built.meta.popProofAuditHash,
+          popSigner: built.meta.popProofSignerPubkey,
+        });
+      }
+
       const { redirectLink, appUrl } = buildSignRedirectContext();
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
       let signed: Awaited<ReturnType<typeof signTransaction>>;
@@ -488,6 +504,9 @@ export const UserConfirmScreen: React.FC = () => {
 
     setStatus('loading');
     setError(null);
+    if (Platform.OS === 'web') {
+      clearPhantomWebUserOnchainSyncContext();
+    }
 
     try {
       // 1) PIN 検証だけ先に行う（off-chain claim の副作用を先に発生させない）
@@ -532,6 +551,18 @@ export const UserConfirmScreen: React.FC = () => {
       } catch (offchainPersistError) {
         console.warn('[UserConfirmScreen] off-chain receipt reflect failed:', offchainPersistError);
         throw new Error('オフチェーン参加レシートの反映に失敗したため署名を開始できません。再試行してください。');
+      }
+      if (Platform.OS === 'web') {
+        savePhantomWebUserOnchainSyncContext({
+          eventId: targetEventId,
+          userId,
+          pin: pinVal,
+          confirmationCode,
+          walletAddress: walletPubkey ?? undefined,
+          eventName: event.title,
+          auditReceiptId: offchainTicketReceipt.receiptId,
+          auditReceiptHash: offchainTicketReceipt.receiptHash,
+        });
       }
 
       // 3) on-chain claim（レシート検証済みの場合のみ許可）
@@ -767,8 +798,14 @@ export const UserConfirmScreen: React.FC = () => {
           auditReceiptHash: result?.ticketReceipt?.receiptHash,
         }) as any
       );
+      if (Platform.OS === 'web') {
+        clearPhantomWebUserOnchainSyncContext();
+      }
     } catch (e: unknown) {
       setStatus('error');
+      if (Platform.OS === 'web') {
+        clearPhantomWebUserOnchainSyncContext();
+      }
 
       if (e instanceof HttpError && e.status === 401) {
         const body = e.body as any;
