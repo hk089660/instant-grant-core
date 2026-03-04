@@ -21,6 +21,7 @@ import {
   isBlockhashExpiredError,
   isRecoverableClaimBuildError,
   buildSendErrorDebugText,
+  getSendTxErrorSignature,
 } from '../../solana/sendTx';
 import { getConnection } from '../../solana/singleton';
 import { fetchSplBalance } from '../../solana/wallet';
@@ -71,6 +72,58 @@ function mapOnchainReadinessError(
     return 'このイベントのオンチェーン設定が不正です。運営に再発行を依頼してください。';
   }
   return 'オンチェーン受け取りの準備状態を確認できませんでした。時間をおいて再試行してください。';
+}
+
+type OnchainAttemptError = Error & {
+  txSignature?: string;
+  receiptPubkey?: string;
+  mint?: string;
+  popEntryHash?: string;
+  popAuditHash?: string;
+  popSigner?: string;
+};
+
+function getOnchainAttemptContext(error: unknown): {
+  txSignature?: string;
+  receiptPubkey?: string;
+  mint?: string;
+  popEntryHash?: string;
+  popAuditHash?: string;
+  popSigner?: string;
+} {
+  if (!error || typeof error !== 'object') return {};
+  const raw = error as Record<string, unknown>;
+  const readString = (key: string): string | undefined =>
+    typeof raw[key] === 'string' && String(raw[key]).trim() ? String(raw[key]).trim() : undefined;
+  return {
+    txSignature: getSendTxErrorSignature(error),
+    receiptPubkey: readString('receiptPubkey'),
+    mint: readString('mint'),
+    popEntryHash: readString('popEntryHash'),
+    popAuditHash: readString('popAuditHash'),
+    popSigner: readString('popSigner'),
+  };
+}
+
+function attachOnchainAttemptContext(
+  error: unknown,
+  context: {
+    txSignature?: string;
+    receiptPubkey: string;
+    mint: string;
+    popEntryHash: string;
+    popAuditHash: string;
+    popSigner: string;
+  }
+): OnchainAttemptError {
+  const target = (error instanceof Error ? error : new Error(String(error))) as OnchainAttemptError;
+  if (context.txSignature?.trim()) target.txSignature = context.txSignature.trim();
+  target.receiptPubkey = context.receiptPubkey;
+  target.mint = context.mint;
+  target.popEntryHash = context.popEntryHash;
+  target.popAuditHash = context.popAuditHash;
+  target.popSigner = context.popSigner;
+  return target;
 }
 
 export const UserConfirmScreen: React.FC = () => {
@@ -232,7 +285,15 @@ export const UserConfirmScreen: React.FC = () => {
           popSigner: built.meta.popProofSignerPubkey,
         };
       } catch (sendError) {
-        const debugText = buildSendErrorDebugText(sendError);
+        const contextualizedSendError = attachOnchainAttemptContext(sendError, {
+          txSignature: getSendTxErrorSignature(sendError),
+          receiptPubkey: built.meta.receiptPda.toBase58(),
+          mint: built.meta.mint.toBase58(),
+          popEntryHash: built.meta.popProofEntryHash,
+          popAuditHash: built.meta.popProofAuditHash,
+          popSigner: built.meta.popProofSignerPubkey,
+        });
+        const debugText = buildSendErrorDebugText(contextualizedSendError);
         if (!retriedForBlockhash && isBlockhashExpiredError(debugText)) {
           retriedForBlockhash = true;
           built = await buildClaimTx({
@@ -275,7 +336,7 @@ export const UserConfirmScreen: React.FC = () => {
           });
           continue;
         }
-        throw sendError;
+        throw contextualizedSendError;
       }
     }
   }, [
@@ -498,6 +559,7 @@ export const UserConfirmScreen: React.FC = () => {
           }
         } catch (onchainError) {
           const storedTicket = getTicketByEventId(targetEventId);
+          const attemptContext = getOnchainAttemptContext(onchainError);
           const onchainMsg = onchainError instanceof Error ? onchainError.message : String(onchainError);
           const onchainMsgLower = onchainMsg.toLowerCase();
           const mayBeAlreadyClaimed =
@@ -506,19 +568,42 @@ export const UserConfirmScreen: React.FC = () => {
             onchainMsgLower.includes('account already in use');
           if (mayBeAlreadyClaimed) {
             onchainBlockedByPeriod = true;
-            if (storedTicket?.txSignature) {
+            if (attemptContext.txSignature) {
+              txSignature = attemptContext.txSignature;
+              receiptPubkey = attemptContext.receiptPubkey;
+              popEntryHash = attemptContext.popEntryHash;
+              popAuditHash = attemptContext.popAuditHash;
+              popSigner = attemptContext.popSigner;
+              try {
+                await addTicket({
+                  eventId: targetEventId,
+                  eventName: event.title,
+                  joinedAt: Date.now(),
+                  txSignature: attemptContext.txSignature,
+                  receiptPubkey: attemptContext.receiptPubkey,
+                  mintAddress: attemptContext.mint ?? event.solanaMint ?? undefined,
+                  popEntryHash: attemptContext.popEntryHash,
+                  popAuditHash: attemptContext.popAuditHash,
+                  popSigner: attemptContext.popSigner,
+                  confirmationCode,
+                });
+              } catch (ticketPersistError) {
+                console.warn('[UserConfirmScreen] addTicket failed (on-chain already tx):', ticketPersistError);
+              }
+            } else if (storedTicket?.txSignature) {
               txSignature = storedTicket.txSignature;
               receiptPubkey = storedTicket.receiptPubkey;
               popEntryHash = storedTicket.popEntryHash;
               popAuditHash = storedTicket.popAuditHash;
               popSigner = storedTicket.popSigner;
             }
-            distributedMint = event.solanaMint ?? undefined;
+            distributedMint = attemptContext.mint ?? event.solanaMint ?? undefined;
             if (__DEV__) {
               console.log('[UserConfirmScreen] on-chain distribution blocked by period', {
                 eventId: targetEventId,
                 onchainPolicyCompatible,
                 hasStoredTicket: Boolean(storedTicket?.txSignature),
+                hasAttemptedTxSignature: Boolean(attemptContext.txSignature),
               });
             }
           } else if (__DEV__) {

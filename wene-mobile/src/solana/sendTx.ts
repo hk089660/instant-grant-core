@@ -12,6 +12,27 @@ export type SimulationFailedLike = Error & {
   unitsConsumed?: number;
 };
 
+export type SendTxErrorWithSignature = Error & {
+  txSignature?: string;
+};
+
+export function getSendTxErrorSignature(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object' || !('txSignature' in error)) return undefined;
+  const candidate = (error as { txSignature?: unknown }).txSignature;
+  return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : undefined;
+}
+
+function attachTxSignatureToError(error: unknown, txSignature: string): SendTxErrorWithSignature {
+  const normalizedTxSignature = txSignature.trim();
+  if (error instanceof Error) {
+    (error as SendTxErrorWithSignature).txSignature = normalizedTxSignature;
+    return error as SendTxErrorWithSignature;
+  }
+  const wrapped = new Error(String(error)) as SendTxErrorWithSignature;
+  wrapped.txSignature = normalizedTxSignature;
+  return wrapped;
+}
+
 export const createSimulationFailedError = (
   message: string,
   simErr: unknown,
@@ -37,6 +58,10 @@ export const isSimulationFailedError = (e: unknown): e is SimulationFailedLike =
  */
 export function buildSendErrorDebugText(error: unknown): string {
   const lines: string[] = [];
+  const txSignature = getSendTxErrorSignature(error);
+  if (txSignature) {
+    lines.push(`txSignature: ${txSignature}`);
+  }
   if (error && typeof error === 'object' && 'message' in error) {
     lines.push(String((error as { message?: unknown }).message ?? ''));
   } else if (error != null) {
@@ -382,7 +407,7 @@ export async function sendSignedTx(
     }
     const rawMsg = confirmError instanceof Error ? confirmError.message : String(confirmError);
     console.error('Failed to confirm transaction:', confirmError);
-    throw new Error(formatSendError(rawMsg));
+    throw attachTxSignatureToError(new Error(formatSendError(rawMsg)), sig);
   }
 
   return sig;
