@@ -210,6 +210,83 @@ describe('participation audit receipt', () => {
     expect(syncedTicket?.receiptPubkey).toBe('6'.repeat(32));
   });
 
+  it('recovers on-chain audit sync when existing user receipt verification fails', async () => {
+    const { eventId, userId } = await prepareEventAndUser();
+
+    const offchainClaimRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(eventId)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          pin: '1234',
+        }),
+      })
+    );
+    expect(offchainClaimRes.status).toBe(200);
+    const offchainClaimBody = (await offchainClaimRes.json()) as {
+      confirmationCode?: string;
+      ticketReceipt?: ParticipationTicketReceipt;
+    };
+    expect(typeof offchainClaimBody.confirmationCode).toBe('string');
+    expect(offchainClaimBody.ticketReceipt).toBeTruthy();
+
+    const tamperedReceipt: ParticipationTicketReceipt = {
+      ...(offchainClaimBody.ticketReceipt as ParticipationTicketReceipt),
+      receiptHash: 'broken-hash',
+    };
+    await state.storage.put(`ticket_receipt:${eventId}:${offchainClaimBody.confirmationCode as string}`, tamperedReceipt);
+    await state.storage.put(`ticket_receipt_subject:${eventId}:${userId}`, tamperedReceipt);
+
+    const onchainSyncRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(eventId)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          pin: '1234',
+          walletAddress: '4'.repeat(32),
+          txSignature: '5'.repeat(64),
+          receiptPubkey: '6'.repeat(32),
+        }),
+      })
+    );
+    expect(onchainSyncRes.status).toBe(200);
+    const onchainSyncBody = (await onchainSyncRes.json()) as {
+      status?: string;
+      confirmationCode?: string;
+      ticketReceipt?: ParticipationTicketReceipt;
+      txSignature?: string;
+      receiptPubkey?: string;
+    };
+    expect(onchainSyncBody.status).toBe('already');
+    expect(onchainSyncBody.txSignature).toBe('5'.repeat(64));
+    expect(onchainSyncBody.receiptPubkey).toBe('6'.repeat(32));
+    expect(onchainSyncBody.ticketReceipt?.receiptHash).not.toBe('broken-hash');
+
+    const transferRes = await store.fetch(
+      new Request(`https://example.com/api/admin/transfers?eventId=${encodeURIComponent(eventId)}&limit=50`, {
+        method: 'GET',
+        headers: { Authorization: 'Bearer master-secret' },
+      })
+    );
+    expect(transferRes.status).toBe(200);
+    const transferBody = (await transferRes.json()) as {
+      items?: Array<{
+        event: string;
+        transfer: {
+          txSignature: string | null;
+          receiptPubkey: string | null;
+        };
+      }>;
+    };
+    const onchainUserClaim = transferBody.items?.find(
+      (item) => item.event === 'USER_CLAIM' && item.transfer.txSignature === '5'.repeat(64)
+    );
+    expect(onchainUserClaim).toBeTruthy();
+    expect(onchainUserClaim?.transfer.receiptPubkey).toBe('6'.repeat(32));
+  });
+
   it('records on-chain proof for already joined /v1/school/claims and returns proof fields', async () => {
     const createRes = await store.fetch(
       new Request('https://example.com/v1/school/events', {

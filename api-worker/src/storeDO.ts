@@ -7080,10 +7080,8 @@ export class SchoolStore implements DurableObject {
           } else {
             const verification = await this.verifyParticipationTicketReceipt(ticketReceipt);
             if (!verification.ok) {
-              return Response.json({
-                success: false,
-                error: { code: 'retryable', message: 'off-chain receipt verification failed' },
-              } as SchoolClaimResult, { status: 409 });
+              // 既存 receipt が壊れている場合も on-chain 監査を優先し、復旧用 receipt を再生成する。
+              needsTicketReceiptBackfill = true;
             }
           }
         }
@@ -7406,11 +7404,8 @@ export class SchoolStore implements DurableObject {
           } else {
             const verification = await this.verifyParticipationTicketReceipt(ticketReceipt);
             if (!verification.ok) {
-              return Response.json({
-                error: 'off-chain receipt verification failed',
-                code: 'offchain_receipt_invalid',
-                verification,
-              }, { status: 409 });
+              // 既存 receipt が壊れている場合も on-chain 監査を優先し、復旧用 receipt を再生成する。
+              needsTicketReceiptBackfill = true;
             }
           }
         }
