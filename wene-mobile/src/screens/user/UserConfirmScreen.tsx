@@ -380,14 +380,34 @@ export const UserConfirmScreen: React.FC = () => {
 
       const receiptCheck = await verifyTicketReceiptByCode(targetEventId, confirmationCode);
       const receiptCheckOk = receiptCheck.ok && (receiptCheck.verification?.ok ?? true);
-      if (!receiptCheckOk) {
-        throw new Error('オフチェーン参加レシートの検証に失敗しました');
+      const offchainTicketReceipt = result.ticketReceipt ?? receiptCheck.receipt;
+      const offchainReceiptReady = Boolean(
+        receiptCheckOk &&
+        offchainTicketReceipt &&
+        typeof offchainTicketReceipt.receiptId === 'string' &&
+        offchainTicketReceipt.receiptId.trim() &&
+        typeof offchainTicketReceipt.receiptHash === 'string' &&
+        offchainTicketReceipt.receiptHash.trim()
+      );
+      if (!offchainReceiptReady || !offchainTicketReceipt) {
+        throw new Error('オフチェーン参加レシートが未発行のため署名できません。先に参加登録を完了してください。');
       }
-      if (!result.ticketReceipt && receiptCheck.receipt) {
-        result = {
-          ...result,
-          ticketReceipt: receiptCheck.receipt,
-        };
+      result = {
+        ...result,
+        ticketReceipt: offchainTicketReceipt,
+      };
+      try {
+        await addTicket({
+          eventId: targetEventId,
+          eventName: event.title,
+          joinedAt: Date.now(),
+          confirmationCode,
+          auditReceiptId: offchainTicketReceipt.receiptId,
+          auditReceiptHash: offchainTicketReceipt.receiptHash,
+        });
+      } catch (offchainPersistError) {
+        console.warn('[UserConfirmScreen] off-chain receipt reflect failed:', offchainPersistError);
+        throw new Error('オフチェーン参加レシートの反映に失敗したため署名を開始できません。再試行してください。');
       }
 
       // 3) on-chain claim（レシート検証済みの場合のみ許可）
@@ -400,7 +420,7 @@ export const UserConfirmScreen: React.FC = () => {
       let tokenReflectedInWallet = false;
       let onchainBlockedByPeriod = false;
       const shouldAttemptOnchainBase = Boolean(
-        receiptCheckOk &&
+        offchainReceiptReady &&
         walletReady &&
         walletPubkey &&
         eventHasOnchainConfig &&
@@ -516,6 +536,7 @@ export const UserConfirmScreen: React.FC = () => {
         console.log('[UserConfirmScreen] on-chain claim skipped (off-chain receipt gate / off-chain only mode)', {
           eventId: targetEventId,
           receiptCheckOk,
+          offchainReceiptReady,
           walletReady,
           hasWalletPubkey: Boolean(walletPubkey),
           hasOnchainConfig: Boolean(event.solanaMint && event.solanaAuthority && event.solanaGrantId),
@@ -611,6 +632,8 @@ export const UserConfirmScreen: React.FC = () => {
           setError('Phantom署名がキャンセルされました');
         } else if (msg.includes('タイムアウト')) {
           setError('Phantom署名がタイムアウトしました。Phantomからこのアプリに戻って再試行してください。');
+        } else if (msg.includes('未発行のため署名できません')) {
+          setError('オフチェーンレシートが未発行のため署名できません。先に参加登録を完了してください。');
         } else if (msg.includes('レシート') || msg.toLowerCase().includes('receipt')) {
           setError('オフチェーン参加レシートの検証に失敗したため、オンチェーン配布は実行できませんでした');
         } else {

@@ -323,6 +323,15 @@ function ensurePopConfigReadyOrThrow(
   }
 }
 
+function isPopConfigStateReady(state: PopConfigAccountState): boolean {
+  if (!state.exists) return false;
+  if (!state.ownerMatchesProgram) return false;
+  if (state.configuredSignerPubkey && state.configuredSignerPubkey !== state.expectedSignerPubkey) {
+    return false;
+  }
+  return true;
+}
+
 function wrapSetupStepError(step: string, error: unknown): never {
   if (isSimulationFailedError(error)) {
     throw createSimulationFailedError(
@@ -425,20 +434,31 @@ export async function issueEventTicketToken(
   // Tx0: PoP設定（既定有効。必要時のみ環境変数で無効化）
   // EXPO_PUBLIC_ENABLE_POP_CONFIG_UPSERT=false でスキップ可能。
   if (popConfigUpsertEnabled) {
-    const upsertPopConfigIx = buildUpsertPopConfigInstruction({
-      authority,
-      popConfigPda,
-      signerPubkey: popSignerPubkey,
-    });
-    const tx0 = new Transaction().add(upsertPopConfigIx);
-    try {
-      setupSignatures.push(await signAndSendTx(tx0, params.phantom));
-    } catch (error) {
-      if (isUnsupportedUpsertPopConfigError(error)) {
-        popConfigUpsertWasUnsupported = true;
-        console.warn('[issueEventTicketToken] upsert_pop_config unsupported on deployed program');
-      } else {
-        wrapSetupStepError('tx0-pop-config', error);
+    const beforeState = await readPopConfigAccountState(popConfigPda, popSignerPubkey);
+    if (isPopConfigStateReady(beforeState)) {
+      console.info('[issueEventTicketToken] pop_config already ready; skipping tx0 upsert');
+    } else {
+      const upsertPopConfigIx = buildUpsertPopConfigInstruction({
+        authority,
+        popConfigPda,
+        signerPubkey: popSignerPubkey,
+      });
+      const tx0 = new Transaction().add(upsertPopConfigIx);
+      try {
+        setupSignatures.push(await signAndSendTx(tx0, params.phantom));
+      } catch (error) {
+        if (isUnsupportedUpsertPopConfigError(error)) {
+          popConfigUpsertWasUnsupported = true;
+          console.warn('[issueEventTicketToken] upsert_pop_config unsupported on deployed program');
+        } else {
+          // Phantom/ネットワークの一時エラーでも、既に desired state なら処理続行できる。
+          const afterState = await readPopConfigAccountState(popConfigPda, popSignerPubkey);
+          if (isPopConfigStateReady(afterState)) {
+            console.warn('[issueEventTicketToken] tx0-pop-config failed but pop_config is already ready, continue');
+          } else {
+            wrapSetupStepError('tx0-pop-config', error);
+          }
+        }
       }
     }
   } else {

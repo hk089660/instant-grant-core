@@ -7,6 +7,7 @@ import { useRecipientStore } from '../store/recipientStore';
 import { usePhantomStore } from '../store/phantomStore';
 import type { Grant } from '../types/grant';
 import { getGrantByCampaignId } from '../api/getGrant';
+import { verifyTicketReceiptByCode } from '../api/userApi';
 import { useRecipientTicketStore } from '../store/recipientTicketStore';
 
 import { AppText, BalanceList, BALANCE_LIST_DUMMY, Button, Card, Pill } from '../ui/components';
@@ -571,6 +572,35 @@ ${st.balanceLamports ?? 'null'}
         setState('Idle');
         return;
       }
+      const confirmationCode = typeof code === 'string' ? code.trim() : '';
+      if (!confirmationCode) {
+        setError('オフチェーンレシートが発行されていないため署名できません。先に参加登録を完了してください。');
+        setState('Idle');
+        return;
+      }
+      const offchainReceiptCheck = await verifyTicketReceiptByCode(campaignId, confirmationCode);
+      const offchainReceiptReady = Boolean(
+        offchainReceiptCheck.ok &&
+        (offchainReceiptCheck.verification?.ok ?? true) &&
+        offchainReceiptCheck.receipt &&
+        typeof offchainReceiptCheck.receipt.receiptId === 'string' &&
+        offchainReceiptCheck.receipt.receiptId.trim() &&
+        typeof offchainReceiptCheck.receipt.receiptHash === 'string' &&
+        offchainReceiptCheck.receipt.receiptHash.trim()
+      );
+      if (!offchainReceiptReady || !offchainReceiptCheck.receipt) {
+        setError('オフチェーンレシートが発行されていないため署名できません。先に参加登録を完了してください。');
+        setState('Idle');
+        return;
+      }
+      await addTicket({
+        eventId: campaignId,
+        eventName: grant?.title ?? campaignId,
+        joinedAt: Date.now(),
+        confirmationCode,
+        auditReceiptId: offchainReceiptCheck.receipt.receiptId,
+        auditReceiptHash: offchainReceiptCheck.receipt.receiptHash,
+      });
       if (grant?.solanaAuthority) {
         const expectedSignerPubkey = await fetchExpectedPopSignerPubkeyFromRuntime();
         const readiness = await fetchPopConfigReadiness(grant.solanaAuthority, { expectedSignerPubkey });
