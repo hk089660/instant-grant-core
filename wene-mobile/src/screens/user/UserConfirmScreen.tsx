@@ -2,7 +2,8 @@ import React, { useEffect, useCallback, useState } from 'react';
 import { View, StyleSheet, Alert, Platform, ToastAndroid, ScrollView, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, Transaction } from '@solana/web3.js';
+import bs58 from 'bs58';
 import { AppText, Button, Card, Loading } from '../../ui/components';
 import { theme } from '../../ui/theme';
 import { setStarted } from '../../data/participationStore';
@@ -124,6 +125,15 @@ function attachOnchainAttemptContext(
   target.popAuditHash = context.popAuditHash;
   target.popSigner = context.popSigner;
   return target;
+}
+
+function getSignedTransactionSignature(tx: Transaction): string | undefined {
+  const signatureBuffer =
+    tx.signature ??
+    tx.signatures.find((entry) => entry.signature)?.signature ??
+    null;
+  if (!signatureBuffer) return undefined;
+  return bs58.encode(signatureBuffer);
 }
 
 export const UserConfirmScreen: React.FC = () => {
@@ -271,7 +281,9 @@ export const UserConfirmScreen: React.FC = () => {
         setWaitingForPhantom(false);
       }
 
+      let signedTxSignature: string | undefined;
       try {
+        signedTxSignature = getSignedTransactionSignature(signed);
         const txSignature = await sendSignedTx(signed, {
           blockhash: built.meta.recentBlockhash,
           lastValidBlockHeight: built.meta.lastValidBlockHeight,
@@ -286,7 +298,7 @@ export const UserConfirmScreen: React.FC = () => {
         };
       } catch (sendError) {
         const contextualizedSendError = attachOnchainAttemptContext(sendError, {
-          txSignature: getSendTxErrorSignature(sendError),
+          txSignature: getSendTxErrorSignature(sendError) ?? signedTxSignature,
           receiptPubkey: built.meta.receiptPda.toBase58(),
           mint: built.meta.mint.toBase58(),
           popEntryHash: built.meta.popProofEntryHash,
