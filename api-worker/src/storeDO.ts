@@ -4489,6 +4489,30 @@ export class SchoolStore implements DurableObject {
     };
   }
 
+  private buildExplorerTxUrl(txSignature: string): string {
+    const normalized = txSignature.trim();
+    return `https://explorer.solana.com/tx/${encodeURIComponent(normalized)}?cluster=devnet`;
+  }
+
+  private buildOnchainClaimResponseFields(params: {
+    txSignature?: unknown;
+    receiptPubkey?: unknown;
+  }): {
+    txSignature?: string;
+    receiptPubkey?: string;
+    explorerTxUrl?: string;
+  } {
+    const txSignature = this.normalizeStringField(params.txSignature);
+    const receiptPubkey = this.normalizeStringField(params.receiptPubkey);
+    if (!txSignature && !receiptPubkey) {
+      return {};
+    }
+    return {
+      ...(txSignature ? { txSignature, explorerTxUrl: this.buildExplorerTxUrl(txSignature) } : {}),
+      ...(receiptPubkey ? { receiptPubkey } : {}),
+    };
+  }
+
   private parseStructuredTransferPayload(data: Record<string, unknown>): TransferAuditPayload | null {
     const transferRaw = data.transfer;
     if (!transferRaw || typeof transferRaw !== 'object') return null;
@@ -6943,37 +6967,43 @@ export class SchoolStore implements DurableObject {
           error: { code: 'not_found', message: 'イベントが見つかりません' },
         } as SchoolClaimResult);
       }
-      if (this.isOnchainPopEnforced() && this.isEventOnchainConfigured(event)) {
-        const fields = this.getOnchainProofFields(body);
-        const hasOnchainProof = this.hasAnyOnchainProofField(fields);
-        if (hasOnchainProof) {
-          let signerConfigured = false;
-          try {
-            signerConfigured = this.getPopSigner() !== null;
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            return Response.json({
-              success: false,
-              error: { code: 'retryable', message: `PoP設定エラー: ${message}` },
-            } as SchoolClaimResult);
-          }
-          if (!signerConfigured) {
-            return Response.json({
-              success: false,
-              error: { code: 'retryable', message: 'PoP署名設定が未完了のためオンチェーン参加を受け付けできません' },
-            } as SchoolClaimResult);
-          }
-          const invalidReason = this.validateOnchainProofFields(fields);
-          if (invalidReason) {
-            return Response.json({
-              success: false,
-              error: { code: 'wallet_required', message: `オンチェーンPoP証跡が必要です: ${invalidReason}` },
-            } as SchoolClaimResult);
-          }
+      const proofFields = this.getOnchainProofFields(body);
+      const hasOnchainProof = this.hasAnyOnchainProofField(proofFields);
+      const onchainResponseFields = this.buildOnchainClaimResponseFields({
+        txSignature: proofFields.txSignature,
+        receiptPubkey: proofFields.receiptPubkey,
+      });
+      if (this.isOnchainPopEnforced() && this.isEventOnchainConfigured(event) && hasOnchainProof) {
+        let signerConfigured = false;
+        try {
+          signerConfigured = this.getPopSigner() !== null;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return Response.json({
+            success: false,
+            error: { code: 'retryable', message: `PoP設定エラー: ${message}` },
+          } as SchoolClaimResult);
+        }
+        if (!signerConfigured) {
+          return Response.json({
+            success: false,
+            error: { code: 'retryable', message: 'PoP署名設定が未完了のためオンチェーン参加を受け付けできません' },
+          } as SchoolClaimResult);
+        }
+        const invalidReason = this.validateOnchainProofFields(proofFields);
+        if (invalidReason) {
+          return Response.json({
+            success: false,
+            error: { code: 'wallet_required', message: `オンチェーンPoP証跡が必要です: ${invalidReason}` },
+          } as SchoolClaimResult);
         }
       }
-      const walletAddress = this.normalizeStringField(body.walletAddress);
+      const walletAddress =
+        this.normalizeStringField(proofFields.walletAddress) ??
+        this.normalizeStringField(body.walletAddress);
       const joinToken = this.normalizeStringField(body.joinToken);
+      const txSignature = this.normalizeStringField(proofFields.txSignature);
+      const receiptPubkey = this.normalizeStringField(proofFields.receiptPubkey);
       const subject = normalizeSubject(walletAddress ?? undefined, joinToken ?? undefined);
       if (!subject) {
         return Response.json({
@@ -7039,16 +7069,60 @@ export class SchoolStore implements DurableObject {
           confirmationCode
             ? await this.getParticipationTicketReceipt(eventId, subject, confirmationCode)
             : null;
+
+        if (hasOnchainProof) {
+          if (!ticketReceipt) {
+            return Response.json({
+              success: false,
+              error: { code: 'retryable', message: 'off-chain receipt not found for this participation' },
+            } as SchoolClaimResult, { status: 409 });
+          }
+          const verification = await this.verifyParticipationTicketReceipt(ticketReceipt);
+          if (!verification.ok) {
+            return Response.json({
+              success: false,
+              error: { code: 'retryable', message: 'off-chain receipt verification failed' },
+            } as SchoolClaimResult, { status: 409 });
+          }
+        }
+
+        const recipient: TransferParty | null = walletAddress
+          ? { type: 'wallet', id: walletAddress }
+          : joinToken
+            ? { type: 'join_token', id: joinToken }
+            : null;
+        const pii: Record<string, string> = {};
+        if (walletAddress) pii.walletAddress = walletAddress;
+        if (joinToken) pii.joinToken = joinToken;
+        if (hasOnchainProof && recipient) {
+          await this.appendAuditLog(
+            'WALLET_CLAIM',
+            { type: 'wallet', id: recipient.id },
+            {
+              eventId,
+              status: 'already',
+              ...(confirmationCode ? { confirmationCode } : {}),
+              transfer: this.buildClaimTransferPayload({
+                eventId,
+                event,
+                recipient,
+                txSignature,
+                receiptPubkey,
+              }),
+              ...(Object.keys(pii).length > 0 ? { pii } : {}),
+            },
+            eventId
+          );
+        }
+
         const alreadyResponse: SchoolClaimResultSuccess = {
           ...result,
           ...(confirmationCode ? { confirmationCode } : {}),
           ...(ticketReceipt ? { ticketReceipt } : {}),
+          ...onchainResponseFields,
         };
         return Response.json(alreadyResponse);
       }
-
-      const txSignature = this.normalizeStringField(body.txSignature);
-      const receiptPubkey = this.normalizeStringField(body.receiptPubkey);
       const recipient: TransferParty | null = walletAddress
         ? { type: 'wallet', id: walletAddress }
         : joinToken
@@ -7108,6 +7182,7 @@ export class SchoolStore implements DurableObject {
         ...result,
         ...(confirmationCode ? { confirmationCode } : {}),
         ...(ticketReceipt ? { ticketReceipt } : {}),
+        ...onchainResponseFields,
       };
       return Response.json(createdResponse);
     }
@@ -7257,6 +7332,10 @@ export class SchoolStore implements DurableObject {
       }
       const proofFields = this.getOnchainProofFields(body);
       const hasOnchainProof = this.hasAnyOnchainProofField(proofFields);
+      const onchainResponseFields = this.buildOnchainClaimResponseFields({
+        txSignature: proofFields.txSignature,
+        receiptPubkey: proofFields.receiptPubkey,
+      });
       if (this.isOnchainPopEnforced() && this.isEventOnchainConfigured(event) && hasOnchainProof) {
         let signerConfigured = false;
         try {
@@ -7354,6 +7433,7 @@ export class SchoolStore implements DurableObject {
           status: 'already',
           confirmationCode,
           ...(ticketReceipt ? { ticketReceipt } : {}),
+          ...onchainResponseFields,
         } as UserClaimResponse);
       }
       let confirmationCode: string | null = null;
@@ -7409,7 +7489,12 @@ export class SchoolStore implements DurableObject {
       });
       await this.storeParticipationTicketReceipt(eventId, userId, ticketReceipt);
 
-      return Response.json({ status: 'created', confirmationCode, ticketReceipt } as UserClaimResponse);
+      return Response.json({
+        status: 'created',
+        confirmationCode,
+        ticketReceipt,
+        ...onchainResponseFields,
+      } as UserClaimResponse);
     }
 
     if (request.method === 'OPTIONS') {

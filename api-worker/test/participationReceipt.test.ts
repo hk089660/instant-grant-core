@@ -158,8 +158,15 @@ describe('participation audit receipt', () => {
     const claimBody = (await claimRes.json()) as {
       confirmationCode: string;
       ticketReceipt?: ParticipationTicketReceipt;
+      txSignature?: string;
+      receiptPubkey?: string;
+      explorerTxUrl?: string;
     };
     expect(claimBody.confirmationCode).toBeDefined();
+    expect(claimBody.txSignature).toBe('5'.repeat(64));
+    expect(claimBody.receiptPubkey).toBe('6'.repeat(32));
+    expect(claimBody.explorerTxUrl).toContain('https://explorer.solana.com/tx/');
+    expect(claimBody.explorerTxUrl).toContain('cluster=devnet');
 
     const syncRes = await store.fetch(
       new Request('https://example.com/api/users/tickets/sync', {
@@ -195,6 +202,94 @@ describe('participation audit receipt', () => {
     expect(syncedTicket?.auditReceiptHash).toBe(claimBody.ticketReceipt?.receiptHash);
     expect(syncedTicket?.txSignature).toBe('5'.repeat(64));
     expect(syncedTicket?.receiptPubkey).toBe('6'.repeat(32));
+  });
+
+  it('records on-chain proof for already joined /v1/school/claims and returns proof fields', async () => {
+    const createRes = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'school wallet claim event',
+          datetime: '2026/02/23 10:00',
+          host: 'admin',
+          ticketTokenAmount: 1,
+        }),
+      })
+    );
+    expect(createRes.status).toBe(201);
+    const event = (await createRes.json()) as { id: string };
+
+    const walletAddress = '4'.repeat(32);
+    const firstClaimRes = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: event.id,
+          walletAddress,
+        }),
+      })
+    );
+    expect(firstClaimRes.status).toBe(200);
+    const firstClaimBody = (await firstClaimRes.json()) as {
+      success: boolean;
+      alreadyJoined?: boolean;
+      confirmationCode?: string;
+    };
+    expect(firstClaimBody.success).toBe(true);
+    expect(firstClaimBody.alreadyJoined).toBeFalsy();
+    expect(typeof firstClaimBody.confirmationCode).toBe('string');
+
+    const secondClaimRes = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: event.id,
+          walletAddress,
+          txSignature: '5'.repeat(64),
+          receiptPubkey: '6'.repeat(32),
+        }),
+      })
+    );
+    expect(secondClaimRes.status).toBe(200);
+    const secondClaimBody = (await secondClaimRes.json()) as {
+      success: boolean;
+      alreadyJoined?: boolean;
+      confirmationCode?: string;
+      txSignature?: string;
+      receiptPubkey?: string;
+      explorerTxUrl?: string;
+    };
+    expect(secondClaimBody.success).toBe(true);
+    expect(secondClaimBody.alreadyJoined).toBe(true);
+    expect(secondClaimBody.confirmationCode).toBe(firstClaimBody.confirmationCode);
+    expect(secondClaimBody.txSignature).toBe('5'.repeat(64));
+    expect(secondClaimBody.receiptPubkey).toBe('6'.repeat(32));
+    expect(secondClaimBody.explorerTxUrl).toContain('https://explorer.solana.com/tx/');
+
+    const transferRes = await store.fetch(
+      new Request(`https://example.com/api/admin/transfers?eventId=${encodeURIComponent(event.id)}&limit=50`, {
+        method: 'GET',
+        headers: { Authorization: 'Bearer master-secret' },
+      })
+    );
+    expect(transferRes.status).toBe(200);
+    const transferBody = (await transferRes.json()) as {
+      items?: Array<{
+        event: string;
+        transfer: {
+          txSignature: string | null;
+          receiptPubkey: string | null;
+        };
+      }>;
+    };
+    const onchainWalletClaim = transferBody.items?.find(
+      (item) => item.event === 'WALLET_CLAIM' && item.transfer.txSignature === '5'.repeat(64)
+    );
+    expect(onchainWalletClaim).toBeTruthy();
+    expect(onchainWalletClaim?.transfer.receiptPubkey).toBe('6'.repeat(32));
   });
 
   it('rejects on-chain proof before off-chain receipt is issued', async () => {
