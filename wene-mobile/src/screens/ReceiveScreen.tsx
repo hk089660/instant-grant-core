@@ -8,6 +8,7 @@ import { usePhantomStore } from '../store/phantomStore';
 import type { Grant } from '../types/grant';
 import { getGrantByCampaignId } from '../api/getGrant';
 import { verifyTicketReceiptByCode } from '../api/userApi';
+import { submitSchoolClaim } from '../api/schoolClaim';
 import { useRecipientTicketStore } from '../store/recipientTicketStore';
 
 import { AppText, BalanceList, BALANCE_LIST_DUMMY, Button, Card, Pill } from '../ui/components';
@@ -20,6 +21,11 @@ import { rejectPendingSignTx } from '../utils/phantomSignTxPending';
 import { getLastPhantomDebug } from '../utils/phantomUrlDebug';
 import { setPhantomWebReturnPath } from '../utils/phantomWebReturnPath';
 import { isLikelyMobileWebBrowser, preparePhantomWebPopup } from '../utils/phantomWebPopup';
+import {
+  clearPhantomWebWalletOnchainSyncContext,
+  patchPhantomWebWalletOnchainSyncContext,
+  savePhantomWebWalletOnchainSyncContext,
+} from '../utils/phantomWebWalletOnchainSync';
 import {
   sendSignedTx,
   isBlockhashExpiredError,
@@ -572,6 +578,9 @@ ${st.balanceLamports ?? 'null'}
         setState('Idle');
         return;
       }
+      if (Platform.OS === 'web') {
+        clearPhantomWebWalletOnchainSyncContext();
+      }
       const confirmationCode = typeof code === 'string' ? code.trim() : '';
       if (!confirmationCode) {
         setError('オフチェーンレシートが発行されていないため署名できません。先に参加登録を完了してください。');
@@ -601,6 +610,16 @@ ${st.balanceLamports ?? 'null'}
         auditReceiptId: offchainReceiptCheck.receipt.receiptId,
         auditReceiptHash: offchainReceiptCheck.receipt.receiptHash,
       });
+      if (Platform.OS === 'web') {
+        savePhantomWebWalletOnchainSyncContext({
+          campaignId,
+          confirmationCode,
+          walletAddress: walletPubkey ?? undefined,
+          eventName: grant?.title ?? campaignId,
+          auditReceiptId: offchainReceiptCheck.receipt.receiptId,
+          auditReceiptHash: offchainReceiptCheck.receipt.receiptHash,
+        });
+      }
       if (grant?.solanaAuthority) {
         const expectedSignerPubkey = await fetchExpectedPopSignerPubkeyFromRuntime();
         const readiness = await fetchPopConfigReadiness(grant.solanaAuthority, { expectedSignerPubkey });
@@ -641,6 +660,13 @@ ${st.balanceLamports ?? 'null'}
           solanaGrantId: grant?.solanaGrantId,
         });
         console.log('[CLAIM] checkpoint 5: buildClaimTx done');
+        if (Platform.OS === 'web') {
+          patchPhantomWebWalletOnchainSyncContext({
+            walletAddress: walletPubkey,
+            receiptPubkey: result.meta.receiptPda.toBase58(),
+            mintAddress: result.meta.mint.toBase58(),
+          });
+        }
       } catch (e) {
         console.error('[CLAIM] buildClaimTx failed:', e);
         console.error('[CLAIM] buildClaimTx error obj', e);
@@ -746,6 +772,13 @@ ${st.balanceLamports ?? 'null'}
                 solanaAuthority: grant?.solanaAuthority,
                 solanaGrantId: grant?.solanaGrantId,
               });
+              if (Platform.OS === 'web') {
+                patchPhantomWebWalletOnchainSyncContext({
+                  walletAddress: walletPubkey,
+                  receiptPubkey: currentResult.meta.receiptPda.toBase58(),
+                  mintAddress: currentResult.meta.mint.toBase58(),
+                });
+              }
               const { redirectLink: signRedirectLink, appUrl: signAppUrl } = buildSignRedirectContext();
               currentSigned = await Promise.race([
                 signTransaction({
@@ -783,6 +816,13 @@ ${st.balanceLamports ?? 'null'}
                 solanaAuthority: grant?.solanaAuthority,
                 solanaGrantId: grant?.solanaGrantId,
               });
+              if (Platform.OS === 'web') {
+                patchPhantomWebWalletOnchainSyncContext({
+                  walletAddress: walletPubkey,
+                  receiptPubkey: currentResult.meta.receiptPda.toBase58(),
+                  mintAddress: currentResult.meta.mint.toBase58(),
+                });
+              }
               const { redirectLink: signRedirectLink, appUrl: signAppUrl } = buildSignRedirectContext();
               currentSigned = await Promise.race([
                 signTransaction({
@@ -818,9 +858,37 @@ ${st.balanceLamports ?? 'null'}
             if (Platform.OS === 'android') {
               ToastAndroid.show(shortMsg, ToastAndroid.LONG);
             }
+            if (Platform.OS === 'web') {
+              clearPhantomWebWalletOnchainSyncContext();
+            }
             return;
           }
         }
+        const currentReceiptPubkey = currentResult.meta.receiptPda.toBase58();
+        let syncedConfirmationCode: string | undefined;
+        let syncedAuditReceiptId: string | undefined;
+        let syncedAuditReceiptHash: string | undefined;
+        let syncedReceiptPubkey: string | undefined;
+        try {
+          const syncResult = await submitSchoolClaim(campaignId, {
+            walletAddress: walletPubkey,
+            txSignature: signature,
+            receiptPubkey: currentReceiptPubkey,
+          });
+          if (syncResult.success) {
+            syncedConfirmationCode = syncResult.confirmationCode?.trim() || undefined;
+            syncedAuditReceiptId = syncResult.ticketReceipt?.receiptId?.trim() || undefined;
+            syncedAuditReceiptHash = syncResult.ticketReceipt?.receiptHash?.trim() || undefined;
+            syncedReceiptPubkey = syncResult.receiptPubkey?.trim() || undefined;
+          } else if (__DEV__) {
+            console.warn('[CLAIM] on-chain proof sync failed:', syncResult.error);
+          }
+        } catch (syncError) {
+          if (__DEV__) {
+            console.warn('[CLAIM] on-chain proof sync failed:', syncError);
+          }
+        }
+
         setLastSignature(signature);
         setLastDoneAt(Date.now());
         setState('Done');
@@ -832,8 +900,15 @@ ${st.balanceLamports ?? 'null'}
             eventName: grant.title,
             joinedAt: Date.now(),
             txSignature: signature,
-            receiptPubkey: currentResult.meta.receiptPda.toBase58(),
+            receiptPubkey: syncedReceiptPubkey ?? currentReceiptPubkey,
+            mintAddress: currentResult.meta.mint.toBase58(),
+            confirmationCode: syncedConfirmationCode ?? confirmationCode,
+            auditReceiptId: syncedAuditReceiptId ?? offchainReceiptCheck.receipt.receiptId,
+            auditReceiptHash: syncedAuditReceiptHash ?? offchainReceiptCheck.receipt.receiptHash,
           }).catch(console.error);
+        }
+        if (Platform.OS === 'web') {
+          clearPhantomWebWalletOnchainSyncContext();
         }
 
       } catch (e) {
@@ -847,6 +922,9 @@ ${st.balanceLamports ?? 'null'}
           setError('SIMULATION FAILED\n' + JSON.stringify(e.simErr));
           setState('Error');
           Alert.alert('シミュレーション失敗', '送信前にシミュレーションで失敗しました。DEV 枠のログを確認してください。', [{ text: 'OK' }]);
+          if (Platform.OS === 'web') {
+            clearPhantomWebWalletOnchainSyncContext();
+          }
           return;
         }
         const errMsg = e instanceof Error ? e.message : String(e);
@@ -857,6 +935,9 @@ ${st.balanceLamports ?? 'null'}
         Alert.alert('送信に失敗しました', shortMsg, [{ text: 'OK' }]);
         if (Platform.OS === 'android') {
           ToastAndroid.show(shortMsg, ToastAndroid.LONG);
+        }
+        if (Platform.OS === 'web') {
+          clearPhantomWebWalletOnchainSyncContext();
         }
         return;
       }
@@ -876,11 +957,17 @@ ${st.balanceLamports ?? 'null'}
         if (Platform.OS === 'android') {
           ToastAndroid.show(shortMsg, ToastAndroid.LONG);
         }
+        if (Platform.OS === 'web') {
+          clearPhantomWebWalletOnchainSyncContext();
+        }
       } catch (innerErr) {
         if (__DEV__) {
           console.error('[CLAIM] outer catch failed:', innerErr);
         }
         setError('エラーが発生しました');
+        if (Platform.OS === 'web') {
+          clearPhantomWebWalletOnchainSyncContext();
+        }
       }
     } finally {
       console.log('[CLAIM] finally: entered');

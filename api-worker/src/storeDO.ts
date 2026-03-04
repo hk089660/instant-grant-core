@@ -4644,7 +4644,9 @@ export class SchoolStore implements DurableObject {
     eventId?: string | null;
   }): Promise<TransferLogView[]> {
     const eventIdFilter = options.eventId?.trim() || null;
-    const scanLimit = Math.min(1000, Math.max(options.limit * 6, options.limit));
+    const scanMultiplier = eventIdFilter ? 50 : 6;
+    const scanCap = eventIdFilter ? AUDIT_ENTRY_SCAN_LIMIT : 1000;
+    const scanLimit = Math.min(scanCap, Math.max(options.limit * scanMultiplier, options.limit));
     const rows = await this.ctx.storage.list({
       prefix: AUDIT_HISTORY_PREFIX,
       limit: scanLimit,

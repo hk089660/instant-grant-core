@@ -1,19 +1,14 @@
-const SESSION_STORAGE_KEY = 'phantom_web_user_onchain_sync_v1';
-const LOCAL_STORAGE_KEY = 'phantom_web_user_onchain_sync_shared_v1';
+const SESSION_STORAGE_KEY = 'phantom_web_wallet_onchain_sync_v1';
+const LOCAL_STORAGE_KEY = 'phantom_web_wallet_onchain_sync_shared_v1';
 const DEFAULT_MAX_AGE_MS = 10 * 60 * 1000;
 
-export interface PhantomWebUserOnchainSyncContext {
-  eventId: string;
-  userId: string;
-  pin: string;
+export interface PhantomWebWalletOnchainSyncContext {
+  campaignId: string;
   confirmationCode: string;
   walletAddress?: string;
   eventName?: string;
   receiptPubkey?: string;
   mintAddress?: string;
-  popEntryHash?: string;
-  popAuditHash?: string;
-  popSigner?: string;
   auditReceiptId?: string;
   auditReceiptHash?: string;
   createdAt: number;
@@ -29,31 +24,24 @@ function normalizeOptionalString(value: unknown): string | undefined {
   return normalized || undefined;
 }
 
-function parseContext(raw: string | null): PhantomWebUserOnchainSyncContext | null {
+function parseContext(raw: string | null): PhantomWebWalletOnchainSyncContext | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as Partial<PhantomWebUserOnchainSyncContext>;
+    const parsed = JSON.parse(raw) as Partial<PhantomWebWalletOnchainSyncContext>;
     if (!parsed || typeof parsed !== 'object') return null;
-    const eventId = normalizeOptionalString(parsed.eventId);
-    const userId = normalizeOptionalString(parsed.userId);
-    const pin = normalizeOptionalString(parsed.pin);
+    const campaignId = normalizeOptionalString(parsed.campaignId);
     const confirmationCode = normalizeOptionalString(parsed.confirmationCode);
     const createdAt = typeof parsed.createdAt === 'number' && Number.isFinite(parsed.createdAt)
       ? parsed.createdAt
       : Date.now();
-    if (!eventId || !userId || !pin || !confirmationCode) return null;
+    if (!campaignId || !confirmationCode) return null;
     return {
-      eventId,
-      userId: userId.toLowerCase(),
-      pin,
+      campaignId,
       confirmationCode,
       walletAddress: normalizeOptionalString(parsed.walletAddress),
       eventName: normalizeOptionalString(parsed.eventName),
       receiptPubkey: normalizeOptionalString(parsed.receiptPubkey),
       mintAddress: normalizeOptionalString(parsed.mintAddress),
-      popEntryHash: normalizeOptionalString(parsed.popEntryHash),
-      popAuditHash: normalizeOptionalString(parsed.popAuditHash),
-      popSigner: normalizeOptionalString(parsed.popSigner),
       auditReceiptId: normalizeOptionalString(parsed.auditReceiptId),
       auditReceiptHash: normalizeOptionalString(parsed.auditReceiptHash),
       createdAt,
@@ -82,7 +70,7 @@ function readStoredContextRaw(): string | null {
   return localRaw;
 }
 
-function writeContext(payload: PhantomWebUserOnchainSyncContext): void {
+function writeContext(payload: PhantomWebWalletOnchainSyncContext): void {
   if (!isWebRuntime()) return;
   const serialized = JSON.stringify(payload);
   try {
@@ -97,7 +85,7 @@ function writeContext(payload: PhantomWebUserOnchainSyncContext): void {
   }
 }
 
-export function clearPhantomWebUserOnchainSyncContext(): void {
+export function clearPhantomWebWalletOnchainSyncContext(): void {
   if (!isWebRuntime()) return;
   try {
     window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
@@ -111,27 +99,21 @@ export function clearPhantomWebUserOnchainSyncContext(): void {
   }
 }
 
-export function savePhantomWebUserOnchainSyncContext(
-  context: Omit<PhantomWebUserOnchainSyncContext, 'createdAt'>
+export function savePhantomWebWalletOnchainSyncContext(
+  context: Omit<PhantomWebWalletOnchainSyncContext, 'createdAt'>
 ): void {
   if (!isWebRuntime()) return;
-  const eventId = context.eventId.trim();
-  const userId = context.userId.trim().toLowerCase();
-  const pin = context.pin.trim();
+  const campaignId = context.campaignId.trim();
   const confirmationCode = context.confirmationCode.trim();
-  if (!eventId || !userId || !pin || !confirmationCode) return;
-  const payload: PhantomWebUserOnchainSyncContext = {
-    eventId,
-    userId,
-    pin,
+  if (!campaignId || !confirmationCode) return;
+
+  const payload: PhantomWebWalletOnchainSyncContext = {
+    campaignId,
     confirmationCode,
     walletAddress: normalizeOptionalString(context.walletAddress),
     eventName: normalizeOptionalString(context.eventName),
     receiptPubkey: normalizeOptionalString(context.receiptPubkey),
     mintAddress: normalizeOptionalString(context.mintAddress),
-    popEntryHash: normalizeOptionalString(context.popEntryHash),
-    popAuditHash: normalizeOptionalString(context.popAuditHash),
-    popSigner: normalizeOptionalString(context.popSigner),
     auditReceiptId: normalizeOptionalString(context.auditReceiptId),
     auditReceiptHash: normalizeOptionalString(context.auditReceiptHash),
     createdAt: Date.now(),
@@ -139,37 +121,34 @@ export function savePhantomWebUserOnchainSyncContext(
   writeContext(payload);
 }
 
-export function patchPhantomWebUserOnchainSyncContext(
-  patch: Partial<Omit<PhantomWebUserOnchainSyncContext, 'eventId' | 'userId' | 'pin' | 'confirmationCode' | 'createdAt'>>
+export function patchPhantomWebWalletOnchainSyncContext(
+  patch: Partial<Omit<PhantomWebWalletOnchainSyncContext, 'campaignId' | 'confirmationCode' | 'createdAt'>>
 ): void {
   if (!isWebRuntime()) return;
   const current = parseContext(readStoredContextRaw());
   if (!current) return;
-  const next: PhantomWebUserOnchainSyncContext = {
+  const next: PhantomWebWalletOnchainSyncContext = {
     ...current,
     walletAddress: normalizeOptionalString(patch.walletAddress) ?? current.walletAddress,
     eventName: normalizeOptionalString(patch.eventName) ?? current.eventName,
     receiptPubkey: normalizeOptionalString(patch.receiptPubkey) ?? current.receiptPubkey,
     mintAddress: normalizeOptionalString(patch.mintAddress) ?? current.mintAddress,
-    popEntryHash: normalizeOptionalString(patch.popEntryHash) ?? current.popEntryHash,
-    popAuditHash: normalizeOptionalString(patch.popAuditHash) ?? current.popAuditHash,
-    popSigner: normalizeOptionalString(patch.popSigner) ?? current.popSigner,
     auditReceiptId: normalizeOptionalString(patch.auditReceiptId) ?? current.auditReceiptId,
     auditReceiptHash: normalizeOptionalString(patch.auditReceiptHash) ?? current.auditReceiptHash,
   };
   writeContext(next);
 }
 
-export function consumePhantomWebUserOnchainSyncContext(options?: {
-  eventId?: string;
+export function consumePhantomWebWalletOnchainSyncContext(options?: {
+  campaignId?: string;
   maxAgeMs?: number;
-}): PhantomWebUserOnchainSyncContext | null {
+}): PhantomWebWalletOnchainSyncContext | null {
   if (!isWebRuntime()) return null;
   const parsed = parseContext(readStoredContextRaw());
-  clearPhantomWebUserOnchainSyncContext();
+  clearPhantomWebWalletOnchainSyncContext();
   if (!parsed) return null;
-  const eventId = options?.eventId?.trim();
-  if (eventId && parsed.eventId !== eventId) return null;
+  const campaignId = options?.campaignId?.trim();
+  if (campaignId && parsed.campaignId !== campaignId) return null;
   const maxAgeMs = options?.maxAgeMs ?? DEFAULT_MAX_AGE_MS;
   if (Date.now() - parsed.createdAt > maxAgeMs) return null;
   return parsed;

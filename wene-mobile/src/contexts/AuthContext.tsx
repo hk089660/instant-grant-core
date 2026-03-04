@@ -14,6 +14,8 @@ import {
 } from '../lib/userStorage';
 import { JOIN_TOKEN_STORAGE_KEY } from '../lib/joinToken';
 import { clearPhantomWebSignResult } from '../utils/phantomWebSignBridge';
+import { clearPhantomWebUserOnchainSyncContext } from '../utils/phantomWebUserOnchainSync';
+import { clearPhantomWebWalletOnchainSyncContext } from '../utils/phantomWebWalletOnchainSync';
 import { useRecipientStore } from '../store/recipientStore';
 import { useRecipientTicketStore } from '../store/recipientTicketStore';
 import { usePhantomStore } from '../store/phantomStore';
@@ -91,9 +93,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     clearPhantomWebSignResult();
+    clearPhantomWebUserOnchainSyncContext();
+    clearPhantomWebWalletOnchainSyncContext();
     if (typeof window !== 'undefined') {
       try {
         window.localStorage.removeItem(JOIN_TOKEN_STORAGE_KEY);
+        window.localStorage.removeItem('phantom_web_return_path_shared_v1');
         window.sessionStorage.removeItem('phantom_web_return_path');
       } catch {
         // no-op

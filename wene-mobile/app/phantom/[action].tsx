@@ -11,7 +11,9 @@ import { useRecipientStore } from '../../src/store/recipientStore';
 import { useRecipientTicketStore } from '../../src/store/recipientTicketStore';
 import { schoolRoutes } from '../../src/lib/schoolRoutes';
 import { claimEventWithUser } from '../../src/api/userApi';
+import { submitSchoolClaim } from '../../src/api/schoolClaim';
 import { consumePhantomWebUserOnchainSyncContext } from '../../src/utils/phantomWebUserOnchainSync';
+import { consumePhantomWebWalletOnchainSyncContext } from '../../src/utils/phantomWebWalletOnchainSync';
 import {
   publishPhantomWebSignError,
   publishPhantomWebSignSuccess,
@@ -52,6 +54,36 @@ function parseEventIdFromReturnPath(path: string): string | null {
   } catch {
     return null;
   }
+}
+
+function isUserConfirmReturnPath(path: string): boolean {
+  const trimmed = path.trim();
+  if (!trimmed) return false;
+  try {
+    const parsed = new URL(trimmed, 'https://wene.local');
+    return parsed.pathname.replace(/\/+$/, '') === '/u/confirm';
+  } catch {
+    return false;
+  }
+}
+
+function parseCampaignIdFromReturnPath(path: string): string | null {
+  const trimmed = path.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed, 'https://wene.local');
+    const normalizedPath = parsed.pathname.replace(/\/+$/, '');
+    const match = normalizedPath.match(/^\/r\/(?:school\/)?([^/]+)$/);
+    if (!match) return null;
+    const campaignId = decodeURIComponent(match[1] ?? '').trim();
+    return campaignId || null;
+  } catch {
+    return null;
+  }
+}
+
+function isWalletReceiveReturnPath(path: string): boolean {
+  return parseCampaignIdFromReturnPath(path) !== null;
 }
 
 function buildExplorerTxUrl(txSignature: string): string {
@@ -146,31 +178,49 @@ export default function PhantomRedirectScreen() {
               recipientStore.setState('Done');
 
               // same-tab 復帰では元画面の Promise が失われる場合があるため、
-              // callback 側でチケット反映と成功画面遷移を完了させる。
+              // callback 側でチケット反映と監査同期を完了させる。
               const eventIdFromReturnPath = parseEventIdFromReturnPath(returnPath);
-              const syncContext = consumePhantomWebUserOnchainSyncContext({
+              const campaignIdFromReturnPath = parseCampaignIdFromReturnPath(returnPath);
+              const userSyncContext = consumePhantomWebUserOnchainSyncContext({
                 eventId: eventIdFromReturnPath ?? undefined,
               });
-              const eventId = eventIdFromReturnPath ?? syncContext?.eventId ?? null;
-              if (eventId) {
+              const walletSyncContext = consumePhantomWebWalletOnchainSyncContext({
+                campaignId: campaignIdFromReturnPath ?? undefined,
+              });
+              const hasUserReturnPath = isUserConfirmReturnPath(returnPath);
+              const hasWalletReturnPath = isWalletReceiveReturnPath(returnPath);
+              const eventId = eventIdFromReturnPath ?? userSyncContext?.eventId ?? null;
+              const campaignId = campaignIdFromReturnPath ?? walletSyncContext?.campaignId ?? null;
+              const shouldHandleUser =
+                (hasUserReturnPath && Boolean(eventId)) ||
+                (!hasWalletReturnPath && Boolean(eventId));
+              const shouldHandleWallet =
+                (!shouldHandleUser && hasWalletReturnPath && Boolean(campaignId)) ||
+                (!shouldHandleUser && !hasUserReturnPath && Boolean(campaignId));
+
+              if (shouldHandleUser && eventId) {
+                const resolvedUserSyncContext =
+                  userSyncContext && userSyncContext.eventId === eventId
+                    ? userSyncContext
+                    : null;
                 const ticketStore = useRecipientTicketStore.getState();
-                if (syncContext?.userId && ticketStore.activeUserId !== syncContext.userId) {
-                  await ticketStore.setActiveUser(syncContext.userId);
+                if (resolvedUserSyncContext?.userId && ticketStore.activeUserId !== resolvedUserSyncContext.userId) {
+                  await ticketStore.setActiveUser(resolvedUserSyncContext.userId);
                 }
                 const scopedTicketStore = useRecipientTicketStore.getState();
                 const existing = scopedTicketStore.getTicketByEventId(eventId);
 
                 let syncedClaimResult: Awaited<ReturnType<typeof claimEventWithUser>> | null = null;
-                if (syncContext) {
+                if (resolvedUserSyncContext) {
                   try {
                     syncedClaimResult = await claimEventWithUser(
                       eventId,
-                      syncContext.userId,
-                      syncContext.pin,
+                      resolvedUserSyncContext.userId,
+                      resolvedUserSyncContext.pin,
                       {
-                        walletAddress: syncContext.walletAddress,
+                        walletAddress: resolvedUserSyncContext.walletAddress,
                         txSignature: signature,
-                        receiptPubkey: syncContext.receiptPubkey,
+                        receiptPubkey: resolvedUserSyncContext.receiptPubkey,
                       }
                     );
                   } catch (syncErr) {
@@ -181,28 +231,28 @@ export default function PhantomRedirectScreen() {
                 const receiptPubkey =
                   syncedClaimResult?.receiptPubkey ??
                   existing?.receiptPubkey ??
-                  syncContext?.receiptPubkey;
+                  resolvedUserSyncContext?.receiptPubkey;
                 const confirmationCode =
                   syncedClaimResult?.confirmationCode ??
                   existing?.confirmationCode ??
-                  syncContext?.confirmationCode;
+                  resolvedUserSyncContext?.confirmationCode;
                 const auditReceiptId =
                   syncedClaimResult?.ticketReceipt?.receiptId ??
                   existing?.auditReceiptId ??
-                  syncContext?.auditReceiptId;
+                  resolvedUserSyncContext?.auditReceiptId;
                 const auditReceiptHash =
                   syncedClaimResult?.ticketReceipt?.receiptHash ??
                   existing?.auditReceiptHash ??
-                  syncContext?.auditReceiptHash;
-                const mintAddress = existing?.mintAddress ?? syncContext?.mintAddress;
-                const popEntryHash = existing?.popEntryHash ?? syncContext?.popEntryHash;
-                const popAuditHash = existing?.popAuditHash ?? syncContext?.popAuditHash;
-                const popSigner = existing?.popSigner ?? syncContext?.popSigner;
+                  resolvedUserSyncContext?.auditReceiptHash;
+                const mintAddress = existing?.mintAddress ?? resolvedUserSyncContext?.mintAddress;
+                const popEntryHash = existing?.popEntryHash ?? resolvedUserSyncContext?.popEntryHash;
+                const popAuditHash = existing?.popAuditHash ?? resolvedUserSyncContext?.popAuditHash;
+                const popSigner = existing?.popSigner ?? resolvedUserSyncContext?.popSigner;
                 const explorerTxUrl = syncedClaimResult?.explorerTxUrl ?? buildExplorerTxUrl(signature);
 
                 await scopedTicketStore.addTicket({
                   eventId,
-                  eventName: existing?.eventName ?? syncContext?.eventName ?? eventId,
+                  eventName: existing?.eventName ?? resolvedUserSyncContext?.eventName ?? eventId,
                   joinedAt: Date.now(),
                   txSignature: signature,
                   receiptPubkey,
@@ -231,6 +281,78 @@ export default function PhantomRedirectScreen() {
                       auditReceiptHash,
                     }) as any
                   );
+                }, 200);
+                return;
+              }
+
+              if (shouldHandleWallet && campaignId) {
+                const resolvedWalletSyncContext =
+                  walletSyncContext && walletSyncContext.campaignId === campaignId
+                    ? walletSyncContext
+                    : null;
+                const ticketStore = useRecipientTicketStore.getState();
+                const existing = ticketStore.getTicketByEventId(campaignId);
+                const walletAddress =
+                  resolvedWalletSyncContext?.walletAddress ??
+                  recipientStore.walletPubkey ??
+                  undefined;
+                const receiptPubkeyCandidate =
+                  resolvedWalletSyncContext?.receiptPubkey ??
+                  existing?.receiptPubkey ??
+                  undefined;
+
+                let syncedClaimResult: Awaited<ReturnType<typeof submitSchoolClaim>> | null = null;
+                try {
+                  syncedClaimResult = await submitSchoolClaim(campaignId, {
+                    walletAddress,
+                    txSignature: signature,
+                    receiptPubkey: receiptPubkeyCandidate,
+                  });
+                } catch (syncErr) {
+                  console.warn('[phantom callback] failed to sync wallet on-chain proof:', syncErr);
+                }
+
+                const syncedReceiptPubkey =
+                  syncedClaimResult && syncedClaimResult.success
+                    ? syncedClaimResult.receiptPubkey
+                    : undefined;
+                const syncedConfirmationCode =
+                  syncedClaimResult && syncedClaimResult.success
+                    ? syncedClaimResult.confirmationCode
+                    : undefined;
+                const syncedAuditReceiptId =
+                  syncedClaimResult && syncedClaimResult.success
+                    ? syncedClaimResult.ticketReceipt?.receiptId
+                    : undefined;
+                const syncedAuditReceiptHash =
+                  syncedClaimResult && syncedClaimResult.success
+                    ? syncedClaimResult.ticketReceipt?.receiptHash
+                    : undefined;
+
+                await ticketStore.addTicket({
+                  eventId: campaignId,
+                  eventName: existing?.eventName ?? resolvedWalletSyncContext?.eventName ?? campaignId,
+                  joinedAt: Date.now(),
+                  txSignature: signature,
+                  receiptPubkey: syncedReceiptPubkey ?? receiptPubkeyCandidate,
+                  mintAddress: existing?.mintAddress ?? resolvedWalletSyncContext?.mintAddress,
+                  confirmationCode:
+                    syncedConfirmationCode ??
+                    existing?.confirmationCode ??
+                    resolvedWalletSyncContext?.confirmationCode,
+                  auditReceiptId:
+                    syncedAuditReceiptId ??
+                    existing?.auditReceiptId ??
+                    resolvedWalletSyncContext?.auditReceiptId,
+                  auditReceiptHash:
+                    syncedAuditReceiptHash ??
+                    existing?.auditReceiptHash ??
+                    resolvedWalletSyncContext?.auditReceiptHash,
+                });
+                setSafeStatus('done', '署名と送信が完了しました。画面へ戻ります…');
+                setTimeout(() => {
+                  if (cancelled) return;
+                  router.replace(returnPath as any);
                 }, 200);
                 return;
               }
