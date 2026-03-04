@@ -27,8 +27,21 @@ function shortenCode(value: string, head = 8, tail = 8): string {
 }
 
 function firstParam(value: string | string[] | undefined): string | undefined {
-  if (Array.isArray(value)) return value[0];
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item === 'string' && item.trim()) return item;
+    }
+    return value[0];
+  }
   return value;
+}
+
+function parseTxSignatureFromExplorerUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const matched = value.match(/\/tx\/([^/?#]+)/i);
+  if (!matched?.[1]) return undefined;
+  const candidate = decodeURIComponent(matched[1]).trim();
+  return candidate || undefined;
 }
 
 type OnchainTxTab = 'tx_hash' | 'explorer';
@@ -79,13 +92,16 @@ export const UserSuccessScreen: React.FC = () => {
   const { eventId: targetEventId, isValid } = useEventIdFromParams({ redirectOnInvalid: true });
   const {
     tx,
+    txSignature: txSignatureRaw,
     receipt,
+    receiptPubkey: receiptPubkeyRaw,
     already,
     confirmationCode,
     status,
     mint,
     reflected,
     onchainBlocked,
+    explorerTxUrl: explorerTxUrlRaw,
     popEntryHash: popEntryHashRaw,
     popAuditHash: popAuditHashRaw,
     popSigner: popSignerRaw,
@@ -93,13 +109,16 @@ export const UserSuccessScreen: React.FC = () => {
     auditReceiptHash: auditReceiptHashRaw,
   } = useLocalSearchParams<{
     tx?: string | string[];
+    txSignature?: string | string[];
     receipt?: string | string[];
+    receiptPubkey?: string | string[];
     already?: string | string[];
     confirmationCode?: string | string[];
     status?: string | string[];
     mint?: string | string[];
     reflected?: string | string[];
     onchainBlocked?: string | string[];
+    explorerTxUrl?: string | string[];
     popEntryHash?: string | string[];
     popAuditHash?: string | string[];
     popSigner?: string | string[];
@@ -113,20 +132,24 @@ export const UserSuccessScreen: React.FC = () => {
   const [onchainUnavailableReason, setOnchainUnavailableReason] = useState<string | null>(null);
   const [onchainTxTab, setOnchainTxTab] = useState<OnchainTxTab>('tx_hash');
   const { addTicket, getTicketByEventId } = useRecipientTicketStore();
-  const txParam = firstParam(tx);
-  const receiptParam = firstParam(receipt);
+  const txParam = firstParam(tx) ?? firstParam(txSignatureRaw);
+  const receiptParam = firstParam(receipt) ?? firstParam(receiptPubkeyRaw);
   const alreadyParam = firstParam(already);
   const statusParam = firstParam(status);
   const confirmationCodeParam = firstParam(confirmationCode);
   const mintParam = firstParam(mint);
   const reflectedParam = firstParam(reflected);
   const onchainBlockedParam = firstParam(onchainBlocked);
+  const explorerTxUrlParam = firstParam(explorerTxUrlRaw);
   const popEntryHashParam = firstParam(popEntryHashRaw);
   const popAuditHashParam = firstParam(popAuditHashRaw);
   const popSignerParam = firstParam(popSignerRaw);
   const auditReceiptIdParam = firstParam(auditReceiptIdRaw);
   const auditReceiptHashParam = firstParam(auditReceiptHashRaw);
-  const txSignature = typeof txParam === 'string' && txParam.trim() ? txParam.trim() : undefined;
+  const txSignatureFromExplorer = parseTxSignatureFromExplorerUrl(explorerTxUrlParam);
+  const txSignature =
+    (typeof txParam === 'string' && txParam.trim() ? txParam.trim() : undefined) ??
+    txSignatureFromExplorer;
   const receiptPubkey = typeof receiptParam === 'string' && receiptParam.trim() ? receiptParam.trim() : undefined;
   const mintAddress = typeof mintParam === 'string' && mintParam.trim() ? mintParam.trim() : undefined;
   const popEntryHash = typeof popEntryHashParam === 'string' && popEntryHashParam.trim() ? popEntryHashParam.trim() : undefined;
