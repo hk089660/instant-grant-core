@@ -140,6 +140,12 @@ describe('participation audit receipt', () => {
       })
     );
     expect(offchainClaimRes.status).toBe(200);
+    const offchainClaimBody = (await offchainClaimRes.json()) as {
+      confirmationCode?: string;
+    };
+    expect(typeof offchainClaimBody.confirmationCode).toBe('string');
+    await state.storage.delete(`ticket_receipt:${eventId}:${offchainClaimBody.confirmationCode as string}`);
+    await state.storage.delete(`ticket_receipt_subject:${eventId}:${userId}`);
 
     const claimRes = await store.fetch(
       new Request(`https://example.com/api/events/${encodeURIComponent(eventId)}/claim`, {
@@ -240,6 +246,8 @@ describe('participation audit receipt', () => {
     expect(firstClaimBody.success).toBe(true);
     expect(firstClaimBody.alreadyJoined).toBeFalsy();
     expect(typeof firstClaimBody.confirmationCode).toBe('string');
+    await state.storage.delete(`ticket_receipt:${event.id}:${firstClaimBody.confirmationCode as string}`);
+    await state.storage.delete(`ticket_receipt_subject:${event.id}:${walletAddress}`);
 
     const secondClaimRes = await store.fetch(
       new Request('https://example.com/v1/school/claims', {
@@ -258,6 +266,7 @@ describe('participation audit receipt', () => {
       success: boolean;
       alreadyJoined?: boolean;
       confirmationCode?: string;
+      ticketReceipt?: ParticipationTicketReceipt;
       txSignature?: string;
       receiptPubkey?: string;
       explorerTxUrl?: string;
@@ -268,6 +277,7 @@ describe('participation audit receipt', () => {
     expect(secondClaimBody.txSignature).toBe('5'.repeat(64));
     expect(secondClaimBody.receiptPubkey).toBe('6'.repeat(32));
     expect(secondClaimBody.explorerTxUrl).toContain('https://explorer.solana.com/tx/');
+    expect(secondClaimBody.ticketReceipt?.confirmationCode).toBe(firstClaimBody.confirmationCode);
 
     const transferRes = await store.fetch(
       new Request(`https://example.com/api/admin/transfers?eventId=${encodeURIComponent(event.id)}&limit=50`, {

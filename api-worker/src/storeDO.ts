@@ -7067,24 +7067,24 @@ export class SchoolStore implements DurableObject {
 
       if (result.alreadyJoined) {
         await this.releaseReservedConfirmationCode(eventId, subject, issuedConfirmationCode);
-        const ticketReceipt =
+        let ticketReceipt =
           confirmationCode
             ? await this.getParticipationTicketReceipt(eventId, subject, confirmationCode)
             : null;
+        let needsTicketReceiptBackfill = false;
 
         if (hasOnchainProof) {
           if (!ticketReceipt) {
-            return Response.json({
-              success: false,
-              error: { code: 'retryable', message: 'off-chain receipt not found for this participation' },
-            } as SchoolClaimResult, { status: 409 });
-          }
-          const verification = await this.verifyParticipationTicketReceipt(ticketReceipt);
-          if (!verification.ok) {
-            return Response.json({
-              success: false,
-              error: { code: 'retryable', message: 'off-chain receipt verification failed' },
-            } as SchoolClaimResult, { status: 409 });
+            // 旧データで receipt が欠損している場合は、on-chain 同期時に再発行して監査整合を回復する。
+            needsTicketReceiptBackfill = true;
+          } else {
+            const verification = await this.verifyParticipationTicketReceipt(ticketReceipt);
+            if (!verification.ok) {
+              return Response.json({
+                success: false,
+                error: { code: 'retryable', message: 'off-chain receipt verification failed' },
+              } as SchoolClaimResult, { status: 409 });
+            }
           }
         }
 
@@ -7096,8 +7096,9 @@ export class SchoolStore implements DurableObject {
         const pii: Record<string, string> = {};
         if (walletAddress) pii.walletAddress = walletAddress;
         if (joinToken) pii.joinToken = joinToken;
+        let onchainAuditEntry: AuditEvent | null = null;
         if (hasOnchainProof && recipient) {
-          await this.appendAuditLog(
+          onchainAuditEntry = await this.appendAuditLog(
             'WALLET_CLAIM',
             { type: 'wallet', id: recipient.id },
             {
@@ -7115,6 +7116,15 @@ export class SchoolStore implements DurableObject {
             },
             eventId
           );
+        }
+        if (needsTicketReceiptBackfill && confirmationCode && onchainAuditEntry) {
+          ticketReceipt = await this.buildParticipationTicketReceipt({
+            eventId,
+            subject,
+            confirmationCode,
+            auditEntry: onchainAuditEntry,
+          });
+          await this.storeParticipationTicketReceipt(eventId, subject, ticketReceipt);
         }
 
         const alreadyResponse: SchoolClaimResultSuccess = {
@@ -7387,23 +7397,24 @@ export class SchoolStore implements DurableObject {
           }
         }
         await this.ensureConfirmationCodeIndexed(eventId, userId, confirmationCode);
-        const ticketReceipt = await this.getParticipationTicketReceipt(eventId, userId, confirmationCode);
+        let ticketReceipt = await this.getParticipationTicketReceipt(eventId, userId, confirmationCode);
+        let needsTicketReceiptBackfill = false;
         if (hasOnchainProof) {
           if (!ticketReceipt) {
-            return Response.json({
-              error: 'off-chain receipt not found for this participation',
-              code: 'offchain_receipt_not_found',
-            }, { status: 409 });
-          }
-          const verification = await this.verifyParticipationTicketReceipt(ticketReceipt);
-          if (!verification.ok) {
-            return Response.json({
-              error: 'off-chain receipt verification failed',
-              code: 'offchain_receipt_invalid',
-              verification,
-            }, { status: 409 });
+            // 旧データで receipt が欠損している場合は、on-chain 同期時に再発行して監査整合を回復する。
+            needsTicketReceiptBackfill = true;
+          } else {
+            const verification = await this.verifyParticipationTicketReceipt(ticketReceipt);
+            if (!verification.ok) {
+              return Response.json({
+                error: 'off-chain receipt verification failed',
+                code: 'offchain_receipt_invalid',
+                verification,
+              }, { status: 409 });
+            }
           }
         }
+        let onchainAuditEntry: AuditEvent | null = null;
         if (hasOnchainProof) {
           const displayName = this.normalizeStringField((userRaw as { displayName?: unknown }).displayName);
           const recipient: TransferParty = proofFields.walletAddress
@@ -7412,7 +7423,7 @@ export class SchoolStore implements DurableObject {
           const pii: Record<string, string> = { userId };
           if (proofFields.walletAddress) pii.walletAddress = proofFields.walletAddress;
           if (displayName) pii.displayName = displayName;
-          await this.appendAuditLog(
+          onchainAuditEntry = await this.appendAuditLog(
             'USER_CLAIM',
             { type: 'user', id: userId },
             {
@@ -7430,6 +7441,15 @@ export class SchoolStore implements DurableObject {
             },
             eventId
           );
+        }
+        if (needsTicketReceiptBackfill && onchainAuditEntry) {
+          ticketReceipt = await this.buildParticipationTicketReceipt({
+            eventId,
+            subject: userId,
+            confirmationCode,
+            auditEntry: onchainAuditEntry,
+          });
+          await this.storeParticipationTicketReceipt(eventId, userId, ticketReceipt);
         }
         return Response.json({
           status: 'already',
