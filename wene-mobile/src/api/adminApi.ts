@@ -991,10 +991,13 @@ export interface RuntimeStatusResponse {
   warnings: string[];
 }
 
-/** Runtime readiness status (public operational check) */
+/** Runtime readiness status (admin/master diagnostics) */
 export async function fetchRuntimeStatus(): Promise<RuntimeStatusResponse> {
   const base = getBaseUrl();
-  return httpGet<RuntimeStatusResponse>(`${base}/v1/school/runtime-status`);
+  return withAdminAuth(async () => {
+    const headers = await getAdminAuthHeaders();
+    return httpGet<RuntimeStatusResponse>(`${base}/v1/school/runtime-status`, { headers });
+  });
 }
 
 export interface PopStatusResponse {
@@ -1012,13 +1015,17 @@ export interface PopStatusResponse {
     pathTemplate: string | null;
   };
   legacySignerEnabled?: boolean;
-  error: string | null;
+  error?: string | null;
+  detailsRedacted?: boolean;
 }
 
-/** PoP runtime status (public operational check) */
+/** PoP runtime status (admin/master diagnostics) */
 export async function fetchPopStatus(): Promise<PopStatusResponse> {
   const base = getBaseUrl();
-  return httpGet<PopStatusResponse>(`${base}/v1/school/pop-status`);
+  return withAdminAuth(async () => {
+    const headers = await getAdminAuthHeaders();
+    return httpGet<PopStatusResponse>(`${base}/v1/school/pop-status`, { headers });
+  });
 }
 
 export interface AdminSecurityViewer {
