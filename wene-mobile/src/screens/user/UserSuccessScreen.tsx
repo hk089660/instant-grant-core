@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { View, StyleSheet, Linking, TouchableOpacity, Animated, Easing, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -29,6 +29,47 @@ function shortenCode(value: string, head = 8, tail = 8): string {
 function firstParam(value: string | string[] | undefined): string | undefined {
   if (Array.isArray(value)) return value[0];
   return value;
+}
+
+type OnchainTxTab = 'tx_hash' | 'explorer';
+
+type OnchainTxHistoryItem = {
+  txSignature: string;
+  receiptPubkey?: string;
+  claimedAt: number;
+  txExplorerUrl: string;
+};
+
+function normalizeOnchainTxHistory(
+  candidates: Array<{ txSignature?: string; receiptPubkey?: string; claimedAt?: number }>
+): OnchainTxHistoryItem[] {
+  const deduped = new Map<string, { txSignature: string; receiptPubkey?: string; claimedAt: number }>();
+  for (const candidate of candidates) {
+    const txSignature = candidate.txSignature?.trim();
+    if (!txSignature) continue;
+    const receiptPubkey = candidate.receiptPubkey?.trim() || undefined;
+    const claimedAt = Number.isFinite(candidate.claimedAt) ? (candidate.claimedAt as number) : 0;
+    const existing = deduped.get(txSignature);
+    if (!existing) {
+      deduped.set(txSignature, {
+        txSignature,
+        receiptPubkey,
+        claimedAt,
+      });
+      continue;
+    }
+    deduped.set(txSignature, {
+      txSignature,
+      receiptPubkey: existing.receiptPubkey ?? receiptPubkey,
+      claimedAt: Math.max(existing.claimedAt, claimedAt),
+    });
+  }
+  return Array.from(deduped.values())
+    .sort((a, b) => b.claimedAt - a.claimedAt)
+    .map((item) => ({
+      ...item,
+      txExplorerUrl: `https://explorer.solana.com/tx/${item.txSignature}?cluster=devnet`,
+    }));
 }
 
 export const UserSuccessScreen: React.FC = () => {
@@ -70,6 +111,7 @@ export const UserSuccessScreen: React.FC = () => {
   const [onchainReadinessChecked, setOnchainReadinessChecked] = useState(false);
   const [onchainReady, setOnchainReady] = useState<boolean>(false);
   const [onchainUnavailableReason, setOnchainUnavailableReason] = useState<string | null>(null);
+  const [onchainTxTab, setOnchainTxTab] = useState<OnchainTxTab>('tx_hash');
   const { addTicket, getTicketByEventId } = useRecipientTicketStore();
   const txParam = firstParam(tx);
   const receiptParam = firstParam(receipt);
@@ -97,8 +139,8 @@ export const UserSuccessScreen: React.FC = () => {
   const reflectedOnchain = reflectedParam === '1';
   const onchainBlockedByPeriod = onchainBlockedParam === '1';
   const storedTicket = targetEventId ? getTicketByEventId(targetEventId) : undefined;
-  const resolvedTx = txSignature ?? storedTicket?.txSignature;
-  const resolvedReceipt = receiptPubkey ?? storedTicket?.receiptPubkey;
+  const fallbackTx = txSignature ?? storedTicket?.txSignature;
+  const fallbackReceipt = receiptPubkey ?? storedTicket?.receiptPubkey;
   const resolvedMintAddress = mintAddress ?? storedTicket?.mintAddress;
   const resolvedConfirmationCode =
     (typeof confirmationCodeParam === 'string' && confirmationCodeParam.trim() ? confirmationCodeParam.trim() : undefined) ??
@@ -110,6 +152,34 @@ export const UserSuccessScreen: React.FC = () => {
   const resolvedPopSigner = popSigner ?? storedTicket?.popSigner;
   const isWalletConnected = Boolean(walletPubkey);
   const isUserLoggedIn = Boolean(userId);
+  const txParamClaimedAt = useRef(Date.now()).current;
+  const onchainTxHistory = useMemo(
+    () =>
+      normalizeOnchainTxHistory([
+        ...(storedTicket?.onchainReceipts ?? []),
+        {
+          txSignature: storedTicket?.txSignature,
+          receiptPubkey: storedTicket?.receiptPubkey,
+          claimedAt: storedTicket?.joinedAt,
+        },
+        {
+          txSignature,
+          receiptPubkey,
+          claimedAt: txParamClaimedAt,
+        },
+      ]),
+    [
+      storedTicket?.onchainReceipts,
+      storedTicket?.txSignature,
+      storedTicket?.receiptPubkey,
+      storedTicket?.joinedAt,
+      txSignature,
+      receiptPubkey,
+      txParamClaimedAt,
+    ]
+  );
+  const resolvedTx = onchainTxHistory[0]?.txSignature ?? fallbackTx;
+  const resolvedReceipt = onchainTxHistory[0]?.receiptPubkey ?? fallbackReceipt;
   const checkScale = useRef(new Animated.Value(0.7)).current;
   const checkOpacity = useRef(new Animated.Value(0)).current;
   const ringScale = useRef(new Animated.Value(0.75)).current;
@@ -225,13 +295,13 @@ export const UserSuccessScreen: React.FC = () => {
   ]);
 
   const isAlready = alreadyParam === '1' || statusParam === 'already';
-  const explorerTxUrl = resolvedTx ? `https://explorer.solana.com/tx/${resolvedTx}?cluster=devnet` : null;
+  const explorerTxUrl = onchainTxHistory[0]?.txExplorerUrl ?? (resolvedTx ? `https://explorer.solana.com/tx/${resolvedTx}?cluster=devnet` : null);
   const explorerReceiptUrl = resolvedReceipt ? `https://explorer.solana.com/address/${resolvedReceipt}?cluster=devnet` : null;
   const explorerMintUrl = resolvedMintAddress ? `https://explorer.solana.com/address/${resolvedMintAddress}?cluster=devnet` : null;
   const hasOffchainReceipt = Boolean(
     resolvedConfirmationCode || resolvedAuditReceiptId || resolvedAuditReceiptHash
   );
-  const hasOnchainReceipt = Boolean(resolvedTx && resolvedReceipt);
+  const hasOnchainReceipt = onchainTxHistory.length > 0;
   const eventSupportsOnchainReceive = Boolean(
     event?.solanaMint && event?.solanaAuthority && event?.solanaGrantId
   );
@@ -308,6 +378,11 @@ export const UserSuccessScreen: React.FC = () => {
     onchainReadinessChecked &&
     !onchainReady
   );
+  useEffect(() => {
+    if (onchainTxHistory.length === 0 && onchainTxTab !== 'tx_hash') {
+      setOnchainTxTab('tx_hash');
+    }
+  }, [onchainTxHistory.length, onchainTxTab]);
 
   const handleCopyPopProof = useCallback(async () => {
     const payload = [
@@ -502,18 +577,61 @@ export const UserSuccessScreen: React.FC = () => {
           </Card>
         )}
 
-        {/* Solana トランザクション情報（将来の Web3 連携用） */}
-        {resolvedTx && (
+        {/* Solana オンチェーン受け取り履歴 */}
+        {onchainTxHistory.length > 0 && (
           <Card style={styles.card}>
             <AppText variant="caption" style={styles.label}>
-              トランザクション署名
+              オンチェーン受け取り署名
             </AppText>
-            <AppText variant="small" style={styles.value}>
-              {shortenCode(resolvedTx)}
-            </AppText>
-            {explorerTxUrl && (
+            <View style={styles.onchainTabs}>
+              <TouchableOpacity
+                onPress={() => setOnchainTxTab('tx_hash')}
+                style={[styles.onchainTabButton, onchainTxTab === 'tx_hash' && styles.onchainTabButtonActive]}
+              >
+                <AppText
+                  variant="small"
+                  style={[styles.onchainTabLabel, onchainTxTab === 'tx_hash' && styles.onchainTabLabelActive]}
+                >
+                  tx hash
+                </AppText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setOnchainTxTab('explorer')}
+                style={[styles.onchainTabButton, onchainTxTab === 'explorer' && styles.onchainTabButtonActive]}
+              >
+                <AppText
+                  variant="small"
+                  style={[styles.onchainTabLabel, onchainTxTab === 'explorer' && styles.onchainTabLabelActive]}
+                >
+                  explorer
+                </AppText>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.onchainTabPanel}>
+              {onchainTxTab === 'tx_hash'
+                ? onchainTxHistory.map((item) => (
+                    <View key={item.txSignature} style={styles.onchainCompactRow}>
+                      <AppText variant="small" style={styles.onchainCompactMono}>
+                        {shortenCode(item.txSignature, 10, 8)}
+                      </AppText>
+                    </View>
+                  ))
+                : onchainTxHistory.map((item, idx) => (
+                    <TouchableOpacity
+                      key={item.txSignature}
+                      onPress={() => Linking.openURL(item.txExplorerUrl)}
+                      style={styles.onchainExplorerRow}
+                    >
+                      <AppText variant="small" style={styles.onchainExplorerLabel}>
+                        #{idx + 1} {shortenCode(item.txSignature, 7, 6)}
+                      </AppText>
+                      <Ionicons name="open-outline" size={14} color={theme.colors.textSecondary} />
+                    </TouchableOpacity>
+                  ))}
+            </View>
+            {onchainTxTab === 'explorer' && explorerTxUrl && (
               <Button
-                title="Explorer で見る（Tx）"
+                title="最新TxをExplorerで開く"
                 variant="secondary"
                 onPress={() => Linking.openURL(explorerTxUrl)}
                 style={styles.explorerButton}
@@ -601,7 +719,7 @@ export const UserSuccessScreen: React.FC = () => {
         )}
 
         {/* confirmationCode もない、tx/receipt もない場合 */}
-        {!resolvedConfirmationCode && !resolvedTx && !resolvedReceipt && !resolvedMintAddress && !resolvedPopEntryHash && !resolvedPopAuditHash && !resolvedPopSigner && (
+        {!resolvedConfirmationCode && onchainTxHistory.length === 0 && !resolvedReceipt && !resolvedMintAddress && !resolvedPopEntryHash && !resolvedPopAuditHash && !resolvedPopSigner && (
           <Card style={styles.card}>
             <AppText variant="caption" style={styles.label}>参加記録</AppText>
             <AppText variant="small" style={styles.codeHint}>
@@ -740,6 +858,65 @@ const styles = StyleSheet.create({
     color: theme.colors.text,
     fontFamily: 'monospace',
     marginBottom: theme.spacing.sm,
+  },
+  onchainTabs: {
+    width: '100%',
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 10,
+    overflow: 'hidden',
+    marginTop: theme.spacing.xs,
+  },
+  onchainTabButton: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: theme.spacing.xs,
+    backgroundColor: theme.colors.surface,
+  },
+  onchainTabButtonActive: {
+    backgroundColor: theme.colors.text,
+  },
+  onchainTabLabel: {
+    color: theme.colors.textSecondary,
+  },
+  onchainTabLabelActive: {
+    color: theme.colors.background,
+  },
+  onchainTabPanel: {
+    width: '100%',
+    marginTop: theme.spacing.sm,
+    gap: theme.spacing.xs,
+  },
+  onchainCompactRow: {
+    width: '100%',
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  onchainCompactMono: {
+    color: theme.colors.text,
+    fontFamily: 'monospace',
+    textAlign: 'center',
+  },
+  onchainExplorerRow: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 8,
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  onchainExplorerLabel: {
+    color: theme.colors.textSecondary,
+    fontFamily: 'monospace',
   },
   explorerButton: {
     marginTop: theme.spacing.xs,
