@@ -30,6 +30,14 @@ const TICKET_RECEIPT_SUBJECT_PREFIX = 'ticket_receipt_subject:';
 const AUDIT_ENTRY_PREFIX = 'audit_entry:';
 const CONFIRMATION_CODE_INDEX_PREFIX = 'confirmation_code_index:';
 const USER_ID_INDEX_PREFIX = 'user_id_index:';
+const ADMIN_SECURITY_STATE_PREFIX = 'admin_security_state:';
+const ADMIN_SECURITY_LOG_PREFIX = 'admin_security_log:';
+const ADMIN_SECURITY_REPORT_PREFIX = 'admin_security_report:';
+const ADMIN_SECURITY_OPERATOR_PREFIX = 'admin_security_operator:';
+const ADMIN_SECURITY_GOVERNANCE_PREFIX = 'admin_security_governance:';
+const ADMIN_SECURITY_REVOKED_OPERATOR_PREFIX = 'admin_security_revoked_operator:';
+const ADMIN_SECURITY_USER_MODERATION_PREFIX = 'admin_security_user_moderation:';
+const ADMIN_SECURITY_LOG_LAST_HASH_KEY = 'admin_security_log:last_hash';
 
 function userKey(userId: string): string {
   return USER_PREFIX + userId;
@@ -65,6 +73,34 @@ function userIdIndexKey(userIdHash: string): string {
 
 function auditEntryByHashKey(entryHash: string): string {
   return `${AUDIT_ENTRY_PREFIX}${entryHash}`;
+}
+
+function adminSecurityStateKey(actorId: string): string {
+  return `${ADMIN_SECURITY_STATE_PREFIX}${actorId}`;
+}
+
+function adminSecurityLogKey(ts: string, id: string): string {
+  return `${ADMIN_SECURITY_LOG_PREFIX}${ts}:${id}`;
+}
+
+function adminSecurityReportKey(reportId: string): string {
+  return `${ADMIN_SECURITY_REPORT_PREFIX}${reportId}`;
+}
+
+function adminSecurityOperatorKey(actorId: string): string {
+  return `${ADMIN_SECURITY_OPERATOR_PREFIX}${actorId}`;
+}
+
+function adminSecurityGovernanceKey(proposalId: string): string {
+  return `${ADMIN_SECURITY_GOVERNANCE_PREFIX}${proposalId}`;
+}
+
+function adminSecurityRevokedOperatorKey(actorId: string): string {
+  return `${ADMIN_SECURITY_REVOKED_OPERATOR_PREFIX}${actorId}`;
+}
+
+function adminSecurityUserModerationKey(userId: string): string {
+  return `${ADMIN_SECURITY_USER_MODERATION_PREFIX}${userId}`;
 }
 
 function costOfForgeryRemediationRequestKey(requestId: string): string {
@@ -214,6 +250,14 @@ const POP_SIGNER_HD_HMAC_KEY = new TextEncoder().encode('ed25519 seed');
 const POP_SIGNER_HD_ROTATION_DEFAULT_INTERVAL_DAYS = 30;
 const POP_SIGNER_HD_ROTATION_MAX_INTERVAL_DAYS = 3650;
 const POP_SIGNER_HD_ROTATION_MAX_INDEX_OFFSET = POP_SIGNER_HD_HARDENED_OFFSET - 1;
+const ADMIN_SECURITY_ISSUE_BURST_WINDOW_MS = 60_000;
+const ADMIN_SECURITY_ISSUE_BURST_THRESHOLD = 3;
+const ADMIN_SECURITY_WARNING_TTL_MS = 120_000;
+const ADMIN_SECURITY_LOG_LIMIT_DEFAULT = 100;
+const ADMIN_SECURITY_LOG_LIMIT_MAX = 500;
+const ADMIN_SECURITY_REPORT_LIMIT_DEFAULT = 100;
+const ADMIN_SECURITY_REPORT_LIMIT_MAX = 500;
+const ADMIN_SECURITY_GOVERNANCE_REASON_MAX_LENGTH = 300;
 
 type SecurityRatePolicy = {
   key: string;
@@ -521,6 +565,166 @@ type OperatorIdentity = {
   name: string;
   actorId: string;
   code?: string;
+};
+
+type AdminSecurityRole = 'admin' | 'master' | 'unknown';
+
+type AdminSecurityActor = {
+  actorId: string;
+  role: AdminSecurityRole;
+  adminId?: string;
+  name?: string;
+};
+
+type AdminSecurityStateRecord = {
+  issueAttemptTimestamps: number[];
+  pendingWarning?: {
+    id: string;
+    issuedAt: number;
+    signals: string[];
+  };
+  frozen?: {
+    frozenAt: number;
+    reason: string;
+    warningId?: string;
+    frozenByActorId?: string;
+    reportId?: string;
+  };
+  revokedAccess?: {
+    revokedAt: number;
+    reason: string;
+    revokedByActorId?: string;
+    reportId?: string;
+  };
+};
+
+type AdminSecurityLogCategory = 'audit' | 'execution';
+
+type AdminSecurityLogAction =
+  | 'event_create_attempt'
+  | 'event_create_success'
+  | 'event_close_success'
+  | 'security_warning_detected'
+  | 'freeze_enforced'
+  | 'freeze_blocked_operation'
+  | 'unlock_executed'
+  | 'access_revoked'
+  | 'revoke_blocked_operation'
+  | 'access_restored'
+  | 'operator_access_revoked'
+  | 'operator_access_restored'
+  | 'user_frozen'
+  | 'user_unfrozen'
+  | 'user_deleted'
+  | 'user_restored'
+  | 'governance_proposal_created'
+  | 'governance_proposal_approved'
+  | 'governance_proposal_executed';
+
+type AdminSecurityLogEntryRecord = {
+  id: string;
+  ts: string;
+  category: AdminSecurityLogCategory;
+  action: AdminSecurityLogAction;
+  actor: AdminSecurityActor;
+  targetActorId?: string;
+  prevHash: string;
+  entryHash: string;
+  details?: Record<string, unknown>;
+};
+
+type AdminSecurityReportObligationType =
+  | 'freeze'
+  | 'revoke_access'
+  | 'operator_revoke'
+  | 'user_freeze'
+  | 'user_delete';
+
+type AdminSecurityReportObligationStatus = 'required' | 'resolved';
+
+type AdminSecurityReportObligationRecord = {
+  reportId: string;
+  type: AdminSecurityReportObligationType;
+  status: AdminSecurityReportObligationStatus;
+  targetActorId: string;
+  actionByActorId: string;
+  reason: string;
+  createdAt: string;
+  resolvedAt?: string;
+  resolvedByActorId?: string;
+  logEntryId: string;
+};
+
+type AdminSecurityGovernanceActionType =
+  | 'unlock_admin'
+  | 'revoke_admin_access'
+  | 'restore_admin_access'
+  | 'revoke_operator'
+  | 'restore_operator'
+  | 'freeze_user'
+  | 'unfreeze_user'
+  | 'delete_user'
+  | 'restore_user';
+
+type AdminSecurityGovernanceProposalStatus = 'pending' | 'executed';
+
+type AdminSecurityGovernanceProposalApproval = {
+  actorId: string;
+  approvedAt: string;
+};
+
+type AdminSecurityGovernanceProposalRecord = {
+  proposalId: string;
+  actionType: AdminSecurityGovernanceActionType;
+  targetId: string;
+  reason: string;
+  createdAt: string;
+  requestedByActorId: string;
+  requiredApproverIds: string[];
+  approvals: AdminSecurityGovernanceProposalApproval[];
+  status: AdminSecurityGovernanceProposalStatus;
+  executedAt?: string;
+  executedByActorId?: string;
+};
+
+type AdminSecurityOperatorRecord = {
+  actorId: string;
+  role: AdminSecurityRole;
+  adminId?: string;
+  name?: string;
+  registeredAt: string;
+};
+
+type AdminSecurityRevokedOperatorRecord = {
+  revokedAt: number;
+  reason: string;
+  revokedByActorId?: string;
+  reportId?: string;
+};
+
+type AdminSecurityUserModerationRecord = {
+  frozen?: {
+    frozenAt: number;
+    reason: string;
+    byActorId?: string;
+    reportId?: string;
+  };
+  deleted?: {
+    deletedAt: number;
+    reason: string;
+    byActorId?: string;
+    reportId?: string;
+  };
+};
+
+type AdminSecurityWarningPayload = {
+  id: string;
+  alertColor: 'red';
+  title: string;
+  message: string;
+  detectedAt: string;
+  signals: string[];
+  freezeOnProceed: boolean;
 };
 
 type EventOwnerRecord = {
@@ -930,6 +1134,7 @@ export class SchoolStore implements DurableObject {
   private popProofLock: Promise<void> = Promise.resolve();
   private confirmationCodeLock: Promise<void> = Promise.resolve();
   private userIdRegistrationLock: Promise<void> = Promise.resolve();
+  private adminSecurityLock: Promise<void> = Promise.resolve();
   private popSignerCache: PopSignerCacheEntry | undefined;
   private masterSearchIndexCache: MasterSearchIndexCache | null = null;
   private masterSearchSqlMetaCache: MasterSearchSqlIndexMeta | null = null;
@@ -3132,6 +3337,987 @@ export class SchoolStore implements DurableObject {
     return null;
   }
 
+  private withAdminSecurityLock<T>(taskFn: () => Promise<T>): Promise<T> {
+    const task = this.adminSecurityLock.then(taskFn);
+    this.adminSecurityLock = task.then(() => { }, () => { });
+    return task;
+  }
+
+  private toAdminSecurityActor(operator: OperatorIdentity): AdminSecurityActor {
+    return {
+      actorId: operator.actorId,
+      role: operator.role,
+      adminId: operator.adminId,
+      name: operator.name,
+    };
+  }
+
+  private parseAdminSecurityStateRecord(raw: unknown): AdminSecurityStateRecord | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+
+    const issueAttemptTimestampsRaw = Array.isArray(obj.issueAttemptTimestamps)
+      ? obj.issueAttemptTimestamps
+      : [];
+    const issueAttemptTimestamps = issueAttemptTimestampsRaw
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0);
+
+    const pendingWarningRaw =
+      obj.pendingWarning && typeof obj.pendingWarning === 'object'
+        ? (obj.pendingWarning as Record<string, unknown>)
+        : null;
+    const pendingWarningId = pendingWarningRaw && typeof pendingWarningRaw.id === 'string'
+      ? pendingWarningRaw.id.trim()
+      : '';
+    const pendingWarningIssuedAt = pendingWarningRaw ? Number(pendingWarningRaw.issuedAt) : NaN;
+    const pendingWarningSignals = pendingWarningRaw && Array.isArray(pendingWarningRaw.signals)
+      ? pendingWarningRaw.signals
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : [];
+    const pendingWarning =
+      pendingWarningId && Number.isFinite(pendingWarningIssuedAt) && pendingWarningIssuedAt > 0
+        ? {
+          id: pendingWarningId,
+          issuedAt: pendingWarningIssuedAt,
+          signals: pendingWarningSignals,
+        }
+        : undefined;
+
+    const frozenRaw =
+      obj.frozen && typeof obj.frozen === 'object'
+        ? (obj.frozen as Record<string, unknown>)
+        : null;
+    const frozenAt = frozenRaw ? Number(frozenRaw.frozenAt) : NaN;
+    const frozenReason = frozenRaw && typeof frozenRaw.reason === 'string'
+      ? frozenRaw.reason.trim()
+      : '';
+    const frozen = Number.isFinite(frozenAt) && frozenAt > 0 && frozenReason
+      ? {
+        frozenAt,
+        reason: frozenReason,
+        warningId: typeof frozenRaw?.warningId === 'string' && frozenRaw.warningId.trim()
+          ? frozenRaw.warningId.trim()
+          : undefined,
+        frozenByActorId: typeof frozenRaw?.frozenByActorId === 'string' && frozenRaw.frozenByActorId.trim()
+          ? frozenRaw.frozenByActorId.trim()
+          : undefined,
+        reportId: typeof frozenRaw?.reportId === 'string' && frozenRaw.reportId.trim()
+          ? frozenRaw.reportId.trim()
+          : undefined,
+      }
+      : undefined;
+
+    const revokedRaw =
+      obj.revokedAccess && typeof obj.revokedAccess === 'object'
+        ? (obj.revokedAccess as Record<string, unknown>)
+        : null;
+    const revokedAt = revokedRaw ? Number(revokedRaw.revokedAt) : NaN;
+    const revokedReason = revokedRaw && typeof revokedRaw.reason === 'string'
+      ? revokedRaw.reason.trim()
+      : '';
+    const revokedAccess = Number.isFinite(revokedAt) && revokedAt > 0 && revokedReason
+      ? {
+        revokedAt,
+        reason: revokedReason,
+        revokedByActorId: typeof revokedRaw?.revokedByActorId === 'string' && revokedRaw.revokedByActorId.trim()
+          ? revokedRaw.revokedByActorId.trim()
+          : undefined,
+        reportId: typeof revokedRaw?.reportId === 'string' && revokedRaw.reportId.trim()
+          ? revokedRaw.reportId.trim()
+          : undefined,
+      }
+      : undefined;
+
+    return {
+      issueAttemptTimestamps,
+      ...(pendingWarning ? { pendingWarning } : {}),
+      ...(frozen ? { frozen } : {}),
+      ...(revokedAccess ? { revokedAccess } : {}),
+    };
+  }
+
+  private async getAdminSecurityState(actorId: string): Promise<AdminSecurityStateRecord> {
+    const parsed = this.parseAdminSecurityStateRecord(
+      await this.ctx.storage.get(adminSecurityStateKey(actorId))
+    );
+    if (parsed) return parsed;
+    return { issueAttemptTimestamps: [] };
+  }
+
+  private async putAdminSecurityState(actorId: string, state: AdminSecurityStateRecord): Promise<void> {
+    await this.ctx.storage.put(adminSecurityStateKey(actorId), state);
+  }
+
+  private async listAdminSecurityStates(): Promise<Array<{ actorId: string; state: AdminSecurityStateRecord }>> {
+    const rows = await this.ctx.storage.list({ prefix: ADMIN_SECURITY_STATE_PREFIX });
+    const out: Array<{ actorId: string; state: AdminSecurityStateRecord }> = [];
+    for (const [key, raw] of rows.entries()) {
+      const actorId = key.slice(ADMIN_SECURITY_STATE_PREFIX.length);
+      if (!actorId) continue;
+      const state = this.parseAdminSecurityStateRecord(raw);
+      if (!state) continue;
+      out.push({ actorId, state });
+    }
+    return out;
+  }
+
+  private parseAdminSecurityLogEntry(raw: unknown): AdminSecurityLogEntryRecord | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const id = typeof obj.id === 'string' ? obj.id.trim() : '';
+    const ts = typeof obj.ts === 'string' ? obj.ts.trim() : '';
+    const categoryRaw = typeof obj.category === 'string' ? obj.category.trim() : '';
+    const actionRaw = typeof obj.action === 'string' ? obj.action.trim() : '';
+    const prevHash = typeof obj.prevHash === 'string' ? obj.prevHash.trim() : '';
+    const entryHash = typeof obj.entryHash === 'string' ? obj.entryHash.trim() : '';
+    if (!id || !ts || !categoryRaw || !actionRaw || !prevHash || !entryHash) return null;
+    const category: AdminSecurityLogCategory =
+      categoryRaw === 'execution' ? 'execution' : 'audit';
+    const actorRaw = obj.actor;
+    if (!actorRaw || typeof actorRaw !== 'object') return null;
+    const actorObj = actorRaw as Record<string, unknown>;
+    const actorId = typeof actorObj.actorId === 'string' ? actorObj.actorId.trim() : '';
+    if (!actorId) return null;
+    const roleRaw = typeof actorObj.role === 'string' ? actorObj.role.trim() : '';
+    const actor: AdminSecurityActor = {
+      actorId,
+      role: roleRaw === 'master' || roleRaw === 'admin' ? roleRaw : 'unknown',
+      ...(typeof actorObj.adminId === 'string' && actorObj.adminId.trim()
+        ? { adminId: actorObj.adminId.trim() }
+        : {}),
+      ...(typeof actorObj.name === 'string' && actorObj.name.trim()
+        ? { name: actorObj.name.trim() }
+        : {}),
+    };
+    const details = obj.details && typeof obj.details === 'object'
+      ? (obj.details as Record<string, unknown>)
+      : undefined;
+    return {
+      id,
+      ts,
+      category,
+      action: actionRaw as AdminSecurityLogAction,
+      actor,
+      ...(typeof obj.targetActorId === 'string' && obj.targetActorId.trim()
+        ? { targetActorId: obj.targetActorId.trim() }
+        : {}),
+      prevHash,
+      entryHash,
+      ...(details ? { details } : {}),
+    };
+  }
+
+  private async appendAdminSecurityLog(
+    category: AdminSecurityLogCategory,
+    action: AdminSecurityLogAction,
+    actor: AdminSecurityActor,
+    params?: {
+      targetActorId?: string;
+      details?: Record<string, unknown>;
+      now?: number;
+    }
+  ): Promise<AdminSecurityLogEntryRecord> {
+    const now = params?.now ?? Date.now();
+    const ts = new Date(now).toISOString();
+    const id = `log-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    const prevHash = (await this.ctx.storage.get<string>(ADMIN_SECURITY_LOG_LAST_HASH_KEY)) ?? '0'.repeat(64);
+    const payload = {
+      id,
+      ts,
+      category,
+      action,
+      actor,
+      targetActorId: params?.targetActorId ?? null,
+      details: params?.details ?? null,
+      prevHash,
+    };
+    const entryHash = await sha256Hex(canonicalize(payload));
+    const entry: AdminSecurityLogEntryRecord = {
+      id,
+      ts,
+      category,
+      action,
+      actor,
+      prevHash,
+      entryHash,
+      ...(params?.targetActorId ? { targetActorId: params.targetActorId } : {}),
+      ...(params?.details ? { details: params.details } : {}),
+    };
+    await this.ctx.storage.put(adminSecurityLogKey(ts, id), entry);
+    await this.ctx.storage.put(ADMIN_SECURITY_LOG_LAST_HASH_KEY, entryHash);
+    return entry;
+  }
+
+  private async listAdminSecurityLogs(): Promise<AdminSecurityLogEntryRecord[]> {
+    const rows = await this.ctx.storage.list({
+      prefix: ADMIN_SECURITY_LOG_PREFIX,
+      reverse: true,
+      limit: ADMIN_SECURITY_LOG_LIMIT_MAX * 10,
+    });
+    const out: AdminSecurityLogEntryRecord[] = [];
+    for (const raw of rows.values()) {
+      const parsed = this.parseAdminSecurityLogEntry(raw);
+      if (parsed) out.push(parsed);
+    }
+    out.sort((a, b) => b.ts.localeCompare(a.ts));
+    return out;
+  }
+
+  private parseAdminSecurityReportObligation(
+    raw: unknown
+  ): AdminSecurityReportObligationRecord | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const reportId = typeof obj.reportId === 'string' ? obj.reportId.trim() : '';
+    const typeRaw = typeof obj.type === 'string' ? obj.type.trim() : '';
+    const statusRaw = typeof obj.status === 'string' ? obj.status.trim() : '';
+    const targetActorId = typeof obj.targetActorId === 'string' ? obj.targetActorId.trim() : '';
+    const actionByActorId = typeof obj.actionByActorId === 'string' ? obj.actionByActorId.trim() : '';
+    const reason = typeof obj.reason === 'string' ? obj.reason.trim() : '';
+    const createdAt = typeof obj.createdAt === 'string' ? obj.createdAt.trim() : '';
+    const logEntryId = typeof obj.logEntryId === 'string' ? obj.logEntryId.trim() : '';
+    if (!reportId || !typeRaw || !statusRaw || !targetActorId || !actionByActorId || !reason || !createdAt || !logEntryId) {
+      return null;
+    }
+    const status: AdminSecurityReportObligationStatus =
+      statusRaw === 'resolved' ? 'resolved' : 'required';
+    const type: AdminSecurityReportObligationType =
+      typeRaw === 'revoke_access' ||
+        typeRaw === 'operator_revoke' ||
+        typeRaw === 'user_freeze' ||
+        typeRaw === 'user_delete'
+        ? typeRaw
+        : 'freeze';
+    return {
+      reportId,
+      type,
+      status,
+      targetActorId,
+      actionByActorId,
+      reason,
+      createdAt,
+      ...(typeof obj.resolvedAt === 'string' && obj.resolvedAt.trim() ? { resolvedAt: obj.resolvedAt.trim() } : {}),
+      ...(typeof obj.resolvedByActorId === 'string' && obj.resolvedByActorId.trim()
+        ? { resolvedByActorId: obj.resolvedByActorId.trim() }
+        : {}),
+      logEntryId,
+    };
+  }
+
+  private async listAdminSecurityReportObligations(): Promise<AdminSecurityReportObligationRecord[]> {
+    const rows = await this.ctx.storage.list({ prefix: ADMIN_SECURITY_REPORT_PREFIX });
+    const out: AdminSecurityReportObligationRecord[] = [];
+    for (const raw of rows.values()) {
+      const parsed = this.parseAdminSecurityReportObligation(raw);
+      if (parsed) out.push(parsed);
+    }
+    out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return out;
+  }
+
+  private async createAdminSecurityReportObligation(params: {
+    type: AdminSecurityReportObligationType;
+    targetActorId: string;
+    actionByActorId: string;
+    reason: string;
+    logEntryId: string;
+    now?: number;
+  }): Promise<AdminSecurityReportObligationRecord> {
+    const now = params.now ?? Date.now();
+    const createdAt = new Date(now).toISOString();
+    const reportId = `report-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    const record: AdminSecurityReportObligationRecord = {
+      reportId,
+      type: params.type,
+      status: 'required',
+      targetActorId: params.targetActorId,
+      actionByActorId: params.actionByActorId,
+      reason: params.reason,
+      createdAt,
+      logEntryId: params.logEntryId,
+    };
+    await this.ctx.storage.put(adminSecurityReportKey(reportId), record);
+    return record;
+  }
+
+  private async resolveAdminSecurityReportObligation(
+    reportId: string,
+    resolvedByActorId: string,
+    now = Date.now()
+  ): Promise<AdminSecurityReportObligationRecord | null> {
+    const key = adminSecurityReportKey(reportId);
+    const existing = this.parseAdminSecurityReportObligation(await this.ctx.storage.get(key));
+    if (!existing) return null;
+    if (existing.status === 'resolved') return existing;
+    const resolved: AdminSecurityReportObligationRecord = {
+      ...existing,
+      status: 'resolved',
+      resolvedAt: new Date(now).toISOString(),
+      resolvedByActorId,
+    };
+    await this.ctx.storage.put(key, resolved);
+    return resolved;
+  }
+
+  private async registerAdminSecurityOperator(actor: AdminSecurityActor): Promise<void> {
+    if (actor.role !== 'master') return;
+    const key = adminSecurityOperatorKey(actor.actorId);
+    const existing = await this.ctx.storage.get(key);
+    if (existing !== undefined) return;
+    const record: AdminSecurityOperatorRecord = {
+      actorId: actor.actorId,
+      role: actor.role,
+      ...(actor.adminId ? { adminId: actor.adminId } : {}),
+      ...(actor.name ? { name: actor.name } : {}),
+      registeredAt: new Date().toISOString(),
+    };
+    await this.ctx.storage.put(key, record);
+  }
+
+  private parseAdminSecurityOperator(raw: unknown): AdminSecurityOperatorRecord | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const actorId = typeof obj.actorId === 'string' ? obj.actorId.trim() : '';
+    const roleRaw = typeof obj.role === 'string' ? obj.role.trim() : '';
+    const registeredAt = typeof obj.registeredAt === 'string' ? obj.registeredAt.trim() : '';
+    if (!actorId || !registeredAt) return null;
+    const role: AdminSecurityRole =
+      roleRaw === 'master' || roleRaw === 'admin' ? roleRaw : 'unknown';
+    return {
+      actorId,
+      role,
+      ...(typeof obj.adminId === 'string' && obj.adminId.trim() ? { adminId: obj.adminId.trim() } : {}),
+      ...(typeof obj.name === 'string' && obj.name.trim() ? { name: obj.name.trim() } : {}),
+      registeredAt,
+    };
+  }
+
+  private async listAdminSecurityOperators(): Promise<AdminSecurityOperatorRecord[]> {
+    const rows = await this.ctx.storage.list({ prefix: ADMIN_SECURITY_OPERATOR_PREFIX });
+    const out: AdminSecurityOperatorRecord[] = [];
+    for (const raw of rows.values()) {
+      const parsed = this.parseAdminSecurityOperator(raw);
+      if (parsed) out.push(parsed);
+    }
+    out.sort((a, b) => a.actorId.localeCompare(b.actorId));
+    return out;
+  }
+
+  private parseAdminSecurityRevokedOperator(raw: unknown): AdminSecurityRevokedOperatorRecord | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const revokedAt = Number(obj.revokedAt);
+    const reason = typeof obj.reason === 'string' ? obj.reason.trim() : '';
+    if (!Number.isFinite(revokedAt) || revokedAt <= 0 || !reason) return null;
+    return {
+      revokedAt,
+      reason,
+      ...(typeof obj.revokedByActorId === 'string' && obj.revokedByActorId.trim()
+        ? { revokedByActorId: obj.revokedByActorId.trim() }
+        : {}),
+      ...(typeof obj.reportId === 'string' && obj.reportId.trim() ? { reportId: obj.reportId.trim() } : {}),
+    };
+  }
+
+  private async getAdminSecurityRevokedOperator(actorId: string): Promise<AdminSecurityRevokedOperatorRecord | null> {
+    return this.parseAdminSecurityRevokedOperator(
+      await this.ctx.storage.get(adminSecurityRevokedOperatorKey(actorId))
+    );
+  }
+
+  private async listAdminSecurityRevokedOperators(): Promise<Array<{ actorId: string; state: AdminSecurityRevokedOperatorRecord }>> {
+    const rows = await this.ctx.storage.list({ prefix: ADMIN_SECURITY_REVOKED_OPERATOR_PREFIX });
+    const out: Array<{ actorId: string; state: AdminSecurityRevokedOperatorRecord }> = [];
+    for (const [key, raw] of rows.entries()) {
+      const actorId = key.slice(ADMIN_SECURITY_REVOKED_OPERATOR_PREFIX.length);
+      if (!actorId) continue;
+      const state = this.parseAdminSecurityRevokedOperator(raw);
+      if (!state) continue;
+      out.push({ actorId, state });
+    }
+    return out;
+  }
+
+  private parseAdminSecurityGovernanceApproval(raw: unknown): AdminSecurityGovernanceProposalApproval | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const actorId = typeof obj.actorId === 'string' ? obj.actorId.trim() : '';
+    const approvedAt = typeof obj.approvedAt === 'string' ? obj.approvedAt.trim() : '';
+    if (!actorId || !approvedAt) return null;
+    return { actorId, approvedAt };
+  }
+
+  private parseAdminSecurityGovernanceProposal(raw: unknown): AdminSecurityGovernanceProposalRecord | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const proposalId = typeof obj.proposalId === 'string' ? obj.proposalId.trim() : '';
+    const actionTypeRaw = typeof obj.actionType === 'string' ? obj.actionType.trim() : '';
+    const targetId = typeof obj.targetId === 'string' ? obj.targetId.trim() : '';
+    const reason = typeof obj.reason === 'string' ? obj.reason.trim() : '';
+    const createdAt = typeof obj.createdAt === 'string' ? obj.createdAt.trim() : '';
+    const requestedByActorId = typeof obj.requestedByActorId === 'string' ? obj.requestedByActorId.trim() : '';
+    const statusRaw = typeof obj.status === 'string' ? obj.status.trim() : '';
+    if (!proposalId || !actionTypeRaw || !targetId || !reason || !createdAt || !requestedByActorId || !statusRaw) {
+      return null;
+    }
+    const requiredApproverIds = Array.isArray(obj.requiredApproverIds)
+      ? obj.requiredApproverIds
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : [];
+    const approvalMap = new Map<string, AdminSecurityGovernanceProposalApproval>();
+    if (Array.isArray(obj.approvals)) {
+      for (const rawApproval of obj.approvals) {
+        const parsed = this.parseAdminSecurityGovernanceApproval(rawApproval);
+        if (!parsed) continue;
+        const existing = approvalMap.get(parsed.actorId);
+        if (!existing || existing.approvedAt < parsed.approvedAt) {
+          approvalMap.set(parsed.actorId, parsed);
+        }
+      }
+    }
+    const approvals = Array.from(approvalMap.values()).sort((a, b) => a.approvedAt.localeCompare(b.approvedAt));
+    const status: AdminSecurityGovernanceProposalStatus =
+      statusRaw === 'executed' ? 'executed' : 'pending';
+
+    return {
+      proposalId,
+      actionType: actionTypeRaw as AdminSecurityGovernanceActionType,
+      targetId,
+      reason,
+      createdAt,
+      requestedByActorId,
+      requiredApproverIds,
+      approvals,
+      status,
+      ...(typeof obj.executedAt === 'string' && obj.executedAt.trim() ? { executedAt: obj.executedAt.trim() } : {}),
+      ...(typeof obj.executedByActorId === 'string' && obj.executedByActorId.trim()
+        ? { executedByActorId: obj.executedByActorId.trim() }
+        : {}),
+    };
+  }
+
+  private async listAdminSecurityGovernanceProposals(): Promise<AdminSecurityGovernanceProposalRecord[]> {
+    const rows = await this.ctx.storage.list({ prefix: ADMIN_SECURITY_GOVERNANCE_PREFIX });
+    const out: AdminSecurityGovernanceProposalRecord[] = [];
+    for (const raw of rows.values()) {
+      const parsed = this.parseAdminSecurityGovernanceProposal(raw);
+      if (parsed) out.push(parsed);
+    }
+    out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return out;
+  }
+
+  private async getAdminSecurityGovernanceProposal(
+    proposalId: string
+  ): Promise<AdminSecurityGovernanceProposalRecord | null> {
+    return this.parseAdminSecurityGovernanceProposal(
+      await this.ctx.storage.get(adminSecurityGovernanceKey(proposalId))
+    );
+  }
+
+  private parseAdminSecurityUserModeration(raw: unknown): AdminSecurityUserModerationRecord | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const record: AdminSecurityUserModerationRecord = {};
+    const frozenRaw = obj.frozen && typeof obj.frozen === 'object'
+      ? (obj.frozen as Record<string, unknown>)
+      : null;
+    if (frozenRaw) {
+      const frozenAt = Number(frozenRaw.frozenAt);
+      const reason = typeof frozenRaw.reason === 'string' ? frozenRaw.reason.trim() : '';
+      if (Number.isFinite(frozenAt) && frozenAt > 0 && reason) {
+        record.frozen = {
+          frozenAt,
+          reason,
+          ...(typeof frozenRaw.byActorId === 'string' && frozenRaw.byActorId.trim()
+            ? { byActorId: frozenRaw.byActorId.trim() }
+            : {}),
+          ...(typeof frozenRaw.reportId === 'string' && frozenRaw.reportId.trim()
+            ? { reportId: frozenRaw.reportId.trim() }
+            : {}),
+        };
+      }
+    }
+    const deletedRaw = obj.deleted && typeof obj.deleted === 'object'
+      ? (obj.deleted as Record<string, unknown>)
+      : null;
+    if (deletedRaw) {
+      const deletedAt = Number(deletedRaw.deletedAt);
+      const reason = typeof deletedRaw.reason === 'string' ? deletedRaw.reason.trim() : '';
+      if (Number.isFinite(deletedAt) && deletedAt > 0 && reason) {
+        record.deleted = {
+          deletedAt,
+          reason,
+          ...(typeof deletedRaw.byActorId === 'string' && deletedRaw.byActorId.trim()
+            ? { byActorId: deletedRaw.byActorId.trim() }
+            : {}),
+          ...(typeof deletedRaw.reportId === 'string' && deletedRaw.reportId.trim()
+            ? { reportId: deletedRaw.reportId.trim() }
+            : {}),
+        };
+      }
+    }
+    if (!record.frozen && !record.deleted) return {};
+    return record;
+  }
+
+  private async getAdminSecurityUserModeration(userId: string): Promise<AdminSecurityUserModerationRecord> {
+    const parsed = this.parseAdminSecurityUserModeration(
+      await this.ctx.storage.get(adminSecurityUserModerationKey(userId))
+    );
+    return parsed ?? {};
+  }
+
+  private async putAdminSecurityUserModeration(
+    userId: string,
+    record: AdminSecurityUserModerationRecord
+  ): Promise<void> {
+    await this.ctx.storage.put(adminSecurityUserModerationKey(userId), record);
+  }
+
+  private async listAdminSecurityUserModeration(): Promise<Array<{ userId: string; state: AdminSecurityUserModerationRecord }>> {
+    const rows = await this.ctx.storage.list({ prefix: ADMIN_SECURITY_USER_MODERATION_PREFIX });
+    const out: Array<{ userId: string; state: AdminSecurityUserModerationRecord }> = [];
+    for (const [key, raw] of rows.entries()) {
+      const userId = key.slice(ADMIN_SECURITY_USER_MODERATION_PREFIX.length);
+      if (!userId) continue;
+      const state = this.parseAdminSecurityUserModeration(raw);
+      if (!state) continue;
+      out.push({ userId, state });
+    }
+    out.sort((a, b) => a.userId.localeCompare(b.userId));
+    return out;
+  }
+
+  private async ensureUserNotModerated(userId: string): Promise<Response | null> {
+    const normalizedUserId = this.normalizeUserId(userId);
+    if (!normalizedUserId) return null;
+    const state = await this.getAdminSecurityUserModeration(normalizedUserId);
+    if (state.deleted) {
+      return Response.json(
+        {
+          error: 'user account deleted by operator consensus',
+          code: 'user_deleted',
+          deletedAt: new Date(state.deleted.deletedAt).toISOString(),
+          reason: state.deleted.reason,
+        },
+        { status: 403 }
+      );
+    }
+    if (state.frozen) {
+      return Response.json(
+        {
+          error: 'user account frozen by operator consensus',
+          code: 'user_frozen',
+          frozenAt: new Date(state.frozen.frozenAt).toISOString(),
+          reason: state.frozen.reason,
+          unlockRequired: true,
+        },
+        { status: 423 }
+      );
+    }
+    return null;
+  }
+
+  private parseAdminSecurityLogLimit(raw: string | null): number {
+    return parseBoundedInt(
+      raw,
+      ADMIN_SECURITY_LOG_LIMIT_DEFAULT,
+      1,
+      ADMIN_SECURITY_LOG_LIMIT_MAX
+    );
+  }
+
+  private parseAdminSecurityReportLimit(raw: string | null): number {
+    return parseBoundedInt(
+      raw,
+      ADMIN_SECURITY_REPORT_LIMIT_DEFAULT,
+      1,
+      ADMIN_SECURITY_REPORT_LIMIT_MAX
+    );
+  }
+
+  private buildAdminSecurityWarning(actorId: string, signals: string[], nowMs: number): AdminSecurityWarningPayload {
+    const fingerprint = `${actorId}:${nowMs}:${signals.join('|')}`;
+    const id = `warn-${crypto.randomUUID().replace(/-/g, '').slice(0, 10)}-${fingerprint.length % 10}`;
+    return {
+      id,
+      alertColor: 'red',
+      title: '不正発行またはBot操作の疑いを検知しました',
+      message: 'このまま続行すると、管理者アカウントはリアルタイム凍結され、運営者の手動ロック解除が必要になります。',
+      detectedAt: new Date(nowMs).toISOString(),
+      signals,
+      freezeOnProceed: true,
+    };
+  }
+
+  private collectSuspiciousSignals(
+    request: Request,
+    title: string,
+    host: string,
+    state: AdminSecurityStateRecord,
+    nowMs: number
+  ): string[] {
+    const signals: string[] = [];
+    const joinedText = `${title} ${host}`.toLowerCase();
+    if (/\b(bot|auto|script|spam|mass)\b/.test(joinedText)) {
+      signals.push('suspicious_keyword');
+    }
+    const userAgent = (request.headers.get('user-agent') ?? '').trim().toLowerCase();
+    if (/(bot|crawler|spider|curl|wget|python|scrapy|headless)/.test(userAgent)) {
+      signals.push('bot_like_user_agent');
+    }
+    state.issueAttemptTimestamps = state.issueAttemptTimestamps.filter(
+      (ts) => nowMs - ts <= ADMIN_SECURITY_ISSUE_BURST_WINDOW_MS
+    );
+    state.issueAttemptTimestamps.push(nowMs);
+    if (state.issueAttemptTimestamps.length >= ADMIN_SECURITY_ISSUE_BURST_THRESHOLD) {
+      signals.push('rapid_issue_attempts');
+    }
+    return Array.from(new Set(signals));
+  }
+
+  private parseGovernanceReason(raw: unknown, fallback: string): string {
+    const normalized =
+      typeof raw === 'string' && raw.trim()
+        ? raw.trim()
+        : fallback;
+    return normalized.slice(0, ADMIN_SECURITY_GOVERNANCE_REASON_MAX_LENGTH);
+  }
+
+  private governanceProposalView(proposal: AdminSecurityGovernanceProposalRecord): {
+    proposalId: string;
+    actionType: AdminSecurityGovernanceActionType;
+    targetId: string;
+    reason: string;
+    status: AdminSecurityGovernanceProposalStatus;
+    createdAt: string;
+    requestedByActorId: string;
+    approvedCount: number;
+    requiredCount: number;
+    requiredApproverIds: string[];
+    approvals: AdminSecurityGovernanceProposalApproval[];
+    missingApprovers: string[];
+    unanimousApproved: boolean;
+    executedAt: string | null;
+    executedByActorId: string | null;
+  } {
+    const approvedIds = new Set(proposal.approvals.map((item) => item.actorId));
+    const missingApprovers = proposal.requiredApproverIds.filter((actorId) => !approvedIds.has(actorId));
+    return {
+      proposalId: proposal.proposalId,
+      actionType: proposal.actionType,
+      targetId: proposal.targetId,
+      reason: proposal.reason,
+      status: proposal.status,
+      createdAt: proposal.createdAt,
+      requestedByActorId: proposal.requestedByActorId,
+      approvedCount: proposal.approvals.length,
+      requiredCount: proposal.requiredApproverIds.length,
+      requiredApproverIds: proposal.requiredApproverIds,
+      approvals: proposal.approvals,
+      missingApprovers,
+      unanimousApproved: missingApprovers.length === 0,
+      executedAt: proposal.executedAt ?? null,
+      executedByActorId: proposal.executedByActorId ?? null,
+    };
+  }
+
+  private async getActiveOperatorCommunityIds(requester: AdminSecurityActor): Promise<string[]> {
+    await this.registerAdminSecurityOperator(requester);
+    const operators = await this.listAdminSecurityOperators();
+    const activeIds = new Set<string>();
+    for (const operator of operators) {
+      if (operator.role !== 'master') continue;
+      const revoked = await this.getAdminSecurityRevokedOperator(operator.actorId);
+      if (revoked) continue;
+      activeIds.add(operator.actorId);
+    }
+    activeIds.add(requester.actorId);
+    return Array.from(activeIds).sort();
+  }
+
+  private adminSecurityFrozenResponse(
+    frozen: AdminSecurityStateRecord['frozen'],
+    message?: string
+  ): Response {
+    const frozenAt = frozen ? new Date(frozen.frozenAt).toISOString() : new Date().toISOString();
+    return Response.json(
+      {
+        code: 'account_frozen',
+        alertColor: 'red',
+        unlockRequired: true,
+        message: message ?? 'この管理者アカウントは現在フリーズ中です。運営者によるロック解除が必要です。',
+        frozenAt,
+        reason: frozen?.reason ?? 'manual_unlock_required',
+        warningId: frozen?.warningId ?? null,
+      },
+      { status: 423 }
+    );
+  }
+
+  private adminSecurityAccessRevokedResponse(
+    revokedAccess: AdminSecurityStateRecord['revokedAccess'],
+    message?: string
+  ): Response {
+    const revokedAt = revokedAccess ? new Date(revokedAccess.revokedAt).toISOString() : new Date().toISOString();
+    return Response.json(
+      {
+        code: 'access_revoked',
+        alertColor: 'red',
+        unlockRequired: true,
+        message: message ?? 'この管理者アカウントの運営者権限は剥奪されています。運営者による復旧が必要です。',
+        revokedAt,
+        reason: revokedAccess?.reason ?? 'manual_restore_required',
+      },
+      { status: 403 }
+    );
+  }
+
+  private async ensureOperatorContext(
+    request: Request
+  ): Promise<{ operator: OperatorIdentity; actor: AdminSecurityActor } | Response> {
+    const operator = await this.authenticateOperator(request);
+    if (!operator) {
+      return this.unauthorizedResponse();
+    }
+    const actor = this.toAdminSecurityActor(operator);
+    if (!operator.adminId) {
+      return Response.json(
+        {
+          code: 'operator_account_required',
+          message: '運営者アカウントIDが必要です。共有アカウントではなく分離アカウントで操作してください。',
+        },
+        { status: 403 }
+      );
+    }
+    if (actor.role === 'master') {
+      await this.registerAdminSecurityOperator(actor);
+      const revoked = await this.getAdminSecurityRevokedOperator(actor.actorId);
+      if (revoked) {
+        return Response.json(
+          {
+            code: 'operator_revoked',
+            message: 'この運営者アカウントは運営者コミュニティによって権限剥奪されています',
+            revokedAt: new Date(revoked.revokedAt).toISOString(),
+            reason: revoked.reason,
+            unlockRequired: true,
+          },
+          { status: 403 }
+        );
+      }
+    }
+    return { operator, actor };
+  }
+
+  private async ensureGovernanceOperatorContext(
+    request: Request
+  ): Promise<{ operator: OperatorIdentity; actor: AdminSecurityActor } | Response> {
+    const context = await this.ensureOperatorContext(request);
+    if (context instanceof Response) return context;
+    if (context.actor.role !== 'master') {
+      return Response.json(
+        {
+          code: 'operator_consensus_required',
+          message: '重たい権限は運営者コミュニティ（master）での全会一致が必要です',
+        },
+        { status: 403 }
+      );
+    }
+    return context;
+  }
+
+  private async enforceAdminSecurityOperation(
+    operation: 'event_create' | 'event_close',
+    actor: AdminSecurityActor,
+    nowMs: number
+  ): Promise<{ state: AdminSecurityStateRecord } | Response> {
+    const state = await this.getAdminSecurityState(actor.actorId);
+
+    if (state.revokedAccess) {
+      await this.appendAdminSecurityLog('audit', 'revoke_blocked_operation', actor, {
+        targetActorId: actor.actorId,
+        now: nowMs,
+        details: {
+          operation,
+          reason: state.revokedAccess.reason,
+          reportId: state.revokedAccess.reportId ?? null,
+        },
+      });
+      return this.adminSecurityAccessRevokedResponse(state.revokedAccess);
+    }
+
+    if (state.frozen) {
+      await this.appendAdminSecurityLog('audit', 'freeze_blocked_operation', actor, {
+        targetActorId: actor.actorId,
+        now: nowMs,
+        details: {
+          operation,
+          reason: state.frozen.reason,
+          warningId: state.frozen.warningId ?? null,
+        },
+      });
+      return this.adminSecurityFrozenResponse(state.frozen);
+    }
+
+    if (state.pendingWarning && nowMs - state.pendingWarning.issuedAt > ADMIN_SECURITY_WARNING_TTL_MS) {
+      state.pendingWarning = undefined;
+      await this.putAdminSecurityState(actor.actorId, state);
+    }
+
+    return { state };
+  }
+
+  private async processAdminSecurityGovernanceAction(params: {
+    actor: AdminSecurityActor;
+    actionType: AdminSecurityGovernanceActionType;
+    targetId: string;
+    reason: string;
+    proposalIdInput?: unknown;
+    requiredApproverIds?: string[];
+    execute: () => Promise<Record<string, unknown>>;
+  }): Promise<{ status: number; body: Record<string, unknown> }> {
+    return this.withAdminSecurityLock(async () => {
+      const proposalIdInput =
+        typeof params.proposalIdInput === 'string' && params.proposalIdInput.trim()
+          ? params.proposalIdInput.trim()
+          : '';
+      const nowIso = new Date().toISOString();
+      const requiredApproverIdsInput = Array.from(
+        new Set((params.requiredApproverIds ?? []).map((item) => item.trim()).filter((item) => item.length > 0))
+      ).sort();
+
+      let proposal: AdminSecurityGovernanceProposalRecord | null = null;
+      if (proposalIdInput) {
+        proposal = await this.getAdminSecurityGovernanceProposal(proposalIdInput);
+        if (!proposal) {
+          return { status: 404, body: { code: 'not_found', message: '指定された合議提案が見つかりません' } };
+        }
+        if (proposal.actionType !== params.actionType || proposal.targetId !== params.targetId) {
+          return { status: 409, body: { code: 'proposal_mismatch', message: '提案と操作内容が一致しません' } };
+        }
+        if (proposal.status === 'executed') {
+          return {
+            status: 200,
+            body: {
+              success: true,
+              alreadyExecuted: true,
+              consensus: this.governanceProposalView(proposal),
+            },
+          };
+        }
+      } else {
+        const proposals = await this.listAdminSecurityGovernanceProposals();
+        const pendingCandidates = proposals.filter((candidate) =>
+          candidate.status === 'pending' &&
+          candidate.actionType === params.actionType &&
+          candidate.targetId === params.targetId
+        );
+        if (pendingCandidates.length > 0) {
+          if (requiredApproverIdsInput.length > 0) {
+            proposal = pendingCandidates.find((candidate) =>
+              candidate.requiredApproverIds.length === requiredApproverIdsInput.length &&
+              candidate.requiredApproverIds.every((actorId, index) => actorId === requiredApproverIdsInput[index])
+            ) ?? null;
+          } else {
+            proposal = pendingCandidates[0];
+          }
+        }
+        if (!proposal) {
+          const requiredApproverIds = requiredApproverIdsInput.length > 0
+            ? requiredApproverIdsInput
+            : await this.getActiveOperatorCommunityIds(params.actor);
+          proposal = {
+            proposalId: `gov-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
+            actionType: params.actionType,
+            targetId: params.targetId,
+            reason: params.reason,
+            createdAt: nowIso,
+            requestedByActorId: params.actor.actorId,
+            requiredApproverIds,
+            approvals: [],
+            status: 'pending',
+          };
+          await this.ctx.storage.put(adminSecurityGovernanceKey(proposal.proposalId), proposal);
+          await this.appendAdminSecurityLog('audit', 'governance_proposal_created', params.actor, {
+            targetActorId: params.targetId,
+            details: {
+              proposalId: proposal.proposalId,
+              actionType: proposal.actionType,
+              requiredApproverIds: proposal.requiredApproverIds,
+              reason: proposal.reason,
+            },
+          });
+        }
+      }
+
+      if (!proposal.requiredApproverIds.includes(params.actor.actorId)) {
+        return {
+          status: 403,
+          body: {
+            code: 'forbidden',
+            message: 'この運営者は当該提案の合議メンバーではありません',
+            proposalId: proposal.proposalId,
+          },
+        };
+      }
+
+      if (!proposal.approvals.some((item) => item.actorId === params.actor.actorId)) {
+        proposal.approvals.push({
+          actorId: params.actor.actorId,
+          approvedAt: nowIso,
+        });
+        proposal.approvals.sort((a, b) => a.approvedAt.localeCompare(b.approvedAt));
+        await this.ctx.storage.put(adminSecurityGovernanceKey(proposal.proposalId), proposal);
+        await this.appendAdminSecurityLog('audit', 'governance_proposal_approved', params.actor, {
+          targetActorId: params.targetId,
+          details: {
+            proposalId: proposal.proposalId,
+            actionType: proposal.actionType,
+            approvedCount: proposal.approvals.length,
+            requiredCount: proposal.requiredApproverIds.length,
+          },
+        });
+      }
+
+      const approvedIds = new Set(proposal.approvals.map((item) => item.actorId));
+      const unanimous = proposal.requiredApproverIds.every((item) => approvedIds.has(item));
+      if (!unanimous) {
+        return {
+          status: 202,
+          body: {
+            success: false,
+            status: 'pending_consensus',
+            consensus: this.governanceProposalView(proposal),
+          },
+        };
+      }
+
+      const result = await params.execute();
+      proposal.status = 'executed';
+      proposal.executedAt = new Date().toISOString();
+      proposal.executedByActorId = params.actor.actorId;
+      await this.ctx.storage.put(adminSecurityGovernanceKey(proposal.proposalId), proposal);
+      await this.appendAdminSecurityLog('audit', 'governance_proposal_executed', params.actor, {
+        targetActorId: params.targetId,
+        details: {
+          proposalId: proposal.proposalId,
+          actionType: proposal.actionType,
+        },
+      });
+
+      return {
+        status: 200,
+        body: {
+          success: true,
+          ...result,
+          consensus: this.governanceProposalView(proposal),
+        },
+      };
+    });
+  }
+
   private getConfiguredMasterPassword(): string | null {
     const password = this.env.ADMIN_PASSWORD?.trim() ?? '';
     if (!password || password === DEFAULT_ADMIN_PASSWORD) return null;
@@ -3242,6 +4428,7 @@ export class SchoolStore implements DurableObject {
     if (normalizedMethod === 'POST' && path === '/v1/school/events') return true;
     if (normalizedMethod === 'POST' && /^\/v1\/school\/events\/[^/]+\/close$/.test(path)) return true;
     if (normalizedMethod === 'GET' && /^\/v1\/school\/events\/[^/]+\/claimants$/.test(path)) return true;
+    if (path.startsWith('/v1/school/admin/security/')) return true;
     return false;
   }
 
@@ -6372,14 +7559,9 @@ export class SchoolStore implements DurableObject {
 
     // POST /v1/school/events — イベント新規作成（admin用）
     if (path === '/v1/school/events' && request.method === 'POST') {
-      const authError = await this.requireAdminAuthorization(request);
-      if (authError) {
-        return authError;
-      }
-      const operator = await this.authenticateOperator(request);
-      if (!operator) {
-        return this.unauthorizedResponse();
-      }
+      const context = await this.ensureOperatorContext(request);
+      if (context instanceof Response) return context;
+      const { operator, actor } = context;
 
       let body: {
         title?: string;
@@ -6444,6 +7626,86 @@ export class SchoolStore implements DurableObject {
       if (maxClaimsPerInterval !== null && (!Number.isInteger(maxClaimsPerInterval) || maxClaimsPerInterval <= 0)) {
         return Response.json({ error: 'maxClaimsPerInterval must be null or a positive integer' }, { status: 400 });
       }
+
+      const now = Date.now();
+      const securityContext = await this.enforceAdminSecurityOperation('event_create', actor, now);
+      if (securityContext instanceof Response) {
+        return securityContext;
+      }
+      const adminState = securityContext.state;
+      await this.appendAdminSecurityLog('execution', 'event_create_attempt', actor, { now });
+
+      const overrideRequested =
+        (request.headers.get('x-admin-security-override') ?? '').trim().toLowerCase() === 'continue';
+      const hasActiveWarning =
+        Boolean(adminState.pendingWarning) &&
+        now - (adminState.pendingWarning?.issuedAt ?? 0) <= ADMIN_SECURITY_WARNING_TTL_MS;
+      if (overrideRequested && hasActiveWarning) {
+        const warningId = adminState.pendingWarning?.id;
+        adminState.pendingWarning = undefined;
+        adminState.frozen = {
+          frozenAt: now,
+          reason: 'proceeded_after_security_warning',
+          warningId,
+          frozenByActorId: actor.actorId,
+        };
+        await this.putAdminSecurityState(actor.actorId, adminState);
+        const freezeLog = await this.appendAdminSecurityLog('audit', 'freeze_enforced', actor, {
+          now,
+          targetActorId: actor.actorId,
+          details: {
+            warningId: warningId ?? null,
+            reason: adminState.frozen.reason,
+            mode: 'manual_unlock_required',
+          },
+        });
+        const report = await this.createAdminSecurityReportObligation({
+          type: 'freeze',
+          targetActorId: actor.actorId,
+          actionByActorId: actor.actorId,
+          reason: adminState.frozen.reason,
+          logEntryId: freezeLog.id,
+          now,
+        });
+        if (adminState.frozen) {
+          adminState.frozen.reportId = report.reportId;
+        }
+        await this.putAdminSecurityState(actor.actorId, adminState);
+        return this.adminSecurityFrozenResponse(
+          adminState.frozen,
+          '不正発行/Bot警告後に継続操作が行われたため、管理者アカウントをリアルタイム凍結しました。解除は運営者の手動操作が必要です。'
+        );
+      }
+
+      const signals = this.collectSuspiciousSignals(request, title, host, adminState, now);
+      if (signals.length > 0) {
+        const warning = this.buildAdminSecurityWarning(actor.actorId, signals, now);
+        adminState.pendingWarning = {
+          id: warning.id,
+          issuedAt: now,
+          signals,
+        };
+        await this.putAdminSecurityState(actor.actorId, adminState);
+        await this.appendAdminSecurityLog('audit', 'security_warning_detected', actor, {
+          now,
+          targetActorId: actor.actorId,
+          details: {
+            warningId: warning.id,
+            signals,
+            freezeOnProceed: true,
+          },
+        });
+        return Response.json(
+          {
+            code: 'security_warning',
+            message: warning.message,
+            warning,
+          },
+          { status: 409 }
+        );
+      }
+      await this.putAdminSecurityState(actor.actorId, adminState);
+
       const solanaMint = this.normalizeStringField(body.solanaMint);
       const solanaAuthority = this.normalizeStringField(body.solanaAuthority);
       const solanaGrantId = this.normalizeStringField(body.solanaGrantId);
@@ -6498,6 +7760,13 @@ export class SchoolStore implements DurableObject {
         },
         event.id
       );
+      await this.appendAdminSecurityLog('execution', 'event_create_success', actor, {
+        targetActorId: actor.actorId,
+        details: {
+          eventId: event.id,
+          title,
+        },
+      });
       return Response.json(event, { status: 201 });
     }
 
@@ -6517,13 +7786,13 @@ export class SchoolStore implements DurableObject {
     // POST /v1/school/events/:eventId/close — イベントを終了状態へ
     const closeEventMatch = path.match(/^\/v1\/school\/events\/([^/]+)\/close$/);
     if (closeEventMatch && request.method === 'POST') {
-      const authError = await this.requireAdminAuthorization(request);
-      if (authError) {
-        return authError;
-      }
-      const operator = await this.authenticateOperator(request);
-      if (!operator) {
-        return this.unauthorizedResponse();
+      const context = await this.ensureOperatorContext(request);
+      if (context instanceof Response) return context;
+      const { operator, actor } = context;
+      const now = Date.now();
+      const securityContext = await this.enforceAdminSecurityOperation('event_close', actor, now);
+      if (securityContext instanceof Response) {
+        return securityContext;
       }
       const eventId = closeEventMatch[1];
       const event = await this.store.getEvent(eventId);
@@ -6555,6 +7824,13 @@ export class SchoolStore implements DurableObject {
         },
         eventId
       );
+      await this.appendAdminSecurityLog('execution', 'event_close_success', actor, {
+        now,
+        details: {
+          eventId,
+          state: 'ended',
+        },
+      });
       return Response.json(updated);
     }
 
@@ -6640,6 +7916,786 @@ export class SchoolStore implements DurableObject {
       const status = this.getRuntimeStatus();
       const operator = await this.authenticateOperator(request);
       return Response.json(operator ? status : this.getPublicRuntimeStatus(status));
+    }
+
+    if (path === '/v1/school/admin/security/freeze-status' && request.method === 'GET') {
+      const context = await this.ensureOperatorContext(request);
+      if (context instanceof Response) return context;
+
+      const [stateRows, revokedOperatorRows, operators, proposals] = await Promise.all([
+        this.listAdminSecurityStates(),
+        this.listAdminSecurityRevokedOperators(),
+        this.listAdminSecurityOperators(),
+        this.listAdminSecurityGovernanceProposals(),
+      ]);
+
+      const frozenItems = stateRows
+        .filter((row) => Boolean(row.state.frozen))
+        .map((row) => ({
+          actorId: row.actorId,
+          frozenAt: row.state.frozen ? new Date(row.state.frozen.frozenAt).toISOString() : null,
+          reason: row.state.frozen?.reason ?? null,
+          warningId: row.state.frozen?.warningId ?? null,
+          frozenByActorId: row.state.frozen?.frozenByActorId ?? null,
+        }))
+        .sort((a, b) => {
+          const ta = a.frozenAt ? new Date(a.frozenAt).getTime() : 0;
+          const tb = b.frozenAt ? new Date(b.frozenAt).getTime() : 0;
+          return tb - ta;
+        });
+
+      const pendingWarnings = stateRows
+        .filter((row) => Boolean(row.state.pendingWarning))
+        .map((row) => ({
+          actorId: row.actorId,
+          warningId: row.state.pendingWarning?.id ?? null,
+          issuedAt: row.state.pendingWarning ? new Date(row.state.pendingWarning.issuedAt).toISOString() : null,
+          signals: row.state.pendingWarning?.signals ?? [],
+        }));
+
+      const revokedItems = stateRows
+        .filter((row) => Boolean(row.state.revokedAccess))
+        .map((row) => ({
+          actorId: row.actorId,
+          revokedAt: row.state.revokedAccess ? new Date(row.state.revokedAccess.revokedAt).toISOString() : null,
+          reason: row.state.revokedAccess?.reason ?? null,
+          revokedByActorId: row.state.revokedAccess?.revokedByActorId ?? null,
+          reportId: row.state.revokedAccess?.reportId ?? null,
+        }))
+        .sort((a, b) => {
+          const ta = a.revokedAt ? new Date(a.revokedAt).getTime() : 0;
+          const tb = b.revokedAt ? new Date(b.revokedAt).getTime() : 0;
+          return tb - ta;
+        });
+
+      const revokedOperatorMap = new Map(revokedOperatorRows.map((row) => [row.actorId, row.state]));
+      const operatorItems = operators
+        .map((operator) => {
+          const revoked = revokedOperatorMap.get(operator.actorId);
+          return {
+            actorId: operator.actorId,
+            role: operator.role,
+            name: operator.name ?? null,
+            revokedAt: revoked ? new Date(revoked.revokedAt).toISOString() : null,
+            revokedReason: revoked?.reason ?? null,
+            revokedReportId: revoked?.reportId ?? null,
+          };
+        })
+        .sort((a, b) => a.actorId.localeCompare(b.actorId));
+
+      const governancePendingCount = proposals.filter((proposal) => proposal.status === 'pending').length;
+
+      return Response.json({
+        checkedAt: new Date().toISOString(),
+        viewer: context.actor,
+        frozenCount: frozenItems.length,
+        revokedCount: revokedItems.length,
+        warningCount: pendingWarnings.length,
+        operatorCommunityCount: operatorItems.length,
+        operatorRevokedCount: operatorItems.filter((item) => Boolean(item.revokedAt)).length,
+        governancePendingCount,
+        items: frozenItems,
+        revokedItems,
+        pendingWarnings,
+        operatorItems,
+      });
+    }
+
+    if (path === '/v1/school/admin/security/report-obligations' && request.method === 'GET') {
+      const context = await this.ensureOperatorContext(request);
+      if (context instanceof Response) return context;
+
+      const url = new URL(request.url);
+      const limit = this.parseAdminSecurityReportLimit(url.searchParams.get('limit'));
+      const statusRaw = (url.searchParams.get('status') ?? '').trim().toLowerCase();
+      const statusFilter: AdminSecurityReportObligationStatus | null =
+        statusRaw === 'required' || statusRaw === 'resolved' ? statusRaw : null;
+
+      const allItems = await this.listAdminSecurityReportObligations();
+      const filtered = statusFilter
+        ? allItems.filter((item) => item.status === statusFilter)
+        : allItems;
+      const items = filtered.slice(0, limit);
+      const requiredCount = allItems.filter((item) => item.status === 'required').length;
+      const resolvedCount = allItems.filter((item) => item.status === 'resolved').length;
+
+      return Response.json({
+        checkedAt: new Date().toISOString(),
+        viewer: context.actor,
+        limit,
+        total: allItems.length,
+        requiredCount,
+        resolvedCount,
+        items,
+      });
+    }
+
+    if (path === '/v1/school/admin/security/logs' && request.method === 'GET') {
+      const context = await this.ensureOperatorContext(request);
+      if (context instanceof Response) return context;
+
+      const url = new URL(request.url);
+      const limit = this.parseAdminSecurityLogLimit(url.searchParams.get('limit'));
+      const categoryRaw = (url.searchParams.get('category') ?? '').trim().toLowerCase();
+      const categoryFilter: AdminSecurityLogCategory | null =
+        categoryRaw === 'audit' || categoryRaw === 'execution'
+          ? categoryRaw
+          : null;
+      const logs = await this.listAdminSecurityLogs();
+      const filtered = categoryFilter
+        ? logs.filter((entry) => entry.category === categoryFilter)
+        : logs;
+      const items = filtered.slice(0, limit);
+      const chainLastHash = (await this.ctx.storage.get<string>(ADMIN_SECURITY_LOG_LAST_HASH_KEY))
+        ?? '0'.repeat(64);
+
+      return Response.json({
+        checkedAt: new Date().toISOString(),
+        viewer: context.actor,
+        roleView: 'operator',
+        limit,
+        total: filtered.length,
+        chainLastHash,
+        items,
+      });
+    }
+
+    if (path === '/v1/school/admin/security/governance/proposals' && request.method === 'GET') {
+      const context = await this.ensureOperatorContext(request);
+      if (context instanceof Response) return context;
+
+      const url = new URL(request.url);
+      const limit = this.parseAdminSecurityLogLimit(url.searchParams.get('limit'));
+      const proposals = await this.listAdminSecurityGovernanceProposals();
+      const items = proposals.slice(0, limit).map((proposal) => this.governanceProposalView(proposal));
+
+      return Response.json({
+        checkedAt: new Date().toISOString(),
+        viewer: context.actor,
+        total: proposals.length,
+        limit,
+        items,
+      });
+    }
+
+    if (path === '/v1/school/admin/security/users' && request.method === 'GET') {
+      const context = await this.ensureOperatorContext(request);
+      if (context instanceof Response) return context;
+
+      const url = new URL(request.url);
+      const userIdFilter = this.normalizeUserId(url.searchParams.get('userId'));
+      const rows = await this.listAdminSecurityUserModeration();
+      const items = rows
+        .filter((row) => !userIdFilter || row.userId === userIdFilter)
+        .map((row) => ({
+          userId: row.userId,
+          frozenAt: row.state.frozen ? new Date(row.state.frozen.frozenAt).toISOString() : null,
+          frozenReason: row.state.frozen?.reason ?? null,
+          frozenByActorId: row.state.frozen?.byActorId ?? null,
+          frozenReportId: row.state.frozen?.reportId ?? null,
+          deletedAt: row.state.deleted ? new Date(row.state.deleted.deletedAt).toISOString() : null,
+          deletedReason: row.state.deleted?.reason ?? null,
+          deletedByActorId: row.state.deleted?.byActorId ?? null,
+          deletedReportId: row.state.deleted?.reportId ?? null,
+        }));
+
+      return Response.json({
+        checkedAt: new Date().toISOString(),
+        viewer: context.actor,
+        total: items.length,
+        items,
+      });
+    }
+
+    if (path === '/v1/school/admin/security/unlock' && request.method === 'POST') {
+      const context = await this.ensureGovernanceOperatorContext(request);
+      if (context instanceof Response) return context;
+
+      let body: { targetActorId?: unknown; proposalId?: unknown };
+      try {
+        body = (await request.json()) as { targetActorId?: unknown; proposalId?: unknown };
+      } catch {
+        body = {};
+      }
+      const targetActorId = this.normalizeStringField(body.targetActorId) ?? '';
+      if (!targetActorId) {
+        return Response.json({ code: 'invalid', message: 'targetActorId is required' }, { status: 400 });
+      }
+      const targetState = await this.getAdminSecurityState(targetActorId);
+      if (!targetState.frozen) {
+        return Response.json({ code: 'not_found', message: '指定された凍結アカウントが見つかりません' }, { status: 404 });
+      }
+
+      const reason = this.parseGovernanceReason(targetState.frozen.reason, 'manual_unlock_required');
+      const result = await this.processAdminSecurityGovernanceAction({
+        actor: context.actor,
+        actionType: 'unlock_admin',
+        targetId: targetActorId,
+        reason,
+        proposalIdInput: body.proposalId,
+        execute: async () => {
+          const previous = { ...targetState.frozen! };
+          targetState.frozen = undefined;
+          targetState.pendingWarning = undefined;
+          targetState.issueAttemptTimestamps = [];
+          await this.putAdminSecurityState(targetActorId, targetState);
+          const resolvedReport = previous.reportId
+            ? await this.resolveAdminSecurityReportObligation(previous.reportId, context.actor.actorId)
+            : null;
+          await this.appendAdminSecurityLog('audit', 'unlock_executed', context.actor, {
+            targetActorId,
+            details: {
+              reason: previous.reason,
+              warningId: previous.warningId ?? null,
+              reportId: previous.reportId ?? null,
+              reportStatus: resolvedReport?.status ?? null,
+            },
+          });
+          return {
+            targetActorId,
+            unlockedAt: new Date().toISOString(),
+            unlockedBy: context.actor,
+            previousFreeze: {
+              frozenAt: new Date(previous.frozenAt).toISOString(),
+              reason: previous.reason,
+              warningId: previous.warningId ?? null,
+              reportId: previous.reportId ?? null,
+            },
+            resolvedReport: resolvedReport ?? null,
+          };
+        },
+      });
+      return Response.json(result.body, { status: result.status });
+    }
+
+    if (path === '/v1/school/admin/security/revoke-access' && request.method === 'POST') {
+      const context = await this.ensureGovernanceOperatorContext(request);
+      if (context instanceof Response) return context;
+
+      let body: { targetActorId?: unknown; reason?: unknown; proposalId?: unknown };
+      try {
+        body = (await request.json()) as { targetActorId?: unknown; reason?: unknown; proposalId?: unknown };
+      } catch {
+        body = {};
+      }
+      const targetActorId = this.normalizeStringField(body.targetActorId) ?? '';
+      if (!targetActorId) {
+        return Response.json({ code: 'invalid', message: 'targetActorId is required' }, { status: 400 });
+      }
+      const targetState = await this.getAdminSecurityState(targetActorId);
+      if (targetState.revokedAccess) {
+        return Response.json({
+          success: true,
+          targetActorId,
+          alreadyRevoked: true,
+          revokedAt: new Date(targetState.revokedAccess.revokedAt).toISOString(),
+          reason: targetState.revokedAccess.reason,
+          reportId: targetState.revokedAccess.reportId ?? null,
+        });
+      }
+      const reason = this.parseGovernanceReason(body.reason, 'operator_revoked_access');
+      const result = await this.processAdminSecurityGovernanceAction({
+        actor: context.actor,
+        actionType: 'revoke_admin_access',
+        targetId: targetActorId,
+        reason,
+        proposalIdInput: body.proposalId,
+        execute: async () => {
+          const now = Date.now();
+          if (targetState.frozen?.reportId) {
+            await this.resolveAdminSecurityReportObligation(targetState.frozen.reportId, context.actor.actorId, now);
+          }
+          targetState.frozen = undefined;
+          targetState.pendingWarning = undefined;
+          targetState.issueAttemptTimestamps = [];
+          targetState.revokedAccess = {
+            revokedAt: now,
+            reason,
+            revokedByActorId: context.actor.actorId,
+          };
+          await this.putAdminSecurityState(targetActorId, targetState);
+          const revokeLog = await this.appendAdminSecurityLog('audit', 'access_revoked', context.actor, {
+            now,
+            targetActorId,
+            details: { reason },
+          });
+          const report = await this.createAdminSecurityReportObligation({
+            type: 'revoke_access',
+            targetActorId,
+            actionByActorId: context.actor.actorId,
+            reason,
+            logEntryId: revokeLog.id,
+            now,
+          });
+          targetState.revokedAccess.reportId = report.reportId;
+          await this.putAdminSecurityState(targetActorId, targetState);
+          return {
+            targetActorId,
+            revokedAt: new Date(now).toISOString(),
+            reason,
+            reportId: report.reportId,
+            revokedBy: context.actor,
+          };
+        },
+      });
+      return Response.json(result.body, { status: result.status });
+    }
+
+    if (path === '/v1/school/admin/security/restore-access' && request.method === 'POST') {
+      const context = await this.ensureGovernanceOperatorContext(request);
+      if (context instanceof Response) return context;
+
+      let body: { targetActorId?: unknown; proposalId?: unknown };
+      try {
+        body = (await request.json()) as { targetActorId?: unknown; proposalId?: unknown };
+      } catch {
+        body = {};
+      }
+      const targetActorId = this.normalizeStringField(body.targetActorId) ?? '';
+      if (!targetActorId) {
+        return Response.json({ code: 'invalid', message: 'targetActorId is required' }, { status: 400 });
+      }
+      const targetState = await this.getAdminSecurityState(targetActorId);
+      if (!targetState.revokedAccess) {
+        return Response.json({ code: 'not_found', message: '指定された剥奪アカウントが見つかりません' }, { status: 404 });
+      }
+
+      const reason = this.parseGovernanceReason(targetState.revokedAccess.reason, 'operator_restore_access');
+      const result = await this.processAdminSecurityGovernanceAction({
+        actor: context.actor,
+        actionType: 'restore_admin_access',
+        targetId: targetActorId,
+        reason,
+        proposalIdInput: body.proposalId,
+        execute: async () => {
+          const previous = { ...targetState.revokedAccess! };
+          targetState.revokedAccess = undefined;
+          targetState.pendingWarning = undefined;
+          targetState.issueAttemptTimestamps = [];
+          await this.putAdminSecurityState(targetActorId, targetState);
+          const resolvedReport = previous.reportId
+            ? await this.resolveAdminSecurityReportObligation(previous.reportId, context.actor.actorId)
+            : null;
+          await this.appendAdminSecurityLog('audit', 'access_restored', context.actor, {
+            targetActorId,
+            details: {
+              reason: previous.reason,
+              reportId: previous.reportId ?? null,
+            },
+          });
+          return {
+            targetActorId,
+            restoredAt: new Date().toISOString(),
+            restoredBy: context.actor,
+            previousRevocation: {
+              revokedAt: new Date(previous.revokedAt).toISOString(),
+              reason: previous.reason,
+              reportId: previous.reportId ?? null,
+            },
+            resolvedReport: resolvedReport ?? null,
+          };
+        },
+      });
+      return Response.json(result.body, { status: result.status });
+    }
+
+    if (path === '/v1/school/admin/security/operator/revoke' && request.method === 'POST') {
+      const context = await this.ensureGovernanceOperatorContext(request);
+      if (context instanceof Response) return context;
+
+      let body: { targetOperatorActorId?: unknown; reason?: unknown; proposalId?: unknown };
+      try {
+        body = (await request.json()) as { targetOperatorActorId?: unknown; reason?: unknown; proposalId?: unknown };
+      } catch {
+        body = {};
+      }
+      const targetOperatorActorId = this.normalizeStringField(body.targetOperatorActorId) ?? '';
+      if (!targetOperatorActorId) {
+        return Response.json({ code: 'invalid', message: 'targetOperatorActorId is required' }, { status: 400 });
+      }
+      if (targetOperatorActorId === context.actor.actorId) {
+        return Response.json({ code: 'invalid', message: 'self revocation is not allowed' }, { status: 400 });
+      }
+      const already = await this.getAdminSecurityRevokedOperator(targetOperatorActorId);
+      if (already) {
+        return Response.json({
+          success: true,
+          alreadyRevoked: true,
+          targetOperatorActorId,
+          revokedAt: new Date(already.revokedAt).toISOString(),
+          reason: already.reason,
+          reportId: already.reportId ?? null,
+        });
+      }
+      const requiredApproverIds = (await this.getActiveOperatorCommunityIds(context.actor))
+        .filter((actorId) => actorId !== targetOperatorActorId);
+      if (requiredApproverIds.length === 0) {
+        return Response.json({ code: 'invalid', message: 'last active operator cannot be revoked' }, { status: 409 });
+      }
+      const reason = this.parseGovernanceReason(body.reason, 'operator_community_revoked');
+      const result = await this.processAdminSecurityGovernanceAction({
+        actor: context.actor,
+        actionType: 'revoke_operator',
+        targetId: targetOperatorActorId,
+        reason,
+        proposalIdInput: body.proposalId,
+        requiredApproverIds,
+        execute: async () => {
+          const now = Date.now();
+          const revokedState: AdminSecurityRevokedOperatorRecord = {
+            revokedAt: now,
+            reason,
+            revokedByActorId: context.actor.actorId,
+          };
+          await this.ctx.storage.put(adminSecurityRevokedOperatorKey(targetOperatorActorId), revokedState);
+          const revokeLog = await this.appendAdminSecurityLog('audit', 'operator_access_revoked', context.actor, {
+            now,
+            targetActorId: targetOperatorActorId,
+            details: { reason },
+          });
+          const report = await this.createAdminSecurityReportObligation({
+            type: 'operator_revoke',
+            targetActorId: targetOperatorActorId,
+            actionByActorId: context.actor.actorId,
+            reason,
+            logEntryId: revokeLog.id,
+            now,
+          });
+          revokedState.reportId = report.reportId;
+          await this.ctx.storage.put(adminSecurityRevokedOperatorKey(targetOperatorActorId), revokedState);
+          return {
+            targetOperatorActorId,
+            revokedAt: new Date(now).toISOString(),
+            reason,
+            reportId: report.reportId,
+            revokedBy: context.actor,
+          };
+        },
+      });
+      return Response.json(result.body, { status: result.status });
+    }
+
+    if (path === '/v1/school/admin/security/operator/restore' && request.method === 'POST') {
+      const context = await this.ensureGovernanceOperatorContext(request);
+      if (context instanceof Response) return context;
+
+      let body: { targetOperatorActorId?: unknown; proposalId?: unknown };
+      try {
+        body = (await request.json()) as { targetOperatorActorId?: unknown; proposalId?: unknown };
+      } catch {
+        body = {};
+      }
+      const targetOperatorActorId = this.normalizeStringField(body.targetOperatorActorId) ?? '';
+      if (!targetOperatorActorId) {
+        return Response.json({ code: 'invalid', message: 'targetOperatorActorId is required' }, { status: 400 });
+      }
+      const revoked = await this.getAdminSecurityRevokedOperator(targetOperatorActorId);
+      if (!revoked) {
+        return Response.json({ code: 'not_found', message: '指定された剥奪運営者が見つかりません' }, { status: 404 });
+      }
+      const result = await this.processAdminSecurityGovernanceAction({
+        actor: context.actor,
+        actionType: 'restore_operator',
+        targetId: targetOperatorActorId,
+        reason: this.parseGovernanceReason(revoked.reason, 'operator_community_restore'),
+        proposalIdInput: body.proposalId,
+        execute: async () => {
+          const previous = { ...revoked };
+          await this.ctx.storage.delete(adminSecurityRevokedOperatorKey(targetOperatorActorId));
+          const resolvedReport = previous.reportId
+            ? await this.resolveAdminSecurityReportObligation(previous.reportId, context.actor.actorId)
+            : null;
+          await this.appendAdminSecurityLog('audit', 'operator_access_restored', context.actor, {
+            targetActorId: targetOperatorActorId,
+            details: {
+              reason: previous.reason,
+              reportId: previous.reportId ?? null,
+            },
+          });
+          return {
+            targetOperatorActorId,
+            restoredAt: new Date().toISOString(),
+            restoredBy: context.actor,
+            previousRevocation: {
+              revokedAt: new Date(previous.revokedAt).toISOString(),
+              reason: previous.reason,
+              reportId: previous.reportId ?? null,
+            },
+            resolvedReport: resolvedReport ?? null,
+          };
+        },
+      });
+      return Response.json(result.body, { status: result.status });
+    }
+
+    if (path === '/v1/school/admin/security/users/freeze' && request.method === 'POST') {
+      const context = await this.ensureGovernanceOperatorContext(request);
+      if (context instanceof Response) return context;
+
+      let body: { userId?: unknown; reason?: unknown; proposalId?: unknown };
+      try {
+        body = (await request.json()) as { userId?: unknown; reason?: unknown; proposalId?: unknown };
+      } catch {
+        body = {};
+      }
+      const userId = this.normalizeUserId(body.userId);
+      if (!userId) {
+        return Response.json({ code: 'invalid', message: 'userId is required' }, { status: 400 });
+      }
+      const current = await this.getAdminSecurityUserModeration(userId);
+      if (current.deleted) {
+        return Response.json({ code: 'invalid', message: 'deleted user cannot be frozen' }, { status: 409 });
+      }
+      if (current.frozen) {
+        return Response.json({
+          success: true,
+          alreadyFrozen: true,
+          userId,
+          frozenAt: new Date(current.frozen.frozenAt).toISOString(),
+          reason: current.frozen.reason,
+          reportId: current.frozen.reportId ?? null,
+        });
+      }
+      const reason = this.parseGovernanceReason(body.reason, 'operator_community_frozen_user');
+      const targetId = `user:${userId}`;
+      const result = await this.processAdminSecurityGovernanceAction({
+        actor: context.actor,
+        actionType: 'freeze_user',
+        targetId,
+        reason,
+        proposalIdInput: body.proposalId,
+        execute: async () => {
+          const now = Date.now();
+          const state = await this.getAdminSecurityUserModeration(userId);
+          state.frozen = {
+            frozenAt: now,
+            reason,
+            byActorId: context.actor.actorId,
+          };
+          await this.putAdminSecurityUserModeration(userId, state);
+          const freezeLog = await this.appendAdminSecurityLog('audit', 'user_frozen', context.actor, {
+            targetActorId: targetId,
+            now,
+            details: { reason, userId },
+          });
+          const report = await this.createAdminSecurityReportObligation({
+            type: 'user_freeze',
+            targetActorId: targetId,
+            actionByActorId: context.actor.actorId,
+            reason,
+            logEntryId: freezeLog.id,
+            now,
+          });
+          state.frozen.reportId = report.reportId;
+          await this.putAdminSecurityUserModeration(userId, state);
+          return {
+            userId,
+            frozenAt: new Date(now).toISOString(),
+            reason,
+            reportId: report.reportId,
+            frozenBy: context.actor,
+          };
+        },
+      });
+      return Response.json(result.body, { status: result.status });
+    }
+
+    if (path === '/v1/school/admin/security/users/unfreeze' && request.method === 'POST') {
+      const context = await this.ensureGovernanceOperatorContext(request);
+      if (context instanceof Response) return context;
+
+      let body: { userId?: unknown; proposalId?: unknown };
+      try {
+        body = (await request.json()) as { userId?: unknown; proposalId?: unknown };
+      } catch {
+        body = {};
+      }
+      const userId = this.normalizeUserId(body.userId);
+      if (!userId) {
+        return Response.json({ code: 'invalid', message: 'userId is required' }, { status: 400 });
+      }
+      const current = await this.getAdminSecurityUserModeration(userId);
+      if (!current.frozen) {
+        return Response.json({ code: 'not_found', message: '指定された凍結ユーザーが見つかりません' }, { status: 404 });
+      }
+      const targetId = `user:${userId}`;
+      const result = await this.processAdminSecurityGovernanceAction({
+        actor: context.actor,
+        actionType: 'unfreeze_user',
+        targetId,
+        reason: this.parseGovernanceReason(current.frozen.reason, 'operator_community_unfreeze_user'),
+        proposalIdInput: body.proposalId,
+        execute: async () => {
+          const state = await this.getAdminSecurityUserModeration(userId);
+          const previous = state.frozen ? { ...state.frozen } : null;
+          if (!previous) {
+            return { userId, skipped: true };
+          }
+          state.frozen = undefined;
+          await this.putAdminSecurityUserModeration(userId, state);
+          const resolvedReport = previous.reportId
+            ? await this.resolveAdminSecurityReportObligation(previous.reportId, context.actor.actorId)
+            : null;
+          await this.appendAdminSecurityLog('audit', 'user_unfrozen', context.actor, {
+            targetActorId: targetId,
+            details: {
+              reason: previous.reason,
+              reportId: previous.reportId ?? null,
+              userId,
+            },
+          });
+          return {
+            userId,
+            unfrozenAt: new Date().toISOString(),
+            unfrozenBy: context.actor,
+            previousFreeze: {
+              frozenAt: new Date(previous.frozenAt).toISOString(),
+              reason: previous.reason,
+              reportId: previous.reportId ?? null,
+            },
+            resolvedReport: resolvedReport ?? null,
+          };
+        },
+      });
+      return Response.json(result.body, { status: result.status });
+    }
+
+    if (path === '/v1/school/admin/security/users/delete' && request.method === 'POST') {
+      const context = await this.ensureGovernanceOperatorContext(request);
+      if (context instanceof Response) return context;
+
+      let body: { userId?: unknown; reason?: unknown; proposalId?: unknown };
+      try {
+        body = (await request.json()) as { userId?: unknown; reason?: unknown; proposalId?: unknown };
+      } catch {
+        body = {};
+      }
+      const userId = this.normalizeUserId(body.userId);
+      if (!userId) {
+        return Response.json({ code: 'invalid', message: 'userId is required' }, { status: 400 });
+      }
+      const current = await this.getAdminSecurityUserModeration(userId);
+      if (current.deleted) {
+        return Response.json({
+          success: true,
+          alreadyDeleted: true,
+          userId,
+          deletedAt: new Date(current.deleted.deletedAt).toISOString(),
+          reason: current.deleted.reason,
+          reportId: current.deleted.reportId ?? null,
+        });
+      }
+      const reason = this.parseGovernanceReason(body.reason, 'operator_community_deleted_user');
+      const targetId = `user:${userId}`;
+      const result = await this.processAdminSecurityGovernanceAction({
+        actor: context.actor,
+        actionType: 'delete_user',
+        targetId,
+        reason,
+        proposalIdInput: body.proposalId,
+        execute: async () => {
+          const now = Date.now();
+          const state = await this.getAdminSecurityUserModeration(userId);
+          state.deleted = {
+            deletedAt: now,
+            reason,
+            byActorId: context.actor.actorId,
+          };
+          state.frozen = {
+            frozenAt: now,
+            reason: `deleted:${reason}`,
+            byActorId: context.actor.actorId,
+          };
+          await this.putAdminSecurityUserModeration(userId, state);
+          const deleteLog = await this.appendAdminSecurityLog('audit', 'user_deleted', context.actor, {
+            targetActorId: targetId,
+            now,
+            details: { reason, userId },
+          });
+          const report = await this.createAdminSecurityReportObligation({
+            type: 'user_delete',
+            targetActorId: targetId,
+            actionByActorId: context.actor.actorId,
+            reason,
+            logEntryId: deleteLog.id,
+            now,
+          });
+          state.deleted.reportId = report.reportId;
+          state.frozen.reportId = report.reportId;
+          await this.putAdminSecurityUserModeration(userId, state);
+          return {
+            userId,
+            deletedAt: new Date(now).toISOString(),
+            reason,
+            reportId: report.reportId,
+            deletedBy: context.actor,
+          };
+        },
+      });
+      return Response.json(result.body, { status: result.status });
+    }
+
+    if (path === '/v1/school/admin/security/users/restore' && request.method === 'POST') {
+      const context = await this.ensureGovernanceOperatorContext(request);
+      if (context instanceof Response) return context;
+
+      let body: { userId?: unknown; proposalId?: unknown };
+      try {
+        body = (await request.json()) as { userId?: unknown; proposalId?: unknown };
+      } catch {
+        body = {};
+      }
+      const userId = this.normalizeUserId(body.userId);
+      if (!userId) {
+        return Response.json({ code: 'invalid', message: 'userId is required' }, { status: 400 });
+      }
+      const current = await this.getAdminSecurityUserModeration(userId);
+      if (!current.deleted) {
+        return Response.json({ code: 'not_found', message: '指定された削除ユーザーが見つかりません' }, { status: 404 });
+      }
+      const targetId = `user:${userId}`;
+      const result = await this.processAdminSecurityGovernanceAction({
+        actor: context.actor,
+        actionType: 'restore_user',
+        targetId,
+        reason: this.parseGovernanceReason(current.deleted.reason, 'operator_community_restore_user'),
+        proposalIdInput: body.proposalId,
+        execute: async () => {
+          const state = await this.getAdminSecurityUserModeration(userId);
+          const previousDeleted = state.deleted ? { ...state.deleted } : null;
+          const previousFrozen = state.frozen ? { ...state.frozen } : null;
+          if (!previousDeleted) {
+            return { userId, skipped: true };
+          }
+          state.deleted = undefined;
+          state.frozen = undefined;
+          await this.putAdminSecurityUserModeration(userId, state);
+          const resolvedReport = previousDeleted.reportId
+            ? await this.resolveAdminSecurityReportObligation(previousDeleted.reportId, context.actor.actorId)
+            : null;
+          await this.appendAdminSecurityLog('audit', 'user_restored', context.actor, {
+            targetActorId: targetId,
+            details: {
+              reason: previousDeleted.reason,
+              reportId: previousDeleted.reportId ?? null,
+              userId,
+            },
+          });
+          return {
+            userId,
+            restoredAt: new Date().toISOString(),
+            restoredBy: context.actor,
+            previousDeletion: {
+              deletedAt: new Date(previousDeleted.deletedAt).toISOString(),
+              reason: previousDeleted.reason,
+              reportId: previousDeleted.reportId ?? null,
+              frozenAt: previousFrozen ? new Date(previousFrozen.frozenAt).toISOString() : null,
+            },
+            resolvedReport: resolvedReport ?? null,
+          };
+        },
+      });
+      return Response.json(result.body, { status: result.status });
     }
 
     if (path === '/api/cost-of-forgery/remediation/request' && request.method === 'POST') {
@@ -7210,6 +9266,8 @@ export class SchoolStore implements DurableObject {
       if (!userId || !pin) {
         return Response.json({ error: 'missing params' }, { status: 400 });
       }
+      const moderatedResponse = await this.ensureUserNotModerated(userId);
+      if (moderatedResponse) return moderatedResponse;
       const userRaw = await this.ctx.storage.get(userKey(userId));
       if (!userRaw || typeof userRaw !== 'object' || !('pinHash' in userRaw)) {
         return Response.json({ message: 'User not found', code: 'user_not_found' }, { status: 401 });
@@ -7234,6 +9292,8 @@ export class SchoolStore implements DurableObject {
       if (!userId || !pin) {
         return Response.json({ error: 'missing params' }, { status: 400 });
       }
+      const moderatedResponse = await this.ensureUserNotModerated(userId);
+      if (moderatedResponse) return moderatedResponse;
 
       const userRaw = await this.ctx.storage.get(userKey(userId));
       if (!userRaw || typeof userRaw !== 'object' || !('pinHash' in userRaw)) {
@@ -7266,6 +9326,8 @@ export class SchoolStore implements DurableObject {
       if (userIdError) {
         return Response.json({ error: userIdError, code: 'invalid_user_id' }, { status: 400 });
       }
+      const moderatedResponse = await this.ensureUserNotModerated(userId);
+      if (moderatedResponse) return moderatedResponse;
       if (!displayName || displayName.length < 1) {
         return Response.json({ error: 'displayName required (nickname 1-32)' }, { status: 400 });
       }
@@ -7325,6 +9387,8 @@ export class SchoolStore implements DurableObject {
       if (!userId || !pin) {
         return Response.json({ error: 'missing params' }, { status: 400 });
       }
+      const moderatedResponse = await this.ensureUserNotModerated(userId);
+      if (moderatedResponse) return moderatedResponse;
       const userRaw = await this.ctx.storage.get(userKey(userId));
       if (!userRaw || typeof userRaw !== 'object' || !('pinHash' in userRaw)) {
         return Response.json({ message: 'User not found', code: 'user_not_found' }, { status: 401 });
