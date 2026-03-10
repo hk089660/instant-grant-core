@@ -2,6 +2,7 @@ import { PublicKey } from '@solana/web3.js';
 import { GRANT_PROGRAM_ID } from './config';
 import { getPopConfigPda } from './grantProgram';
 import { getConnection } from './singleton';
+import { resolveApiBaseUrl as resolveSharedApiBaseUrl } from '../api/resolveApiBaseUrl';
 
 export type PopConfigReadinessReason =
   | 'ready'
@@ -25,20 +26,12 @@ interface FetchPopConfigReadinessOptions {
   expectedSignerPubkey?: string | null;
 }
 
-function resolveApiBaseUrl(): string {
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin;
-  }
-  const envBase = (
-    process.env.EXPO_PUBLIC_SCHOOL_API_BASE_URL ??
-    process.env.EXPO_PUBLIC_API_BASE_URL ??
-    ''
-  ).trim().replace(/\/$/, '');
-  return envBase;
+function resolveRuntimeApiBaseUrl(): string {
+  return resolveSharedApiBaseUrl({ required: false });
 }
 
 export async function fetchExpectedPopSignerPubkeyFromRuntime(): Promise<string | null> {
-  const base = resolveApiBaseUrl();
+  const base = resolveRuntimeApiBaseUrl();
   if (!base) return null;
   try {
     const res = await fetch(`${base}/v1/school/pop-status`, { method: 'GET' });

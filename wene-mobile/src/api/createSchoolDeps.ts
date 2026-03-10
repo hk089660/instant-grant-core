@@ -6,6 +6,7 @@
 import type { SchoolClaimClient, SchoolEventProvider } from './schoolClaimClient';
 import { createHttpSchoolEventProvider } from './http/HttpSchoolEventProvider';
 import { createHttpSchoolClaimClient } from './http/HttpSchoolClaimClient';
+import { resolveApiBaseUrl } from './resolveApiBaseUrl';
 
 export interface SchoolDeps {
   eventProvider: SchoolEventProvider;
@@ -23,18 +24,7 @@ function resolveApiMode(): 'http' {
 }
 
 function resolveBaseUrl(): string {
-  // Web: Pages Functions で /v1/* を Worker に中継するため同一オリジンを最優先
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin;
-  }
-  // Native: 環境変数で指定された Workers URL へ直接アクセス
-  const envBase = (
-    process.env.EXPO_PUBLIC_SCHOOL_API_BASE_URL ??
-    process.env.EXPO_PUBLIC_API_BASE_URL ??
-    ''
-  ).trim().replace(/\/$/, '');
-  if (envBase) return envBase;
-  throw new Error('API base URL is required (set EXPO_PUBLIC_SCHOOL_API_BASE_URL or EXPO_PUBLIC_API_BASE_URL)');
+  return resolveApiBaseUrl();
 }
 
 export function createSchoolDeps(): SchoolDeps {

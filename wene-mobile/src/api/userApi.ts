@@ -5,20 +5,10 @@
 
 import { httpPost } from './http/httpClient';
 import type { ParticipationTicketReceipt } from '../types/school';
+import { resolveApiBaseUrl } from './resolveApiBaseUrl';
 
 export function getBaseUrl(): string {
-  // Web: Pages Functions で /api/* を Worker に中継するため、同一オリジンを使う（CORS回避）
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin;
-  }
-  // Native: 環境変数で指定された Workers URL へ直接アクセス
-  const base = (
-    process.env.EXPO_PUBLIC_SCHOOL_API_BASE_URL ??
-    process.env.EXPO_PUBLIC_API_BASE_URL ??
-    ''
-  ).trim().replace(/\/$/, '');
-  if (base) return base;
-  throw new Error('API base URL is required (set EXPO_PUBLIC_SCHOOL_API_BASE_URL or EXPO_PUBLIC_API_BASE_URL)');
+  return resolveApiBaseUrl();
 }
 
 export interface RegisterResponse {

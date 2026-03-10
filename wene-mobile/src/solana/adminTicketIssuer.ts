@@ -29,6 +29,7 @@ import { signTransaction } from '../utils/phantom';
 import { createSimulationFailedError, sendSignedTx, isSimulationFailedError } from './sendTx';
 import { setPhantomWebReturnPath } from '../utils/phantomWebReturnPath';
 import type { PhantomExtensionProvider } from '../wallet/phantomExtension';
+import { resolveApiBaseUrl } from '../api/resolveApiBaseUrl';
 
 const MAX_U64 = (BigInt(1) << BigInt(64)) - BigInt(1);
 const MIN_PREFUND_MULTIPLIER = 100;
@@ -124,39 +125,9 @@ function clipUtf8(input: string, maxBytes: number): string {
 }
 
 function resolveMetadataBaseUrl(): string {
-  const envBase = (
-    process.env.EXPO_PUBLIC_API_BASE_URL ??
-    process.env.EXPO_PUBLIC_SCHOOL_API_BASE_URL ??
-    ''
-  ).trim().replace(/\/$/, '');
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    if (envBase && !isLocalBaseUrl(envBase)) {
-      return envBase;
-    }
-    return window.location.origin.replace(/\/$/, '');
-  }
-  if (envBase) return envBase;
+  const base = resolveApiBaseUrl({ required: false });
+  if (base) return base;
   return 'https://instant-grant-core.haruki-kira3.workers.dev';
-}
-
-function isLocalBaseUrl(raw: string): boolean {
-  try {
-    const url = new URL(raw);
-    return (
-      url.hostname === 'localhost' ||
-      url.hostname === '127.0.0.1' ||
-      url.hostname === '0.0.0.0' ||
-      url.hostname === '::1'
-    );
-  } catch {
-    const normalized = raw.toLowerCase();
-    return (
-      normalized.startsWith('http://localhost') ||
-      normalized.startsWith('https://localhost') ||
-      normalized.startsWith('http://127.0.0.1') ||
-      normalized.startsWith('https://127.0.0.1')
-    );
-  }
 }
 
 function normalizePubkeyString(value: unknown): string | null {

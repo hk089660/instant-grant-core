@@ -27,6 +27,7 @@ import {
 import { DEFAULT_CLUSTER } from './cluster';
 import { DEVNET_GRANT_CONFIG } from './devnetConfig';
 import { RPC_URL } from './singleton';
+import { resolveApiBaseUrl } from '../api/resolveApiBaseUrl';
 
 const CLAIM_GRANT_DISCRIMINATOR = Buffer.from([125, 134, 233, 135, 82, 18, 177, 8]);
 const SUPPORTED_POP_PROOF_MESSAGE_VERSIONS = new Set<number>([2]);
@@ -60,18 +61,7 @@ function toBigIntValue(value: unknown, field: string): bigint {
 }
 
 function getApiBaseUrl(): string {
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin;
-  }
-  const base = (
-    process.env.EXPO_PUBLIC_SCHOOL_API_BASE_URL ??
-    process.env.EXPO_PUBLIC_API_BASE_URL ??
-    ''
-  ).trim().replace(/\/$/, '');
-  if (!base) {
-    throw new Error('API base URL is not configured (set EXPO_PUBLIC_SCHOOL_API_BASE_URL or EXPO_PUBLIC_API_BASE_URL)');
-  }
-  return base;
+  return resolveApiBaseUrl();
 }
 
 async function fetchPopClaimProof(params: {

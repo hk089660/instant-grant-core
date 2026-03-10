@@ -7,18 +7,10 @@ import { HttpError, httpGet, httpPost } from './http/httpClient';
 import type { SchoolEvent } from '../types/school';
 import { clearAdminSession, loadAdminSession } from '../lib/adminAuth';
 import { clearAdminRuntimeArtifacts } from '../lib/adminRuntimeScope';
+import { resolveApiBaseUrl } from './resolveApiBaseUrl';
 
 function getBaseUrl(): string {
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin;
-  }
-  const envBase = (
-    process.env.EXPO_PUBLIC_SCHOOL_API_BASE_URL ??
-    process.env.EXPO_PUBLIC_API_BASE_URL ??
-    ''
-  ).trim().replace(/\/$/, '');
-  if (envBase) return envBase;
-  throw new Error('API base URL is required (set EXPO_PUBLIC_SCHOOL_API_BASE_URL or EXPO_PUBLIC_API_BASE_URL)');
+  return resolveApiBaseUrl();
 }
 
 function toHeaderByteString(value: unknown): string | null {
