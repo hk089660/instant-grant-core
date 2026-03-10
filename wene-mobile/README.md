@@ -392,8 +392,8 @@ From the repository root you can build and test everything without entering each
 **Option A: npm scripts (requires Node at root)**
 
 ```bash
-git clone https://github.com/<owner>/we-ne.git
-cd we-ne
+git clone https://github.com/hk089660/instant-grant-core.git
+cd instant-grant-core
 
 npm ci # optional: only if you want to run root scripts
 npm run build # build contract + mobile typecheck
@@ -515,7 +515,7 @@ anchor test
 ## 📁 Repository Structure
 
 ```
-we-ne/
+instant-grant-core/
 ├── grant_program/           # Solana smart contract (Anchor)
 │   ├── programs/grant_program/src/lib.rs   # Core logic
 │   └── tests/               # Integration tests

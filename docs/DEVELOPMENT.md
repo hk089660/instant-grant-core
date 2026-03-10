@@ -26,7 +26,7 @@ From the **repository root** you can build and test without entering each subpro
 
 ```bash
 git clone https://github.com/hk089660/instant-grant-core.git
-cd we-ne
+cd instant-grant-core
 
 # Using npm (requires Node at root)
 npm run build      # contract build + mobile typecheck
@@ -47,7 +47,7 @@ chmod +x scripts/build-all.sh
 ```bash
 # Clone repository
 git clone https://github.com/hk089660/instant-grant-core.git
-cd we-ne
+cd instant-grant-core
 
 # Install mobile app dependencies (deterministic install via lockfile)
 cd wene-mobile
@@ -72,7 +72,7 @@ No secrets required. The README CI badge reflects this workflow once the repo is
 ## Repository Structure
 
 ```
-we-ne/
+instant-grant-core/
 ├── grant_program/          # Solana smart contract (Anchor)
 │   ├── programs/
 │   │   └── grant_program/
