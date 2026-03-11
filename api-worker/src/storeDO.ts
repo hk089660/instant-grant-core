@@ -6267,6 +6267,33 @@ export class SchoolStore implements DurableObject {
     return claims.some((claim) => claim.confirmationCode === params.confirmationCode);
   }
 
+  private async getConfirmedWalletOnchainClaimByCode(params: {
+    eventId: string;
+    confirmationCode: string;
+    walletAddress?: string | null;
+    joinToken?: string | null;
+  }): Promise<ConfirmedOnchainClaim | null> {
+    const claims = await this.collectConfirmedOnchainClaims({
+      eventId: params.eventId,
+      auditEvent: 'WALLET_CLAIM',
+      matches: (view) => this.matchesWalletTransferSubject(view, params),
+    });
+    return claims.find((claim) => claim.confirmationCode === params.confirmationCode) ?? null;
+  }
+
+  private async getConfirmedUserOnchainClaimByCode(params: {
+    eventId: string;
+    confirmationCode: string;
+    userId: string;
+  }): Promise<ConfirmedOnchainClaim | null> {
+    const claims = await this.collectConfirmedOnchainClaims({
+      eventId: params.eventId,
+      auditEvent: 'USER_CLAIM',
+      matches: (view) => this.matchesUserTransferSubject(view, params.userId),
+    });
+    return claims.find((claim) => claim.confirmationCode === params.confirmationCode) ?? null;
+  }
+
   private async buildUserTicketSyncItems(userId: string): Promise<UserTicketSyncItem[]> {
     const normalizedUserId = this.normalizeUserId(userId);
     if (!normalizedUserId) return [];
@@ -9565,17 +9592,18 @@ export class SchoolStore implements DurableObject {
         walletAddress,
         joinToken,
       });
-      const existingOnchainSnapshot = await this.getLatestWalletTransferSnapshot({
-        eventId,
-        walletAddress,
-        joinToken,
-      });
-      const resolvedOnchainResponseFields = this.buildOnchainClaimResponseFields({
-        txSignature: existingOnchainSnapshot?.txSignature,
-        receiptPubkey: existingOnchainSnapshot?.receiptPubkey,
-      });
 
       if (pendingClaim) {
+        const pendingOnchainClaim = await this.getConfirmedWalletOnchainClaimByCode({
+          eventId,
+          confirmationCode: pendingClaim.confirmationCode,
+          walletAddress,
+          joinToken,
+        });
+        const pendingOnchainResponseFields = this.buildOnchainClaimResponseFields({
+          txSignature: pendingOnchainClaim?.txSignature,
+          receiptPubkey: pendingOnchainClaim?.receiptPubkey,
+        });
         const ticketReceipt = await this.getParticipationTicketReceipt(eventId, subject, pendingClaim.confirmationCode);
         return Response.json({
           success: true,
@@ -9584,13 +9612,26 @@ export class SchoolStore implements DurableObject {
           confirmationCode: pendingClaim.confirmationCode,
           ...(ticketReceipt ? { ticketReceipt } : {}),
           claimQuota,
-          ...resolvedOnchainResponseFields,
+          ...pendingOnchainResponseFields,
         } as SchoolClaimResultSuccess);
       }
 
       if (!claimQuota.canClaimNow) {
         const rec = await this.store.getClaimRecord(eventId, subject);
         const confirmationCode = rec?.confirmationCode;
+        const confirmedOnchainClaim =
+          confirmationCode
+            ? await this.getConfirmedWalletOnchainClaimByCode({
+              eventId,
+              confirmationCode,
+              walletAddress,
+              joinToken,
+            })
+            : null;
+        const confirmedOnchainResponseFields = this.buildOnchainClaimResponseFields({
+          txSignature: confirmedOnchainClaim?.txSignature,
+          receiptPubkey: confirmedOnchainClaim?.receiptPubkey,
+        });
         const ticketReceipt =
           confirmationCode
             ? await this.getParticipationTicketReceipt(eventId, subject, confirmationCode)
@@ -9602,7 +9643,7 @@ export class SchoolStore implements DurableObject {
           ...(confirmationCode ? { confirmationCode } : {}),
           ...(ticketReceipt ? { ticketReceipt } : {}),
           claimQuota,
-          ...resolvedOnchainResponseFields,
+          ...confirmedOnchainResponseFields,
         } as SchoolClaimResultSuccess);
       }
 
@@ -9971,26 +10012,42 @@ export class SchoolStore implements DurableObject {
         event,
         userId,
       });
-      const existingOnchainSnapshot = await this.getLatestUserTransferSnapshot(userId, eventId);
-      const resolvedOnchainResponseFields = this.buildOnchainClaimResponseFields({
-        txSignature: existingOnchainSnapshot?.txSignature,
-        receiptPubkey: existingOnchainSnapshot?.receiptPubkey,
-      });
 
       if (pendingClaim) {
+        const pendingOnchainClaim = await this.getConfirmedUserOnchainClaimByCode({
+          eventId,
+          confirmationCode: pendingClaim.confirmationCode,
+          userId,
+        });
+        const pendingOnchainResponseFields = this.buildOnchainClaimResponseFields({
+          txSignature: pendingOnchainClaim?.txSignature,
+          receiptPubkey: pendingOnchainClaim?.receiptPubkey,
+        });
         const ticketReceipt = await this.getParticipationTicketReceipt(eventId, userId, pendingClaim.confirmationCode);
         return Response.json({
           status: 'already',
           confirmationCode: pendingClaim.confirmationCode,
           ...(ticketReceipt ? { ticketReceipt } : {}),
           claimQuota,
-          ...resolvedOnchainResponseFields,
+          ...pendingOnchainResponseFields,
         } as UserClaimResponse);
       }
 
       if (!claimQuota.canClaimNow) {
         const rec = await this.store.getClaimRecord(eventId, userId);
         const confirmationCode = rec?.confirmationCode;
+        const confirmedOnchainClaim =
+          confirmationCode
+            ? await this.getConfirmedUserOnchainClaimByCode({
+              eventId,
+              confirmationCode,
+              userId,
+            })
+            : null;
+        const confirmedOnchainResponseFields = this.buildOnchainClaimResponseFields({
+          txSignature: confirmedOnchainClaim?.txSignature,
+          receiptPubkey: confirmedOnchainClaim?.receiptPubkey,
+        });
         const ticketReceipt =
           confirmationCode
             ? await this.getParticipationTicketReceipt(eventId, userId, confirmationCode)
@@ -10000,7 +10057,7 @@ export class SchoolStore implements DurableObject {
           ...(confirmationCode ? { confirmationCode } : {}),
           ...(ticketReceipt ? { ticketReceipt } : {}),
           claimQuota,
-          ...resolvedOnchainResponseFields,
+          ...confirmedOnchainResponseFields,
         } as UserClaimResponse);
       }
 

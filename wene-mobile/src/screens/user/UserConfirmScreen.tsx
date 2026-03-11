@@ -577,13 +577,19 @@ export const UserConfirmScreen: React.FC = () => {
       let tokenReflectedInWallet = false;
       let onchainBlockedByPeriod = false;
       const existingTicket = getTicketByEventId(targetEventId);
+      const storedConfirmationCode = normalizeOptionalString(existingTicket?.confirmationCode);
+      const storedProofMatchesCurrentCode = storedConfirmationCode === confirmationCode;
       const resultExplorerTxUrl = normalizeOptionalString(result?.explorerTxUrl);
       const resultTxSignature =
         normalizeOptionalString(result?.txSignature) ??
         parseTxSignatureFromExplorerUrl(resultExplorerTxUrl);
       const resultReceiptPubkey = normalizeOptionalString(result?.receiptPubkey);
-      const storedTxSignature = normalizeOptionalString(existingTicket?.txSignature);
-      const storedReceiptPubkey = normalizeOptionalString(existingTicket?.receiptPubkey);
+      const storedTxSignature = storedProofMatchesCurrentCode
+        ? normalizeOptionalString(existingTicket?.txSignature)
+        : undefined;
+      const storedReceiptPubkey = storedProofMatchesCurrentCode
+        ? normalizeOptionalString(existingTicket?.receiptPubkey)
+        : undefined;
       if (resultTxSignature) {
         txSignature = resultTxSignature;
       }
@@ -602,12 +608,14 @@ export const UserConfirmScreen: React.FC = () => {
         explorerTxUrl = buildExplorerTxUrl(resultTxSignature);
       }
       distributedMint =
-        normalizeOptionalString(existingTicket?.mintAddress) ??
+        (storedProofMatchesCurrentCode
+          ? normalizeOptionalString(existingTicket?.mintAddress)
+          : undefined) ??
         event.solanaMint ??
         undefined;
-      popEntryHash = normalizeOptionalString(existingTicket?.popEntryHash);
-      popAuditHash = normalizeOptionalString(existingTicket?.popAuditHash);
-      popSigner = normalizeOptionalString(existingTicket?.popSigner);
+      popEntryHash = storedProofMatchesCurrentCode ? normalizeOptionalString(existingTicket?.popEntryHash) : undefined;
+      popAuditHash = storedProofMatchesCurrentCode ? normalizeOptionalString(existingTicket?.popAuditHash) : undefined;
+      popSigner = storedProofMatchesCurrentCode ? normalizeOptionalString(existingTicket?.popSigner) : undefined;
       const hasExistingOnchainProof = Boolean(txSignature && receiptPubkey);
       const shouldAttemptOnchainBase = Boolean(
         offchainReceiptReady &&
@@ -738,20 +746,20 @@ export const UserConfirmScreen: React.FC = () => {
               } catch (ticketPersistError) {
                 console.warn('[UserConfirmScreen] addTicket failed (on-chain already tx):', ticketPersistError);
               }
-            } else if (storedTicket?.txSignature) {
-              txSignature = storedTicket.txSignature;
-              receiptPubkey = storedTicket.receiptPubkey;
-              explorerTxUrl = buildExplorerTxUrl(storedTicket.txSignature);
-              popEntryHash = storedTicket.popEntryHash;
-              popAuditHash = storedTicket.popAuditHash;
-              popSigner = storedTicket.popSigner;
+            } else if (storedTxSignature) {
+              txSignature = storedTxSignature;
+              receiptPubkey = storedReceiptPubkey;
+              explorerTxUrl = buildExplorerTxUrl(storedTxSignature);
+              popEntryHash = storedProofMatchesCurrentCode ? existingTicket?.popEntryHash : undefined;
+              popAuditHash = storedProofMatchesCurrentCode ? existingTicket?.popAuditHash : undefined;
+              popSigner = storedProofMatchesCurrentCode ? existingTicket?.popSigner : undefined;
             }
             distributedMint = attemptContext.mint ?? event.solanaMint ?? undefined;
             if (__DEV__) {
               console.log('[UserConfirmScreen] on-chain distribution blocked by period', {
                 eventId: targetEventId,
                 onchainPolicyCompatible,
-                hasStoredTicket: Boolean(storedTicket?.txSignature),
+                hasStoredTicket: Boolean(storedTxSignature),
                 hasAttemptedTxSignature: Boolean(attemptContext.txSignature),
               });
             }
@@ -789,11 +797,17 @@ export const UserConfirmScreen: React.FC = () => {
       }
 
       const latestStoredTicket = getTicketByEventId(targetEventId);
+      const latestStoredProofMatchesCurrentCode =
+        normalizeOptionalString(latestStoredTicket?.confirmationCode) === confirmationCode;
       if (!txSignature) {
-        txSignature = normalizeOptionalString(latestStoredTicket?.txSignature);
+        txSignature = latestStoredProofMatchesCurrentCode
+          ? normalizeOptionalString(latestStoredTicket?.txSignature)
+          : undefined;
       }
       if (!receiptPubkey) {
-        receiptPubkey = normalizeOptionalString(latestStoredTicket?.receiptPubkey);
+        receiptPubkey = latestStoredProofMatchesCurrentCode
+          ? normalizeOptionalString(latestStoredTicket?.receiptPubkey)
+          : undefined;
       }
       if (!explorerTxUrl) {
         explorerTxUrl =

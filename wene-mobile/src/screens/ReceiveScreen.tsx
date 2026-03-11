@@ -36,7 +36,7 @@ import {
 } from '../solana/sendTx';
 import { getConnection } from '../solana/anchorClient';
 import { RPC_URL } from '../solana/singleton';
-import { fetchSplBalance, fetchAnyPositiveSplBalance, formatAmountForDisplay, SPL_USDC_MINT } from '../solana/wallet';
+import { fetchSplBalance, formatAmountForDisplay } from '../solana/wallet';
 import {
   fetchExpectedPopSignerPubkeyFromRuntime,
   fetchPopConfigReadiness,
@@ -69,7 +69,6 @@ export const ReceiveScreen: React.FC = () => {
   const {
     state,
     lastError,
-    isClaimed,
     walletPubkey,
     phantomSession,
     lastSignature,
@@ -88,11 +87,9 @@ export const ReceiveScreen: React.FC = () => {
     setPreSendDebug,
     setSimulationFailed,
     clearSimulationResult,
-    checkClaimed,
-    markAsClaimed,
   } = useRecipientStore();
 
-  const { addTicket } = useRecipientTicketStore();
+  const { addTicket, getTicketByEventId } = useRecipientTicketStore();
 
   const {
     dappEncryptionPublicKey,
@@ -114,13 +111,48 @@ export const ReceiveScreen: React.FC = () => {
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [balanceItems, setBalanceItems] = useState<BalanceItem[]>(() => sortBalances(BALANCE_LIST_DUMMY));
   const [splBalanceItem, setSplBalanceItem] = useState<BalanceItem | null>(null);
+  const confirmationCode = typeof code === 'string' ? code.trim() : '';
+  const currentTicket = campaignId ? getTicketByEventId(campaignId) : undefined;
+  const storedConfirmationCode = typeof currentTicket?.confirmationCode === 'string'
+    ? currentTicket.confirmationCode.trim()
+    : '';
+  const currentCodeMatchesStoredTicket = Boolean(confirmationCode && storedConfirmationCode === confirmationCode);
+  const hasStoredOnchainProofForCurrentCode = Boolean(
+    currentCodeMatchesStoredTicket &&
+    typeof currentTicket?.txSignature === 'string' &&
+    currentTicket.txSignature.trim() &&
+    typeof currentTicket?.receiptPubkey === 'string' &&
+    currentTicket.receiptPubkey.trim()
+  );
+  const hasOnchainConfig = Boolean(
+    typeof grant?.solanaMint === 'string' &&
+    grant.solanaMint.trim() &&
+    typeof grant?.solanaAuthority === 'string' &&
+    grant.solanaAuthority.trim() &&
+    typeof grant?.solanaGrantId === 'string' &&
+    grant?.solanaGrantId.trim()
+  );
+  const walletReady = Boolean(walletPubkey && phantomSession && phantomEncryptionPublicKey);
+  const hasInMemoryCompletion = state === 'Done' && Boolean(lastSignature);
+  const showCompletedState = hasStoredOnchainProofForCurrentCode || hasInMemoryCompletion;
+  const displayedTxSignature =
+    (currentCodeMatchesStoredTicket ? currentTicket?.txSignature : undefined) ??
+    lastSignature;
+  const effectiveState =
+    showCompletedState
+      ? 'Done'
+      : (state === 'Claimed' || state === 'Done')
+        ? (walletReady ? 'Connected' : 'Idle')
+        : state;
 
   useEffect(() => {
     if (campaignId) {
       setCampaign(campaignId, code);
-      checkClaimed(campaignId, walletPubkey);
+      setLastSignature(null);
+      setLastDoneAt(null);
+      clearError();
     }
-  }, [campaignId, code, walletPubkey, setCampaign, checkClaimed]);
+  }, [campaignId, code, setCampaign, setLastSignature, setLastDoneAt, clearError]);
 
   useEffect(() => {
     const init = async () => {
@@ -137,7 +169,7 @@ export const ReceiveScreen: React.FC = () => {
     init();
   }, [loadKeyPair, getOrCreateKeyPair, saveKeyPair]);
 
-  // ウォレット接続時のみ SPL 残高を1件取得し、残高一覧にマージ・ソート（TODO/0/ATA無し時はフォールバック）
+  // ウォレット接続時のみ、このイベントの mint 残高を取得する。
   useEffect(() => {
     if (!walletPubkey || !phantomSession) {
       setSplBalanceItem(null);
@@ -165,150 +197,79 @@ export const ReceiveScreen: React.FC = () => {
       setSplBalanceItem(item);
       setBalanceItems(sortBalances([...BALANCE_LIST_DUMMY, item]));
     };
-
-    const isMintValid = !SPL_USDC_MINT.startsWith("TODO") && SPL_USDC_MINT.length >= 32;
-
-    if (!isMintValid) {
-      // TODO/無効 mint: フォールバックで uiAmount > 0 の最初の1件を表示
-      fetchAnyPositiveSplBalance(connection, ownerPubkey)
-        .then((fallback) => {
-          if (cancelled) return;
-          const item: BalanceItem = fallback
-            ? {
-              id: "spl-1",
-              name: "SPLトークン",
-              issuer: "Solana (devnet)",
-              amountText: fallback.amountText,
-              unit: fallback.unit,
-              source: "spl",
-              todayUsable: true,
-            }
-            : {
-              ...loadingRow,
-              amountText: "0.00",
-              unit: "SPL",
-            };
-          applySplRow(item);
-        })
-        .catch(() => {
-          if (cancelled) return;
-          applySplRow({ ...loadingRow, amountText: "0.00", unit: "SPL" });
-        });
+    const targetMint =
+      (typeof grant?.solanaMint === 'string' && grant.solanaMint.trim()) ||
+      (currentCodeMatchesStoredTicket && typeof currentTicket?.mintAddress === 'string'
+        ? currentTicket.mintAddress.trim()
+        : '');
+    if (!targetMint) {
+      setSplBalanceItem(null);
+      setBalanceItems(sortBalances(BALANCE_LIST_DUMMY));
       return () => {
         cancelled = true;
       };
     }
 
-    // 有効 mint: 指定 mint を取得し、0 ならフォールバックを1回試す
-    const mintPubkey = new PublicKey(SPL_USDC_MINT);
+    const mintPubkey = new PublicKey(targetMint);
     fetchSplBalance(connection, ownerPubkey, mintPubkey)
-      .then(async (res) => {
+      .then((res) => {
         if (cancelled) return;
         const amountText = formatAmountForDisplay(res.amount, res.decimals, 2);
-        const isZero = res.amount === "0" || amountText === "0.00";
-        if (isZero) {
-          const fallback = await fetchAnyPositiveSplBalance(connection, ownerPubkey);
-          if (cancelled) return;
-          if (fallback) {
-            applySplRow({
-              id: "spl-1",
-              name: "SPLトークン",
-              issuer: "Solana (devnet)",
-              amountText: fallback.amountText,
-              unit: fallback.unit,
-              source: "spl",
-              todayUsable: true,
-            });
-          } else {
-            applySplRow({
-              id: "spl-1",
-              name: "USDC",
-              issuer: "Circle",
-              amountText: "0.00",
-              unit: "USDC",
-              source: "spl",
-              todayUsable: true,
-            });
-          }
-        } else {
-          applySplRow({
-            id: "spl-1",
-            name: "USDC",
-            issuer: "Circle",
-            amountText,
-            unit: "USDC",
-            source: "spl",
-            todayUsable: true,
-          });
-        }
+        applySplRow({
+          id: "spl-1",
+          name: grant?.title ?? "参加トークン",
+          issuer: "Solana (devnet)",
+          amountText,
+          unit: "SPL",
+          source: "spl",
+          todayUsable: true,
+        });
       })
-      .catch(async () => {
+      .catch(() => {
         if (cancelled) return;
-        try {
-          const fallback = await fetchAnyPositiveSplBalance(connection, ownerPubkey);
-          if (cancelled) return;
-          if (fallback) {
-            applySplRow({
-              id: "spl-1",
-              name: "SPLトークン",
-              issuer: "Solana (devnet)",
-              amountText: fallback.amountText,
-              unit: fallback.unit,
-              source: "spl",
-              todayUsable: true,
-            });
-          } else {
-            applySplRow({
-              id: "spl-1",
-              name: "USDC",
-              issuer: "Circle",
-              amountText: "0.00",
-              unit: "USDC",
-              source: "spl",
-              todayUsable: true,
-            });
-          }
-        } catch {
-          if (cancelled) return;
-          applySplRow({
-            id: "spl-1",
-            name: "USDC",
-            issuer: "Circle",
-            amountText: "0.00",
-            unit: "USDC",
-            source: "spl",
-            todayUsable: true,
-          });
-        }
+        applySplRow({
+          id: "spl-1",
+          name: grant?.title ?? "参加トークン",
+          issuer: "Solana (devnet)",
+          amountText: "0.00",
+          unit: "SPL",
+          source: "spl",
+          todayUsable: true,
+        });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [walletPubkey, phantomSession]);
+  }, [walletPubkey, phantomSession, grant?.solanaMint, grant?.title, currentCodeMatchesStoredTicket, currentTicket?.mintAddress]);
 
   // adb ログ用: ボタン有効条件を定期的に出力（adb logcat | grep RECEIVE_BTN）
   useEffect(() => {
     const logButtonState = () => {
       const needConnect = !walletPubkey || !phantomSession || !phantomEncryptionPublicKey;
       const hasKeys = !!(dappEncryptionPublicKey && dappSecretKey);
-      const canClaim = !needConnect && hasKeys && !!campaignId && !isClaimed;
-      const btnDisabled = state === 'Expired' || state === 'Claiming' || state === 'Connecting' || state === 'Signing' || state === 'Sending';
+      const canClaim = !needConnect && hasKeys && !!campaignId && !showCompletedState;
+      const btnDisabled =
+        effectiveState === 'Expired' ||
+        effectiveState === 'Claiming' ||
+        effectiveState === 'Connecting' ||
+        effectiveState === 'Signing' ||
+        effectiveState === 'Sending';
       const reason = needConnect
         ? `needConnect(wallet=${!!walletPubkey} session=${!!phantomSession} phantomPk=${!!phantomEncryptionPublicKey})`
         : btnDisabled
-          ? `btnDisabled(state=${state})`
+          ? `btnDisabled(state=${effectiveState})`
           : canClaim
             ? 'enabled'
-            : `blocked(claimed=${isClaimed} campaign=${!!campaignId})`;
+            : `blocked(completed=${showCompletedState} campaign=${!!campaignId})`;
       console.log(
-        `[RECEIVE_BTN] state=${state} ${reason} dappKey=${!!dappEncryptionPublicKey} dappSecret=${!!dappSecretKey}`
+        `[RECEIVE_BTN] state=${effectiveState} ${reason} dappKey=${!!dappEncryptionPublicKey} dappSecret=${!!dappSecretKey}`
       );
     };
     logButtonState();
     const t = setInterval(logButtonState, 8000);
     return () => clearInterval(t);
-  }, [state, walletPubkey, phantomSession, phantomEncryptionPublicKey, dappEncryptionPublicKey, dappSecretKey, campaignId, isClaimed]);
+  }, [effectiveState, walletPubkey, phantomSession, phantomEncryptionPublicKey, dappEncryptionPublicKey, dappSecretKey, campaignId, showCompletedState]);
 
   useEffect(() => {
     if (!campaignId) {
@@ -337,7 +298,7 @@ export const ReceiveScreen: React.FC = () => {
   }, [campaignId]);
 
   const getButtonTitle = (): string => {
-    switch (state) {
+    switch (effectiveState) {
       case 'Idle':
       case 'Connected':
         return 'このクレジットを受け取る';
@@ -360,7 +321,7 @@ export const ReceiveScreen: React.FC = () => {
 
   /** Claim フロー用の状態メッセージ（Signing / Sending / Error / Done） */
   const getClaimStatusMessage = (): string | null => {
-    switch (state) {
+    switch (effectiveState) {
       case 'Signing':
         return 'Phantomで署名してください';
       case 'Sending':
@@ -551,13 +512,17 @@ ${st.balanceLamports ?? 'null'}
         setTxDebugInfo(null);
         return;
       }
-      if (isClaimed || state === 'Claimed') {
-        console.log('[CLAIM] checkpoint 2b: guard already claimed');
+      if (hasStoredOnchainProofForCurrentCode || showCompletedState) {
+        console.log('[CLAIM] checkpoint 2b: guard already completed for current confirmationCode');
+        if (hasStoredOnchainProofForCurrentCode) {
+          setLastSignature(currentTicket?.txSignature ?? null);
+          setLastDoneAt(currentTicket?.joinedAt ?? Date.now());
+        }
         router.replace('/wallet' as any);
         return;
       }
-      if (state !== 'Idle' && state !== 'Connected' && state !== 'Claiming') {
-        console.log('[CLAIM] checkpoint 2c: guard state not ready, state=', state);
+      if (effectiveState !== 'Idle' && effectiveState !== 'Connected' && effectiveState !== 'Claiming') {
+        console.log('[CLAIM] checkpoint 2c: guard state not ready, state=', effectiveState);
         return;
       }
       if (!walletPubkey || !phantomSession || !phantomEncryptionPublicKey || !dappEncryptionPublicKey || !dappSecretKey) {
@@ -572,6 +537,11 @@ ${st.balanceLamports ?? 'null'}
         setState('Idle');
         return;
       }
+      if (!hasOnchainConfig) {
+        setError('このイベントのオンチェーン受け取り設定が未完了です。運営に再発行を依頼してください。');
+        setState('Idle');
+        return;
+      }
       if (grant?.state && grant.state !== 'published') {
         const stateLabel = grant.state === 'ended' ? '終了済み' : '未公開';
         const msg = `このイベントは現在受付していません（${stateLabel}）。`;
@@ -582,7 +552,6 @@ ${st.balanceLamports ?? 'null'}
       if (Platform.OS === 'web') {
         clearPhantomWebWalletOnchainSyncContext();
       }
-      const confirmationCode = typeof code === 'string' ? code.trim() : '';
       if (!confirmationCode) {
         setError('オフチェーンレシートが発行されていないため署名できません。先に参加登録を完了してください。');
         setState('Idle');
@@ -895,9 +864,6 @@ ${st.balanceLamports ?? 'null'}
 
         setLastSignature(signature);
         setLastDoneAt(Date.now());
-        if (campaignId && walletPubkey) {
-          await markAsClaimed(campaignId, walletPubkey);
-        }
         setState('Done');
 
         // Add to the UserEventsScreen ticket list
@@ -1078,22 +1044,24 @@ ${st.balanceLamports ?? 'null'}
 
             {/* 状態メッセージ: Signing / Sending / Error / Done */}
             {getClaimStatusMessage() != null && (
-              <Card style={state === 'Error' ? styles.errorCard : styles.statusCard}>
-                <AppText variant="body" style={state === 'Error' ? styles.errorTitle : styles.statusTitle}>
+              <Card style={effectiveState === 'Error' ? styles.errorCard : styles.statusCard}>
+                <AppText variant="body" style={effectiveState === 'Error' ? styles.errorTitle : styles.statusTitle}>
                   {getClaimStatusMessage()}
                 </AppText>
-                {state === 'Error' && lastError && (
+                {effectiveState === 'Error' && lastError && (
                   <AppText variant="caption" style={styles.errorText}>
                     {lastError}
                   </AppText>
                 )}
-                {state === 'Done' && lastSignature && (
+                {effectiveState === 'Done' && displayedTxSignature && (
                   <>
                     <AppText variant="caption" style={styles.txidText}>
-                      txid: {lastSignature.length > 16 ? lastSignature.slice(0, 8) + '…' + lastSignature.slice(-8) : lastSignature}
+                      txid: {displayedTxSignature.length > 16
+                        ? `${displayedTxSignature.slice(0, 8)}…${displayedTxSignature.slice(-8)}`
+                        : displayedTxSignature}
                     </AppText>
                     <TouchableOpacity
-                      onPress={() => Linking.openURL(`https://explorer.solana.com/tx/${lastSignature}?cluster=devnet`)}
+                      onPress={() => Linking.openURL(`https://explorer.solana.com/tx/${displayedTxSignature}?cluster=devnet`)}
                       style={styles.explorerLinkTouch}
                     >
                       <AppText variant="caption" style={styles.explorerLinkText}>
@@ -1219,7 +1187,7 @@ ${st.balanceLamports ?? 'null'}
               </Card>
             ) : null}
 
-            {(!walletPubkey || !phantomSession || !phantomEncryptionPublicKey) && !(isClaimed || state === 'Claimed') ? (
+            {(!walletPubkey || !phantomSession || !phantomEncryptionPublicKey) && !showCompletedState ? (
               <Card style={styles.debugCard}>
                 <AppText variant="caption" style={styles.debugLabel}>
                   Phantomに接続してください
@@ -1229,7 +1197,7 @@ ${st.balanceLamports ?? 'null'}
                 </AppText>
                 <Button
                   title={
-                    state === 'Connecting'
+                    effectiveState === 'Connecting'
                       ? '接続中…'
                       : walletPubkey
                         ? '接続済み'
@@ -1237,8 +1205,8 @@ ${st.balanceLamports ?? 'null'}
                   }
                   onPress={handleConnect}
                   variant="secondary"
-                  loading={state === 'Connecting'}
-                  disabled={state === 'Connecting' || !!walletPubkey}
+                  loading={effectiveState === 'Connecting'}
+                  disabled={effectiveState === 'Connecting' || !!walletPubkey}
                   style={styles.claimButton}
                 />
                 {Platform.OS === 'web' ? (
@@ -1273,20 +1241,20 @@ ${st.balanceLamports ?? 'null'}
               items={balanceItems}
             />
 
-            {(isClaimed || state === 'Claimed' || state === 'Done') ? (
+            {showCompletedState ? (
               <View style={styles.claimedActions}>
-                {state === 'Done' && (
+                {effectiveState === 'Done' && (
                   <AppText variant="body" style={styles.successMessage}>
                     受け取りが完了しました
                   </AppText>
                 )}
-                {lastSignature ? (
+                {displayedTxSignature ? (
                   <Card style={styles.debugCard}>
                     <AppText variant="caption" style={styles.debugLabel}>
-                      {state === 'Done' ? 'txid (送信成功)' : '署名 (devnet)'}
+                      {effectiveState === 'Done' ? 'txid (送信成功)' : '署名 (devnet)'}
                     </AppText>
                     <AppText variant="small" style={styles.debugText} numberOfLines={2}>
-                      {lastSignature}
+                      {displayedTxSignature}
                     </AppText>
                   </Card>
                 ) : null}
@@ -1303,10 +1271,6 @@ ${st.balanceLamports ?? 'null'}
                 <Button
                   title="ウォレットを見る"
                   onPress={async () => {
-                    if (state === 'Done' && campaignId && walletPubkey) {
-                      await markAsClaimed(campaignId, walletPubkey);
-                      setState('Claimed');
-                    }
                     router.replace('/wallet' as any);
                   }}
                   variant="primary"
@@ -1324,8 +1288,8 @@ ${st.balanceLamports ?? 'null'}
                 title={getButtonTitle()}
                 onPress={handleClaimSolana}
                 variant="primary"
-                loading={state === 'Signing' || state === 'Sending' || state === 'Claiming' || state === 'Connecting'}
-                disabled={state === 'Expired' || state === 'Claiming' || state === 'Connecting' || state === 'Signing' || state === 'Sending'}
+                loading={effectiveState === 'Signing' || effectiveState === 'Sending' || effectiveState === 'Claiming' || effectiveState === 'Connecting'}
+                disabled={effectiveState === 'Expired' || effectiveState === 'Claiming' || effectiveState === 'Connecting' || effectiveState === 'Signing' || effectiveState === 'Sending'}
                 style={styles.claimButton}
               />
             )}

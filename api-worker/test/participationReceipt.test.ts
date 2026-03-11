@@ -577,6 +577,8 @@ describe('participation audit receipt', () => {
       status?: string;
       confirmationCode?: string;
       ticketReceipt?: ParticipationTicketReceipt;
+      txSignature?: string;
+      receiptPubkey?: string;
       claimQuota?: {
         claimsUsedInCurrentInterval?: number;
         remainingClaimsInCurrentInterval?: number | null;
@@ -585,6 +587,8 @@ describe('participation audit receipt', () => {
     expect(secondOffchainBody.status).toBe('created');
     expect(secondOffchainBody.confirmationCode).toBeDefined();
     expect(secondOffchainBody.confirmationCode).not.toBe(firstOffchainBody.confirmationCode);
+    expect(secondOffchainBody.txSignature).toBeUndefined();
+    expect(secondOffchainBody.receiptPubkey).toBeUndefined();
     expect(secondOffchainBody.claimQuota?.claimsUsedInCurrentInterval).toBe(1);
     expect(secondOffchainBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(1);
 
@@ -603,6 +607,8 @@ describe('participation audit receipt', () => {
       status?: string;
       confirmationCode?: string;
       ticketReceipt?: ParticipationTicketReceipt;
+      txSignature?: string;
+      receiptPubkey?: string;
       claimQuota?: {
         claimsUsedInCurrentInterval?: number;
         remainingClaimsInCurrentInterval?: number | null;
@@ -612,6 +618,8 @@ describe('participation audit receipt', () => {
     expect(secondPendingOffchainBody.confirmationCode).toBe(secondOffchainBody.confirmationCode);
     expect(secondPendingOffchainBody.ticketReceipt?.receiptId).toBe(secondOffchainBody.ticketReceipt?.receiptId);
     expect(secondPendingOffchainBody.ticketReceipt?.receiptHash).toBe(secondOffchainBody.ticketReceipt?.receiptHash);
+    expect(secondPendingOffchainBody.txSignature).toBeUndefined();
+    expect(secondPendingOffchainBody.receiptPubkey).toBeUndefined();
     expect(secondPendingOffchainBody.claimQuota?.claimsUsedInCurrentInterval).toBe(1);
     expect(secondPendingOffchainBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(1);
 
@@ -796,6 +804,8 @@ describe('participation audit receipt', () => {
       alreadyJoined?: boolean;
       confirmationCode?: string;
       ticketReceipt?: ParticipationTicketReceipt;
+      txSignature?: string;
+      receiptPubkey?: string;
       claimQuota?: {
         claimsUsedInCurrentInterval?: number;
         remainingClaimsInCurrentInterval?: number | null;
@@ -805,6 +815,8 @@ describe('participation audit receipt', () => {
     expect(secondOffchainBody.alreadyJoined).toBe(false);
     expect(secondOffchainBody.confirmationCode).toBeDefined();
     expect(secondOffchainBody.confirmationCode).not.toBe(firstOffchainBody.confirmationCode);
+    expect(secondOffchainBody.txSignature).toBeUndefined();
+    expect(secondOffchainBody.receiptPubkey).toBeUndefined();
     expect(secondOffchainBody.claimQuota?.claimsUsedInCurrentInterval).toBe(1);
     expect(secondOffchainBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(1);
 
@@ -824,6 +836,8 @@ describe('participation audit receipt', () => {
       alreadyJoined?: boolean;
       confirmationCode?: string;
       ticketReceipt?: ParticipationTicketReceipt;
+      txSignature?: string;
+      receiptPubkey?: string;
       claimQuota?: {
         claimsUsedInCurrentInterval?: number;
         remainingClaimsInCurrentInterval?: number | null;
@@ -834,6 +848,8 @@ describe('participation audit receipt', () => {
     expect(secondPendingOffchainBody.confirmationCode).toBe(secondOffchainBody.confirmationCode);
     expect(secondPendingOffchainBody.ticketReceipt?.receiptId).toBe(secondOffchainBody.ticketReceipt?.receiptId);
     expect(secondPendingOffchainBody.ticketReceipt?.receiptHash).toBe(secondOffchainBody.ticketReceipt?.receiptHash);
+    expect(secondPendingOffchainBody.txSignature).toBeUndefined();
+    expect(secondPendingOffchainBody.receiptPubkey).toBeUndefined();
     expect(secondPendingOffchainBody.claimQuota?.claimsUsedInCurrentInterval).toBe(1);
     expect(secondPendingOffchainBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(1);
 

@@ -213,6 +213,17 @@ const saveToStorage = async (tickets: RecipientTicket[], userId?: string | null)
 };
 
 function mergeTicket(existing: RecipientTicket, incoming: RecipientTicket): RecipientTicket {
+  const existingConfirmationCode = normalizeString(existing.confirmationCode);
+  const incomingConfirmationCode = normalizeString(incoming.confirmationCode);
+  const incomingHasOnchainProof = Boolean(
+    normalizeString(incoming.txSignature) || normalizeString(incoming.receiptPubkey)
+  );
+  const shouldResetCurrentOnchainProof =
+    Boolean(
+      incomingConfirmationCode &&
+      incomingConfirmationCode !== existingConfirmationCode &&
+      !incomingHasOnchainProof
+    );
   const mergedOnchainReceipts = normalizeOnchainReceipts(
     [
       ...(existing.onchainReceipts ?? []),
@@ -234,14 +245,18 @@ function mergeTicket(existing: RecipientTicket, incoming: RecipientTicket): Reci
   return {
     ...existing,
     ...incoming,
-    joinedAt: existing.joinedAt || incoming.joinedAt,
+    joinedAt: Math.max(existing.joinedAt, incoming.joinedAt),
     mintAddress: incoming.mintAddress ?? existing.mintAddress,
-    txSignature: latestOnchain?.txSignature ?? incoming.txSignature ?? existing.txSignature,
-    receiptPubkey: latestOnchain?.receiptPubkey ?? incoming.receiptPubkey ?? existing.receiptPubkey,
+    txSignature: shouldResetCurrentOnchainProof
+      ? undefined
+      : (latestOnchain?.txSignature ?? incoming.txSignature ?? existing.txSignature),
+    receiptPubkey: shouldResetCurrentOnchainProof
+      ? undefined
+      : (latestOnchain?.receiptPubkey ?? incoming.receiptPubkey ?? existing.receiptPubkey),
     onchainReceipts: mergedOnchainReceipts.length > 0 ? mergedOnchainReceipts : undefined,
-    popEntryHash: incoming.popEntryHash ?? existing.popEntryHash,
-    popAuditHash: incoming.popAuditHash ?? existing.popAuditHash,
-    popSigner: incoming.popSigner ?? existing.popSigner,
+    popEntryHash: shouldResetCurrentOnchainProof ? incoming.popEntryHash : (incoming.popEntryHash ?? existing.popEntryHash),
+    popAuditHash: shouldResetCurrentOnchainProof ? incoming.popAuditHash : (incoming.popAuditHash ?? existing.popAuditHash),
+    popSigner: shouldResetCurrentOnchainProof ? incoming.popSigner : (incoming.popSigner ?? existing.popSigner),
     confirmationCode: incoming.confirmationCode ?? existing.confirmationCode,
     auditReceiptId: incoming.auditReceiptId ?? existing.auditReceiptId,
     auditReceiptHash: incoming.auditReceiptHash ?? existing.auditReceiptHash,
