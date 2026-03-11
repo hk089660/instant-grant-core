@@ -1,295 +1,295 @@
-# Development Guide
+# 開発ガイド
 
-This guide covers setting up the development environment for we-ne. Third-party and contributor builds are supported via root-level scripts and CI.
+この文書では、instant-grant-core の開発環境構築、各コンポーネントの起動方法、主要な検証コマンドをまとめます。現在のリポジトリは root スクリプトを起点に、`grant_program`、`api-worker`、`wene-mobile` を個別にも動かせます。
 
-## Prerequisites
+## 前提環境
 
-### All Platforms
-- Node.js v18+ (recommended: v20 LTS)
-- npm (v10+, bundled with Node.js v20)
+### 全体共通
+
+- Node.js `v20` 系推奨
+- npm `v10` 系
 - Git
 
-### Smart Contract Development
-- Rust (latest stable)
-- Solana CLI v1.18+
-- Anchor v0.30+
+### コントラクト開発
 
-### Mobile Development
-- **Android**: Android Studio, Android SDK (API 36), Java 17
-- **iOS**: Xcode 15+ (macOS only), CocoaPods
+- Rust stable
+- Solana CLI
+- Anchor CLI
 
-## Quick Start
+### モバイル開発
 
-### Root-level build (recommended for contributors)
+- Android: Android Studio / Android SDK / Java 17
+- iOS: Xcode 15 以降（macOS のみ）、CocoaPods
 
-From the **repository root** you can build and test without entering each subproject:
+## クイックスタート
+
+### 1. リポジトリ取得
 
 ```bash
 git clone https://github.com/hk089660/instant-grant-core.git
 cd instant-grant-core
-
-# Using npm (requires Node at root)
-npm run build      # contract build + mobile typecheck
-npm run test       # Anchor tests
-npm run build:contract
-npm run build:mobile
-npm run test:contract
-
-# Using shell script (no root Node required)
-chmod +x scripts/build-all.sh
-./scripts/build-all.sh all    # build + test + mobile typecheck
-./scripts/build-all.sh build  # build only
-./scripts/build-all.sh test   # contract tests only
 ```
 
-### Per-component setup
+### 2. 依存関係インストール
 
 ```bash
-# Clone repository
-git clone https://github.com/hk089660/instant-grant-core.git
-cd instant-grant-core
+npm ci
 
-# Install mobile app dependencies (deterministic install via lockfile)
-cd wene-mobile
+cd api-worker
+npm ci
+
+cd ../wene-mobile
 npm ci --legacy-peer-deps
 
-# Start development server
+cd ../grant_program
+npm ci
+```
+
+補足:
+
+- `wene-mobile` は peer dependency の都合で `npm ci --legacy-peer-deps` を前提にしています
+- root の `npm run build` は `anchor build` と mobile の TypeScript check を実行します
+
+### 3. root からの主要コマンド
+
+```bash
+# コントラクト build + mobile typecheck
+npm run build
+
+# Anchor テスト
+npm run test
+
+# lockfile policy の検証
+npm run check:lockfiles
+
+# 本番 readiness の確認
+npm run verify:production
+```
+
+## コンポーネント別の開発
+
+### `api-worker`
+
+```bash
+cd api-worker
+npm ci
+npm run dev
+```
+
+主なコマンド:
+
+- `npm run dev`: `wrangler dev`
+- `npm run deploy`: `wrangler deploy`
+- `npm test`: `vitest run`
+
+ローカル起動先:
+
+- `http://localhost:8787`
+
+### `wene-mobile`
+
+```bash
+cd wene-mobile
+npm ci --legacy-peer-deps
 npm start
 ```
 
-If you see peer dependency errors in `wene-mobile`, use `npm ci --legacy-peer-deps`; root build scripts and CI already apply this.
+主なコマンド:
 
-## CI (GitHub Actions)
+- `npm start`: Expo 開発サーバー
+- `npm run web`: Web 起動
+- `npm run android`: Android 実機 / エミュレータ起動
+- `npm run ios`: iOS 起動
+- `npm run test:server`: server 側テスト
+- `npx tsc --noEmit`: TypeScript check
 
-On every push/PR to `main` or `master`, [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs:
-
-- **Policy check**: reject `yarn.lock`, `pnpm-lock.yaml`, and non-canonical lockfile names.
-- **Smart contract**: Install Rust, Solana CLI, Anchor → `grant_program`: `npm ci`, `anchor build`, `anchor test`
-- **Mobile app**: Node 20 → `wene-mobile`: `npm ci --legacy-peer-deps`, `npx tsc --noEmit`
-
-No secrets required. The README CI badge reflects this workflow once the repo is on GitHub.
-
-## Repository Structure
-
-```
-instant-grant-core/
-├── grant_program/          # Solana smart contract (Anchor)
-│   ├── programs/
-│   │   └── grant_program/
-│   │       └── src/lib.rs  # Main program logic
-│   ├── tests/              # Integration tests
-│   ├── Anchor.toml         # Anchor configuration
-│   └── Cargo.toml
-│
-├── wene-mobile/            # React Native app (Expo)
-│   ├── app/                # Expo Router screens
-│   ├── src/
-│   │   ├── solana/         # Blockchain client
-│   │   ├── screens/        # UI components
-│   │   ├── store/          # Zustand state
-│   │   ├── wallet/         # Wallet adapters
-│   │   └── utils/          # Utilities
-│   ├── assets/             # Images, icons
-│   └── scripts/            # Build scripts
-│
-├── docs/                   # Documentation
-└── .github/workflows/      # CI/CD
-```
-
-## Smart Contract (Anchor)
-
-### Setup
-
-```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Install Solana CLI
-sh -c "$(curl -sSfL https://release.solana.com/v1.18.0/install)"
-
-# Install Anchor
-cargo install --git https://github.com/coral-xyz/anchor avm --locked
-avm install latest
-avm use latest
-```
-
-### Build & Test
+### `grant_program`
 
 ```bash
 cd grant_program
-
-# Build
 anchor build
-
-# Run tests (starts local validator)
 anchor test
-
-# Deploy to devnet
-anchor deploy --provider.cluster devnet
 ```
 
-### Key Files
+主なコマンド:
 
-| File | Description |
-|------|-------------|
-| `programs/grant_program/src/lib.rs` | Main program with instructions |
-| `Anchor.toml` | Network configuration |
-| `tests/basic.ts` | TypeScript integration tests |
+- `anchor build`: プログラム build
+- `anchor test`: Anchor テスト
+- `npm run devnet:setup`: devnet 向け mint / grant / vault のセットアップ補助
 
-## Mobile App (Expo)
+## CI
 
-### Setup
+GitHub Actions では主に以下を検証します。
+
+- lockfile policy
+  - `yarn.lock`、`pnpm-lock.yaml`、非正規 lockfile 名を拒否
+- `grant_program`
+  - `npm ci`
+  - `anchor build`
+  - `anchor test`
+- `wene-mobile`
+  - `npm ci --legacy-peer-deps`
+  - `npx tsc --noEmit`
+
+## リポジトリ構成
+
+```text
+instant-grant-core/
+├── grant_program/          # Anchor program とテスト
+├── api-worker/             # Cloudflare Worker API
+├── wene-mobile/            # Expo / React Native / Pages frontend
+├── docs/                   # 設計、運用、検証ドキュメント
+└── scripts/                # root 補助スクリプト
+```
+
+### 主要ディレクトリ
+
+| パス | 役割 |
+| --- | --- |
+| `grant_program/programs/grant_program/src/lib.rs` | Anchor program 本体 |
+| `grant_program/tests/` | コントラクト検証 |
+| `api-worker/src/index.ts` | Worker API 入口 |
+| `api-worker/src/storeDO.ts` | Durable Object 状態管理 |
+| `wene-mobile/src/screens/` | UI 画面群 |
+| `wene-mobile/src/solana/` | Solana RPC / tx 構築 |
+| `wene-mobile/src/wallet/` | wallet adapter |
+| `wene-mobile/src/utils/phantom.ts` | Phantom 連携 |
+
+## 環境変数
+
+### `wene-mobile`
+
+テンプレートから `.env.local` を作成します。
 
 ```bash
 cd wene-mobile
-npm ci --legacy-peer-deps
-```
-
-### Development Server
-
-```bash
-# Standard start
-npm start
-
-# Clear cache
-npm run start:clear
-
-# Full reset (clears all caches)
-npm run start:reset
-```
-
-### Android Development
-
-#### Emulator-first 開発（推奨）
-
-Mac 上で Android Emulator を主軸にする場合の手順は [wene-mobile/docs/EMULATOR_DEVELOPMENT.md](../wene-mobile/docs/EMULATOR_DEVELOPMENT.md) を参照してください。
-
-```bash
-cd wene-mobile
-npm run emulator:check    # エミュレータ起動確認
-npm run emulator:start    # 未起動なら起動
-npm run deploy:adb        # APK ビルド→エミュレータへインストール（emulator-xxxx のみ対象）
-```
-
-#### Prerequisites
-```bash
-# macOS (Homebrew)
-brew install openjdk@17
-brew install --cask android-commandlinetools
-
-# Set environment
-export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
-export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
-```
-
-#### Build APK
-```bash
-# Generate native project (first time)
-npm run build:prebuild
-
-# Build release APK
-npm run build:apk
-```
-
-Output: `android/app/build/outputs/apk/release/app-release.apk`
-
-#### Install via ADB
-```bash
-# One-command deploy (generates icons, builds, installs)
-npm run deploy:adb
-
-# Or manually
-adb install -r android/app/build/outputs/apk/release/app-release.apk
-```
-
-### iOS Development
-
-#### Prerequisites
-- Xcode 15+ from App Store
-- `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`
-
-#### Build for Simulator
-```bash
-npm run build:ios
-```
-
-#### Without Xcode (EAS Cloud Build)
-```bash
-npm install -g eas-cli
-eas login
-eas build --platform ios --profile development
-```
-
-### Environment Variables
-
-Create `.env.local` from template:
-```bash
 cp .env.example .env.local
 ```
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `SOLANA_RPC_URL` | RPC endpoint | devnet |
-| `PROGRAM_ID` | Grant program address | (from deploy) |
+代表的な変数:
 
-## Troubleshooting
+| 変数 | 説明 | 例 |
+| --- | --- | --- |
+| `EXPO_PUBLIC_API_BASE_URL` | Worker API ベース URL | `http://localhost:8787` |
+| `EXPO_PUBLIC_API_MODE` | API モード | `http` |
+| `EXPO_PUBLIC_SOLANA_RPC_URL` | Solana RPC | `https://solana-devnet.api.onfinality.io/public` |
+| `EXPO_PUBLIC_SOLANA_CLUSTER` | Solana cluster | `devnet` |
+| `PROGRAM_ID` | grant program ID | `anchor deploy` 出力値 |
 
-### Metro Bundler Issues
+詳しくは [wene-mobile/.env.example](../wene-mobile/.env.example) を参照してください。
+
+### `api-worker`
+
+ローカルでは `wrangler dev`、本番では Cloudflare の secrets / vars を使います。代表的な設定は次のとおりです。
+
+- `CORS_ORIGIN`
+- `AUDIT_IMMUTABLE_MODE`
+- `POP_SIGNER_*` / `POP_SIGNER_HD_*`
+- `SECURITY_RATE_LIMIT_*`
+- `COST_OF_FORGERY_*`
+
+詳細は [api-worker/README.md](../api-worker/README.md) と [api-worker/wrangler.toml](../api-worker/wrangler.toml) を参照してください。
+
+## Android 開発
+
+### エミュレータ中心で進める場合
+
+詳細は [wene-mobile/docs/EMULATOR_DEVELOPMENT.md](../wene-mobile/docs/EMULATOR_DEVELOPMENT.md) を参照してください。
+
 ```bash
-# Clear all caches
-npm run clean
-
-# Or manually
-rm -rf .expo node_modules/.cache .metro
-npm run start:reset
+cd wene-mobile
+npm run emulator:check
+npm run emulator:start
+npm run deploy:adb
 ```
 
-### Android Build Fails
-```bash
-# Check Java version (must be 17)
-java -version
+### APK ビルド
 
-# Clear Gradle cache
-cd android && ./gradlew clean
+```bash
+cd wene-mobile
+npm run build:prebuild
+npm run build:apk
 ```
 
-### iOS Build Fails
+出力先:
+
+- `wene-mobile/android/app/build/outputs/apk/release/app-release.apk`
+
+## iOS 開発
+
+### シミュレータ起動
+
 ```bash
-# Reinstall pods
-cd ios && pod install --repo-update
+cd wene-mobile
+npm run build:ios
 ```
 
-### Phantom Redirect Not Working
-1. Check `scheme` in `app.config.ts` matches deep link
-2. Verify `intentFilters` include `wene://` scheme
-3. Check Phantom app is installed and updated
+### 前提
 
-## Code Style
+- Xcode 15 以降
+- `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`
 
-### TypeScript
+## よく使う検証コマンド
+
+### 型・テスト
+
 ```bash
-# Lint
-npx eslint . --ext .ts,.tsx
-
-# Type check
+# Worker
+cd api-worker
+npm test
 npx tsc --noEmit
+
+# Mobile
+cd ../wene-mobile
+npm run test:server
+npx tsc --noEmit
+
+# Contract
+cd ../grant_program
+anchor build
+anchor test --skip-build --provider.cluster localnet
 ```
 
-### Rust
+### devnet セットアップ
+
 ```bash
 cd grant_program
-cargo fmt
-cargo clippy
+npm run devnet:setup
 ```
 
-## Debugging
+その後、出力された `_RAW` を `wene-mobile/src/solana/devnetConfig.ts` へ反映します。詳細は [DEVNET_SETUP.md](./DEVNET_SETUP.md) を参照してください。
 
-### React Native
-- Shake device → "Debug" menu
-- React DevTools: `npx react-devtools`
-- Flipper for network/storage inspection
+## トラブルシューティング
 
-### Solana Program
-- `msg!()` macro for logging
-- View logs: `solana logs -u devnet`
-- Explorer: https://explorer.solana.com/?cluster=devnet
+### Metro の不調
+
+```bash
+cd wene-mobile
+npm run clean
+```
+
+### Android build 失敗
+
+```bash
+java -version
+cd wene-mobile/android && ./gradlew clean
+```
+
+Java 17 を使っていることを確認してください。
+
+### iOS build 失敗
+
+```bash
+cd wene-mobile/ios
+pod install --repo-update
+```
+
+### Phantom リダイレクト不調
+
+以下を確認します。
+
+1. `app.config.ts` の `scheme`
+2. deep link 受信ルート
+3. Phantom アプリが最新であること
+
+詳細は [PHANTOM_FLOW.md](./PHANTOM_FLOW.md) と [PHANTOM_DEBUG.md](./PHANTOM_DEBUG.md) を参照してください。

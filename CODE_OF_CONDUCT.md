@@ -1,39 +1,35 @@
-# Contributor Covenant Code of Conduct
+# 行動規範
 
-## Our Pledge
+このプロジェクトは、年齢、体格、目に見える障害・見えない障害、民族、性徴、性自認、性表現、経験年数、学歴、社会経済的状況、国籍、外見、人種、宗教、性的指向に関わらず、誰もが安心して参加できるコミュニティであることを目指します。
 
-We as members, contributors, and leaders pledge to make participation in our
-community a harassment-free experience for everyone, regardless of age, body
-size, visible or invisible disability, ethnicity, sex characteristics, gender
-identity and expression, level of experience, education, socio-economic status,
-nationality, personal appearance, race, religion, or sexual identity
-and orientation.
+## 私たちの約束
 
-## Our Standards
+メンバー、コントリビューター、メンテナーは、すべての参加者にとってハラスメントのない体験をつくるよう努めます。
 
-Examples of behavior that contributes to a positive environment:
+## 望ましい行動
 
-- Using welcoming and inclusive language
-- Being respectful of differing viewpoints and experiences
-- Gracefully accepting constructive criticism
-- Focusing on what is best for the community
-- Showing empathy towards other community members
+前向きな環境づくりにつながる行動の例:
 
-Examples of unacceptable behavior:
+- 歓迎的で包摂的な言葉を使う
+- 異なる視点や経験を尊重する
+- 建設的なフィードバックを丁寧に受け止める
+- コミュニティ全体にとって何が良いかを優先して考える
+- 他の参加者に共感をもって接する
 
-- The use of sexualized language or imagery
-- Trolling, insulting or derogatory comments, and personal or political attacks
-- Public or private harassment
-- Publishing others' private information without explicit permission
-- Other conduct which could reasonably be considered inappropriate
+## 許容されない行動
 
-## Enforcement
+以下のような行動は受け入れられません。
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the project team. All complaints will be reviewed and investigated
-and will result in a response that is deemed necessary and appropriate.
+- 性的な言動や画像の利用
+- 荒らし、侮辱、差別的なコメント、個人攻撃や政治的攻撃
+- 公的・私的を問わない嫌がらせ
+- 明示的な許可なく他者の私的情報を公開する行為
+- その他、合理的に見て不適切と判断される行為
 
-## Attribution
+## 対応
 
-This Code of Conduct is adapted from the [Contributor Covenant](https://www.contributor-covenant.org),
-version 2.1, available at https://www.contributor-covenant.org/version/2/1/code_of_conduct.html
+攻撃的、嫌がらせ、またはその他受け入れられない行動を見つけた場合は、プロジェクトチームに報告してください。すべての報告は確認・調査の対象となり、必要かつ適切と判断される対応を行います。
+
+## 出典
+
+この行動規範は [Contributor Covenant](https://www.contributor-covenant.org) version 2.1 をもとにしています。原文は https://www.contributor-covenant.org/version/2/1/code_of_conduct.html で参照できます。

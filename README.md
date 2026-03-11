@@ -212,7 +212,7 @@ npm run verify:production
 | --- | --- |
 | `grant_program/` | Solana コントラクトのワークスペース。コマンドは [grant_program/package.json](./grant_program/package.json) を参照 |
 | [api-worker/README.md](./api-worker/README.md) | API 契約、Worker 変数、監査と PoP 運用 |
-| [wene-mobile/README.md](./wene-mobile/README.md) | アプリ固有フロー、mobile/web 利用方法、Expo 詳細 |
+| [wene-mobile/README.ja.md](./wene-mobile/README.ja.md) | アプリ固有フロー、mobile/web 利用方法、Expo 詳細 |
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | アーキテクチャ概要 |
 | [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md) | 開発環境セットアップ |
 | [docs/DEVNET_SETUP.md](./docs/DEVNET_SETUP.md) | Devnet claim 検証手順 |

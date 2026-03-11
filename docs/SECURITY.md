@@ -1,131 +1,179 @@
-# Security Model & Threat Analysis
+# セキュリティモデルと脅威分析
 
-## Overview
+## 概要
 
-we-ne is designed with a **non-custodial** security model. The mobile app never has access to user private keys.
+we-ne は **non-custodial** を前提に設計されています。モバイルアプリはユーザー秘密鍵へアクセスせず、オンチェーン検証と off-chain 監査証跡を組み合わせて運用します。ただし、現時点では Worker / PoP signer を中心とする中央集約的 trust assumption が残っています。
 
-## Threat Model
+## 脅威モデル
 
 ### 1. Deep Link Injection
 
-**Threat**: Malicious app intercepts or crafts deep links to steal sessions.
+脅威:
 
-**Mitigations**:
-- All Phantom responses are encrypted with NaCl box
-- Decryption requires `dappSecretKey` stored only in app's AsyncStorage
-- URL parameters are strictly validated before processing
-- Session tokens are bound to specific dapp encryption keypair
+- 悪意のあるアプリが deep link を傍受または偽造し、セッション窃取や誤誘導を狙う
 
-**Code Location**: `src/utils/phantom.ts` - `parsePhantomRedirect()`, `decryptPhantomResponse()`
+主な対策:
+
+- Phantom レスポンスは NaCl box で暗号化される
+- 復号にはアプリが保持する `dappSecretKey` が必要
+- URL パラメータを厳格に検証する
+- セッションは特定の dapp 側鍵ペアに紐づく
+
+関連箇所:
+
+- `wene-mobile/src/utils/phantom.ts`
+  - `parsePhantomRedirect()`
+  - `decryptPhantomResponse()`
 
 ### 2. Session Hijacking
 
-**Threat**: Attacker steals Phantom session token to sign transactions.
+脅威:
 
-**Mitigations**:
-- Session is encrypted and stored in AsyncStorage (app-sandboxed)
-- Session alone is insufficient - requires `phantomEncryptionPublicKey` for signing
-- Each transaction requires user approval in Phantom app
+- Phantom session token を盗み、不正署名を試みる
 
-**Residual Risk**: Root/jailbroken devices can access AsyncStorage
+主な対策:
 
-### 3. Replay Attacks
+- セッションは app sandbox 内ストレージで扱う
+- セッション単独では不十分で、Phantom 側暗号鍵との組み合わせが必要
+- 実際の署名には Phantom でのユーザー承認が必要
 
-**Threat**: Attacker replays valid claim transaction to double-claim.
+残余リスク:
 
-**Mitigations**:
-- On-chain `ClaimReceipt` PDA prevents same-period claims
-- PDA seeds include `period_index` - one receipt per period per user
-- Solana's built-in replay protection via recent blockhash
+- root 化 / jailbreak 済み端末では AsyncStorage へのアクセスリスクがある
 
-**Code Location**: `grant_program/src/lib.rs` - `claim` instruction
+### 3. Replay Attack / Double Claim
 
-### 4. Sybil Attacks
+脅威:
 
-**Threat**: Attacker creates multiple wallets to claim multiple times.
+- 正当な claim を再送して二重受給を狙う
 
-**Mitigations**:
-- **Current**: Allowlist-based eligibility (Merkle root)
-- **Planned**: Cost of Forgery integration for Sybil resistance
-- **Design Choice**: Not identity-based to preserve privacy
+主な対策:
 
-**Limitations**: Allowlist management is off-chain responsibility
+- on-chain `ClaimReceipt` PDA で同一期間の claim を禁止
+- receipt seed に `period_index` を含める
+- Solana の recent blockhash によるリプレイ抑止
 
-### 5. Front-Running
+関連箇所:
 
-**Threat**: MEV bots observe pending claims and front-run.
+- `grant_program/programs/grant_program/src/lib.rs`
 
-**Analysis**:
-- Claims are user-specific (claimer pubkey in instruction)
-- Front-running doesn't benefit attacker for standard claims
-- Potential issue only if future features involve competitive claiming
+### 4. Sybil / Fraud
 
-**Status**: Low risk for current design
+脅威:
 
-### 6. Man-in-the-Middle (MITM)
+- 複数 wallet や複数アカウントを作って不正 claim を試みる
 
-**Threat**: Attacker intercepts RPC calls or deep links.
+主な対策:
 
-**Mitigations**:
-- RPC calls use HTTPS to trusted endpoints
-- Deep link payloads are encrypted end-to-end
-- Phantom's encryption prevents MITM on wallet communication
+- 現在: allowlist ベース判定
+- 現在: API レベルの rate limiting
+- 現在: Cost of Forgery 連携フック
+- 将来: trust assumption 縮小と運用ルール強化
 
-### 7. Phishing
+制約:
 
-**Threat**: Fake app or website tricks users into approving malicious transactions.
+- allowlist 管理や実運用上の本人確認は off-chain 側の責任に残る
 
-**Mitigations**:
-- Transaction details shown in Phantom before signing
-- Universal Links require domain verification (AASA/assetlinks.json)
-- Users educated to verify transaction details
+### 5. Audit Chain Tampering
 
-**User Responsibility**: Always review transaction in Phantom
+脅威:
 
-## Sensitive Data Handling
+- receipt や監査ログを後から改ざんし、参加証跡や transfer 記録を操作する
 
-### What we store (AsyncStorage)
+主な対策:
 
-| Data | Encrypted | Purpose |
-|------|-----------|---------|
-| `dappSecretKey` | No* | Decrypt Phantom responses |
-| `phantomSession` | Yes (by Phantom) | Authenticate to Phantom |
-| `walletPubkey` | No | Display connected wallet |
+- receipt に hash chain を持たせる
+- immutable sink への固定化を支援する
+- `/api/audit/receipts/verify` と `/api/audit/receipts/verify-code` を公開する
+- `/api/master/audit-integrity` により整合確認を行う
 
-*Stored in app-sandboxed storage, not accessible to other apps on non-rooted devices.
+残余リスク:
 
-### What we NEVER store
+- Worker が完全に侵害された場合、運用時点の trust assumption は残る
+- そのため immutable sink と公開検証導線を併用する
 
-- Wallet private keys
-- Seed phrases / mnemonics
-- Plaintext session tokens from other apps
+### 6. Signer / Config Drift
 
-## Logging Policy
+脅威:
 
-- **Production**: No sensitive data logged
-- **Debug**: May log encrypted payloads (not keys)
-- **Never logged**: Private keys, session tokens, decrypted payloads
+- PoP signer の公開鍵と on-chain `pop-config` がずれ、検証不能や誤動作を起こす
 
-**Code**: Debug logging uses `fetch()` to localhost only, disabled in production builds.
+主な対策:
 
-## Audit Status
+- `/v1/school/pop-status` で signer 状態を公開
+- `verify:production` で `pop-config` 整合を確認
+- HD rotation と key separation の導入計画を進める
 
-| Component | Audited | Notes |
-|-----------|---------|-------|
-| grant_program | ❌ No | External audit kickoff target: 2026-04-01 |
-| wene-mobile | ❌ No | Mobile app security review target: 2026-04-15 |
-| Dependencies | Partial | Major deps are audited |
+### 7. MITM
 
-## External Assurance Plan (as of 2026-02-22)
+脅威:
 
-1. 2026-03-15: Audit scope freeze for `grant_program` and API trust boundaries.
-2. 2026-04-01: External smart contract audit kickoff.
-3. 2026-04-30: Publish remediation status summary in repository docs.
+- RPC や deep link を中間者が傍受し、内容を改ざんする
 
-## Recommendations for Production
+主な対策:
 
-1. **Smart Contract Audit**: Mandatory before mainnet
-2. **Penetration Testing**: Mobile app security review
-3. **Bug Bounty**: Establish responsible disclosure program
-4. **Monitoring**: On-chain event monitoring for anomalies
-5. **Rate Limiting**: RPC endpoint protection
+- RPC は HTTPS 前提
+- deep link payload は end-to-end で暗号化
+- Phantom 通信の暗号化により wallet 経路の MITM を抑止
+
+### 8. Phishing
+
+脅威:
+
+- 偽アプリや偽サイトがユーザーに悪意ある署名を承認させる
+
+主な対策:
+
+- Phantom で署名内容を確認できる
+- Universal Links によるドメイン検証を使う
+- 利用者に署名内容の確認を促す
+
+## 機微データの取り扱い
+
+### `wene-mobile` 側で保持するもの
+
+| データ | 暗号化 | 用途 |
+| --- | --- | --- |
+| `dappSecretKey` | No* | Phantom レスポンス復号 |
+| `phantomSession` | Phantom 側で暗号化された payload | Phantom とのセッション維持 |
+| `walletPubkey` | No | 接続 wallet の表示 |
+
+\* 非 root 端末では app sandbox 内に保持されます。
+
+### 保持しないもの
+
+- wallet 秘密鍵
+- seed phrase / mnemonic
+- 他アプリ由来の平文セッショントークン
+
+## ログ方針
+
+- Production: 機微情報はログしない
+- Debug: 暗号化済み payload や状態遷移は出す場合がある
+- 常に出さないもの
+  - 秘密鍵
+  - 平文 session
+  - 復号済み payload
+
+## 監査状況
+
+| コンポーネント | 監査状況 | 補足 |
+| --- | --- | --- |
+| `grant_program` | ❌ 未監査 | 外部監査キックオフ目標: 2026-04-01 |
+| `wene-mobile` | ❌ 未監査 | モバイルセキュリティレビュー目標: 2026-04-15 |
+| `api-worker` | ❌ 未監査 | trust boundary の整理と外部確認が必要 |
+| 依存関係 | 一部対応 | メジャー依存は継続確認が必要 |
+
+## 外部保証計画（2026-02-22 時点）
+
+1. 2026-03-15: `grant_program` と API trust boundary の監査範囲を確定
+2. 2026-04-01: スマートコントラクト外部監査を開始
+3. 2026-04-30: 是正ステータスの要約を repository docs に公開
+
+## 本番前提での推奨事項
+
+1. スマートコントラクト外部監査
+2. モバイルアプリのセキュリティレビュー
+3. responsible disclosure / bug bounty の整備
+4. on-chain / Worker 両面の監視強化
+5. RPC / API の rate limiting と fail-closed ポリシーの明確化

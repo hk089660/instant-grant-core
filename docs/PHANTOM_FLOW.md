@@ -1,82 +1,84 @@
-# Phantom Wallet Integration
+# Phantom Wallet 連携フロー
 
-This document describes how we-ne integrates with Phantom wallet for transaction signing.
+この文書では、we-ne が Phantom wallet とどのように連携して接続・署名を行うかを整理します。
 
-**デバッグ**: signTransaction で戻らない場合は [PHANTOM_DEBUG.md](./PHANTOM_DEBUG.md) を参照。
+デバッグ:
 
-## Overview
+- `signTransaction` 後にアプリへ戻らない場合は [PHANTOM_DEBUG.md](./PHANTOM_DEBUG.md) を参照してください。
 
-we-ne uses Phantom's [deep link protocol](https://docs.phantom.app/phantom-deeplinks/deeplinks-ios-and-android) for mobile wallet integration. This allows non-custodial signing without exposing private keys to the app.
+## 概要
 
-## Connection Flow
+we-ne は Phantom の [deep link protocol](https://docs.phantom.app/phantom-deeplinks/deeplinks-ios-and-android) を使って、モバイル端末上で non-custodial な署名フローを実現しています。アプリ本体は秘密鍵を保持せず、Phantom が署名だけを担当します。
 
-```
+## 接続フロー
+
+```text
 ┌─────────────┐                    ┌─────────────┐
 │  we-ne App  │                    │   Phantom   │
 └──────┬──────┘                    └──────┬──────┘
        │                                  │
-       │ 1. Generate X25519 keypair       │
+       │ 1. X25519 鍵ペア生成             │
        │    (dappPublicKey, dappSecretKey)│
        │                                  │
-       │ 2. Open deep link ───────────────►
+       │ 2. connect deep link を開く ─────►
        │    phantom.app/ul/v1/connect     │
        │    ?dapp_encryption_public_key   │
        │    &redirect_link                │
-       │    &cluster                      │
+       │    &cluster=devnet               │
        │                                  │
-       │                    3. User approves
+       │                    3. ユーザー承認
        │                                  │
-       │ ◄─────────────── 4. Redirect back│
+       │ ◄─────────────── 4. redirect back│
        │    wene://phantom/connect        │
        │    ?data=<encrypted>             │
        │    &nonce=<nonce>                │
        │    &phantom_encryption_public_key│
        │                                  │
-       │ 5. Decrypt response with         │
-       │    dappSecretKey + phantomPubKey │
-       │    → { publicKey, session }      │
+       │ 5. dappSecretKey + phantomPubKey │
+       │    で復号                        │
+       │    -> { publicKey, session }     │
        │                                  │
-       │ 6. Store session for signing     │
+       │ 6. session を保持                │
        ▼                                  ▼
 ```
 
-## Sign Transaction Flow
+## 署名フロー
 
-```
+```text
 ┌─────────────┐                    ┌─────────────┐
 │  we-ne App  │                    │   Phantom   │
 └──────┬──────┘                    └──────┬──────┘
        │                                  │
-       │ 1. Build unsigned transaction    │
+       │ 1. 未署名 transaction を構築     │
        │                                  │
-       │ 2. Encrypt payload with          │
-       │    phantomEncryptionPublicKey    │
+       │ 2. payload を暗号化              │
        │    { transaction, session }      │
        │                                  │
-       │ 3. Open deep link ───────────────►
+       │ 3. signTransaction deep link ───►
        │    phantom.app/ul/v1/signTransaction
        │    ?payload=<encrypted>          │
        │    &dapp_encryption_public_key   │
        │    &nonce                        │
+       │    &cluster=devnet               │
        │                                  │
-       │                    4. User reviews
-       │                       and signs  │
+       │                    4. ユーザー確認・署名
        │                                  │
-       │ ◄─────────────── 5. Redirect back│
+       │ ◄─────────────── 5. redirect back│
        │    wene://phantom/signTransaction│
        │    ?data=<encrypted>             │
        │    &nonce                        │
        │                                  │
-       │ 6. Decrypt → signed transaction  │
+       │ 6. 復号 -> signed transaction    │
        │                                  │
-       │ 7. Submit to Solana RPC          │
+       │ 7. Solana RPC へ送信             │
        ▼                                  ▼
 ```
 
-## Deep Link Formats
+## Deep Link フォーマット
 
 ### Connect Request
-```
+
+```text
 https://phantom.app/ul/v1/connect
   ?app_url=https://wene.app
   &dapp_encryption_public_key=<base64>
@@ -85,14 +87,16 @@ https://phantom.app/ul/v1/connect
 ```
 
 ### Connect Response
-```
+
+```text
 wene://phantom/connect
   ?data=<base64_encrypted>
   &nonce=<base64>
   &phantom_encryption_public_key=<base64>
 ```
 
-Decrypted payload:
+復号後の payload:
+
 ```json
 {
   "public_key": "ABC123...",
@@ -101,7 +105,8 @@ Decrypted payload:
 ```
 
 ### Sign Transaction Request
-```
+
+```text
 https://phantom.app/ul/v1/signTransaction
   ?dapp_encryption_public_key=<base64>
   &nonce=<base58>
@@ -112,69 +117,75 @@ https://phantom.app/ul/v1/signTransaction
 ```
 
 ### Sign Transaction Response
-```
+
+```text
 wene://phantom/signTransaction
   ?data=<base64_encrypted>
   &nonce=<base64>
   &phantom_encryption_public_key=<base64>
 ```
 
-Decrypted payload:
+復号後の payload:
+
 ```json
 {
   "signed_transaction": "<base64_serialized_tx>"
 }
 ```
 
-## Key Files
+## 主要ファイル
 
-| File | Purpose |
-|------|---------|
-| `src/utils/phantom.ts` | URL building, encryption/decryption |
-| `src/store/phantomStore.ts` | Keypair storage, session state |
-| `src/wallet/openPhantom.ts` | Deep link opening with fallbacks |
-| `app/phantom/[action].tsx` | Redirect handler screen |
+| ファイル | 役割 |
+| --- | --- |
+| `wene-mobile/src/utils/phantom.ts` | URL 構築、暗号化、復号 |
+| `wene-mobile/src/store/phantomStore.ts` | 鍵ペア保持と session 状態 |
+| `wene-mobile/src/wallet/openPhantom.ts` | Phantom 起動とフォールバック |
+| `wene-mobile/app/phantom/[action].tsx` | redirect 受信ルート |
+| `wene-mobile/src/wallet/PhantomWalletAdapter.ts` | wallet adapter 実装 |
 
-## Error Handling
+## エラーハンドリング
 
-### Common Errors
+### よくあるエラー
 
-| Error | Cause | Solution |
-|-------|-------|----------|
-| "Phantom public key not found" | Missing URL param | Check redirect URL format |
-| "Failed to decrypt" | Wrong keypair | Ensure same keypair used |
-| "Encryption key pair not found" | AsyncStorage cleared | Reconnect wallet |
-| Timeout | User didn't return | Show retry button |
+| エラー | 原因 | 対処 |
+| --- | --- | --- |
+| `Phantom public key not found` | URL パラメータ不足 | redirect URL 形式を確認 |
+| `Failed to decrypt` | 鍵ペア不一致 | 同じ dapp 鍵ペアで connect / sign しているか確認 |
+| `Encryption key pair not found` | AsyncStorage が消えている | 再接続する |
+| Timeout | ユーザーが戻ってこない | 再試行ボタンを出す |
 
-### Timeout Handling
+### Timeout 例
 
 ```typescript
-// app/phantom/[action].tsx
 timeoutId = setTimeout(() => {
   setStatus('error');
   setErrorMessage('Phantomからのリダイレクトがタイムアウトしました');
-}, 30000); // 30 second timeout for connect
+}, 30000);
 ```
 
-## Security Considerations
+## セキュリティ上の注意
 
-1. **Keypair Storage**: `dappSecretKey` stored in AsyncStorage (app-sandboxed)
-2. **Session Validity**: Sessions may expire; handle reconnection gracefully
-3. **URL Validation**: Always validate URL parameters before processing
-4. **Nonce Usage**: Each request uses fresh random nonce
+1. `dappSecretKey` は app sandbox 内に保持する
+2. session は期限切れを前提に再接続導線を持つ
+3. URL パラメータは常に検証する
+4. nonce は毎回新しく生成する
 
-## Testing
+## テスト
 
-### Manual Testing
-1. Install Phantom on test device
-2. Run app in development mode
-3. Tap "Connect Wallet" 
-4. Approve in Phantom
-5. Verify redirect and session storage
+### 手動確認
+
+1. 検証端末に Phantom をインストールする
+2. 開発モードでアプリを起動する
+3. `Connect Wallet` を押す
+4. Phantom で承認する
+5. redirect と session 保持を確認する
 
 ### Debug Logging
-Debug logs are sent to localhost during development:
+
+開発時には localhost へ debug log を送る実装があります。
+
 ```typescript
 fetch('http://127.0.0.1:7242/ingest/...', { ... })
 ```
-These are no-ops in production.
+
+本番ビルドでは no-op として扱います。

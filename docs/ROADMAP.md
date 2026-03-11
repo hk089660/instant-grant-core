@@ -1,152 +1,182 @@
-# Roadmap
+# ロードマップ
 
-This document outlines the development roadmap for we-ne.
+we-ne の開発ロードマップです。現状の到達点、実証パイロットの目標、今後 3 か月の優先事項をまとめています。
 
-## Vision
+## ビジョン
 
-Enable instant, transparent, and low-cost benefit distribution for public support programs in Japan and beyond.
+日本を含む公的支援プログラムに対して、即時性、透明性、低コストを備えた給付配布基盤を実現することを目指します。
 
-## Current Status (MVP)
+## 現在地（MVP）
 
-✅ **Completed**
-- SPL token-based periodic grants (smart contract)
-- Mobile app for recipients (React Native/Expo)
-- Phantom wallet integration
-- Deep link support (custom scheme + Universal Links)
-- Basic claim flow with double-claim prevention
-- Merkle-based allowlist claim path (`claim_grant_with_proof`)
-- PoP signature verification on Solana (`verify_and_record_pop_proof`)
-- Admin/master audit visibility APIs and receipt verification endpoint
+### 実装済み
 
-## Status Snapshot (as of 2026-02-22)
+- SPL トークンによる定期給付機能（スマートコントラクト）
+- 受給者向けモバイルアプリ（React Native / Expo）
+- Phantom ウォレット連携
+- Deep link 対応（カスタムスキーム + Universal Links）
+- 二重請求防止を含む基本 claim フロー
+- Merkle ベースの allowlist claim 経路（`claim_grant_with_proof`）
+- Solana 上での PoP 署名検証（`verify_and_record_pop_proof`）
+- admin / master 向けの監査可視化 API と receipt 検証 endpoint
 
-Implemented now:
-- On/off-chain route policy toggle (enforced vs non-enforced) per event; PoP verification remains mandatory inside on-chain claim instructions
-- Runtime/PoP/audit readiness endpoints for operator verification
-- Hash-chain based transfer and participation receipt audit traces
+### 2026-02-22 時点のステータス要約
 
-Planned next:
-- External audit execution and remediation
-- CI/CD and test coverage hardening
-- Federation/adapter design generalization
-- Trust-assumption reduction plan (single-operator/signer -> multi-operator/multi-signer)
-- One real-world pilot (anonymous organization allowed) + fixed one-page onboarding flow
+現在すでに実装されている内容:
 
-## Pilot Validation (Real Adopter Fit)
+- イベント単位の on/off-chain 経路ポリシー切り替え
+  - enforced / non-enforced の切り替えに対応
+  - オンチェーン claim 命令内では PoP 検証を必須のまま維持
+- オペレーター確認用の runtime / PoP / audit readiness endpoint
+- 転送監査と参加レシート監査のための hash-chain ベース監査証跡
 
-Purpose:
-- Avoid "too-early" evaluation by showing at least one real operator can run the flow end-to-end.
+次に進める内容:
 
-Profile (anonymous allowed):
-- 1 institution (school / education NPO / municipal contractor)
-- `admin 1-3` operators, `20-200` participants
+- 外部監査の実施と是正
+- CI/CD とテストカバレッジの強化
+- federation / adapter 設計の汎化
+- trust assumption の縮小計画
+  - 単一 operator / signer から multi-operator / multi-signer へ移行
+- 実在組織でのパイロット 1 件
+  - 匿名組織は許容
+  - 固定 1 ページのオンボーディングフローを併用
 
-Pilot timeline targets:
-- [ ] Candidate lock (anonymous naming policy confirmed): 2026-03-10
-- [ ] Operator dry-run complete: 2026-03-24
-- [ ] Live pilot event execution: 2026-04-15
-- [ ] Redacted evidence package published: 2026-04-22
+## 実証パイロット（実運用適合性の確認）
 
-Pilot success criteria:
-- At least one event runs through `admin login -> QR issuance -> user claim -> success -> audit verification`
-- Runtime/readiness snapshots (`/v1/school/pop-status`, `/v1/school/runtime-status`, `/v1/school/audit-status`) are captured
-- Receipt verification by code (`/api/audit/receipts/verify-code`) is reproducible
-- If on-chain path is used, `txSignature` and `receiptPubkey` are captured and independently verifiable
+### 目的
 
-Reference one-page flow:
-- `docs/PILOT_ONBOARDING_FLOW.md`
+- 机上評価に留まらず、少なくとも 1 つの実運用主体がエンドツーエンドでフローを回せることを示す
 
-## Short Term (2 Weeks)
+### 想定プロファイル
 
-### Smart Contract
-- [x] Merkle-based allowlist verification
-- [ ] Event emission for better indexing
-- [ ] Instruction to update grant parameters
-- [ ] Additional negative-path tests for PoP message validation
+- 対象組織: 1 機関（学校 / 教育 NPO / 自治体委託先）
+- オペレーター: `admin 1-3`
+- 参加者: `20-200`
 
-### Mobile App
-- [ ] Improved error handling and user feedback
-- [ ] Transaction history screen
-- [ ] Offline-capable grant info caching
+### スケジュール目標
 
-### Infrastructure
-- [ ] CI/CD pipeline (GitHub Actions)
-- [ ] Automated testing coverage >60%
-- [ ] Devnet deployment scripts
-- [ ] PoP chain recovery drill (`reset/fork handling/stream cut`) and operator runbook validation
+- [ ] 候補先の確定（匿名表記ポリシー確定を含む）: 2026-03-10
+- [ ] オペレーターのドライラン完了: 2026-03-24
+- [ ] 本番パイロットイベント実施: 2026-04-15
+- [ ] マスキング済みエビデンス公開: 2026-04-22
 
-## Medium Term (1 Month)
+### 成功条件
 
-### Smart Contract
-- [ ] Multi-token grant support
-- [ ] Batch claim optimization
-- [ ] Grant expiry and auto-close
+- 少なくとも 1 つのイベントで `admin login -> QR issuance -> user claim -> success -> audit verification` が通る
+- runtime / readiness スナップショット（`/v1/school/pop-status`、`/v1/school/runtime-status`、`/v1/school/audit-status`）が取得されている
+- コードによる receipt 検証（`/api/audit/receipts/verify-code`）を第三者が再現できる
+- オンチェーン経路を使った場合は、`txSignature` と `receiptPubkey` を取得し、独立検証できる
 
-### Mobile App
-- [ ] Multiple wallet support (Solflare, etc.)
-- [ ] Push notifications for claim availability
-- [ ] Localization (EN/JA complete)
+### 参照フロー
 
-### Admin Tools
-- [ ] Web dashboard for grant creators
-- [ ] Analytics and monitoring
-- [ ] Bulk allowlist management
+- [PILOT_ONBOARDING_FLOW.md](./PILOT_ONBOARDING_FLOW.md)
 
-### Security
-- [ ] Smart contract audit (external) - vendor selection target: 2026-03-15
-- [ ] Smart contract audit kickoff target: 2026-04-01
-- [ ] Mobile app security review target: 2026-04-15
-- [ ] Bug bounty program launch
+## 短期（2 週間）
 
-### Trust Assumption Reduction (Operator/Signer Decentralization)
-- [ ] Role-key separation (`operator`, `pop_signer`, `audit_admin`) + key-rotation runbook target: 2026-03-31
-- [ ] `2-of-3 multisig` for high-impact grant operations (`upsert_pop_config`, `set_paused`, `set_allowlist_root`, `close_grant`) target: 2026-04-30
-- [ ] `threshold PoP signer (t-of-n)` design freeze + devnet PoC target: 2026-05-31
+### スマートコントラクト
 
-## Long Term (3 Months)
+- [x] Merkle ベースの allowlist 検証
+- [ ] インデックス性を高めるイベント発火
+- [ ] grant パラメータ更新命令の追加
+- [ ] PoP メッセージ検証の negative-path テスト追加
 
-### Cost of Forgery Integration
-- [ ] Sybil resistance layer
-- [ ] Privacy-preserving eligibility proofs
-- [ ] Cross-grant deduplication
+### モバイルアプリ
 
-### Ecosystem
-- [ ] SDK for third-party integrations
-- [ ] API for grant discovery
-- [ ] Partner onboarding tools
+- [ ] エラーハンドリングとユーザーフィードバックの改善
+- [ ] 取引履歴画面
+- [ ] grant 情報のオフラインキャッシュ
 
-### Compliance
-- [ ] KYC integration (optional, for regulated use cases)
-- [ ] Audit trail and reporting tools
-- [ ] Multi-sig grant administration
+### インフラ
 
-### Scale
-- [ ] Mainnet deployment
-- [ ] Performance optimization
-- [ ] Geographic expansion beyond Japan
+- [ ] CI/CD パイプライン（GitHub Actions）
+- [ ] 自動テストカバレッジ 60% 超
+- [ ] devnet デプロイスクリプト
+- [ ] PoP chain 復旧ドリル（`reset / fork handling / stream cut`）とオペレーター runbook の検証
 
-## Grant Milestones (for Solana Foundation)
+## 中期（1 か月）
 
-| Milestone | Deliverable | Timeline |
-|-----------|-------------|----------|
-| M1 | Devnet MVP with docs | Complete |
-| M2 | Allowlist + audit prep | Target: 2026-03-08 |
-| M3 | Admin dashboard + audit + role-key separation | Target: 2026-03-31 |
-| M4 | One pilot (anonymous allowed) + one-page onboarding flow + redacted evidence package | Target: 2026-04-22 |
-| M5 | Mainnet beta readiness + multisig/threshold signer PoC | Target: 2026-05-31 |
+### スマートコントラクト
 
-## How to Contribute
+- [ ] 複数トークン給付への対応
+- [ ] バッチ claim の最適化
+- [ ] grant の有効期限と自動 close
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for guidelines.
+### モバイルアプリ
 
-Priority areas for contributions:
-1. Testing (unit + integration)
-2. Documentation improvements
-3. Localization
-4. Security review
-5. UI/UX feedback
+- [ ] 複数ウォレット対応（Solflare など）
+- [ ] claim 可能通知の push 配信
+- [ ] 多言語化の完成（EN / JA）
 
-## Contact
+### 管理ツール
 
-- GitHub Issues: Feature requests and bugs
-- GitHub Discussions: General questions
+- [ ] grant 作成者向け Web ダッシュボード
+- [ ] 分析と監視
+- [ ] allowlist の一括管理
+
+### セキュリティ
+
+- [ ] スマートコントラクト監査（外部）: ベンダー選定目標 2026-03-15
+- [ ] スマートコントラクト監査キックオフ目標: 2026-04-01
+- [ ] モバイルアプリのセキュリティレビュー目標: 2026-04-15
+- [ ] バグバウンティ開始
+
+### Trust Assumption 縮小（Operator / Signer 分散化）
+
+- [ ] 役割鍵の分離（`operator`、`pop_signer`、`audit_admin`）と key rotation runbook: 2026-03-31 目標
+- [ ] 高影響 grant 操作向け `2-of-3 multisig`
+  - 対象: `upsert_pop_config`、`set_paused`、`set_allowlist_root`、`close_grant`
+  - 目標: 2026-04-30
+- [ ] `threshold PoP signer (t-of-n)` の設計確定と devnet PoC: 2026-05-31 目標
+
+## 長期（3 か月）
+
+### Cost of Forgery 連携
+
+- [ ] Sybil resistance レイヤー
+- [ ] プライバシーを保った eligibility proof
+- [ ] grant 横断の重複排除
+
+### エコシステム
+
+- [ ] サードパーティ連携用 SDK
+- [ ] grant discovery API
+- [ ] パートナー向けオンボーディングツール
+
+### コンプライアンス
+
+- [ ] KYC 連携
+  - 規制用途では任意オプション
+- [ ] 監査証跡とレポーティングツール
+- [ ] multisig による grant 管理
+
+### スケール
+
+- [ ] mainnet デプロイ
+- [ ] パフォーマンス最適化
+- [ ] 日本国外への展開
+
+## Solana Foundation 向けマイルストーン
+
+| マイルストーン | 成果物 | 期限 |
+| --- | --- | --- |
+| M1 | devnet MVP とドキュメント | 完了 |
+| M2 | allowlist + 監査準備 | 目標: 2026-03-08 |
+| M3 | admin ダッシュボード + 監査 + 役割鍵分離 | 目標: 2026-03-31 |
+| M4 | パイロット 1 件（匿名可）+ 1 ページオンボーディングフロー + マスキング済みエビデンス | 目標: 2026-04-22 |
+| M5 | mainnet beta readiness + multisig / threshold signer PoC | 目標: 2026-05-31 |
+
+## コントリビュート
+
+ガイドラインは [CONTRIBUTING.md](../CONTRIBUTING.md) を参照してください。
+
+優先的に歓迎する領域:
+
+1. テスト（unit + integration）
+2. ドキュメント改善
+3. 多言語化
+4. セキュリティレビュー
+5. UI / UX フィードバック
+
+## 連絡先
+
+- GitHub Issues: バグ報告、機能要望
+- 問い合わせ全般: GitHub Issues を利用

@@ -1,59 +1,61 @@
-# Security Policy
+# セキュリティポリシー
 
-## Reporting a Vulnerability
+## 脆弱性の報告
 
-**Please do NOT report security vulnerabilities through public GitHub issues.**
+**セキュリティ脆弱性は、公開 GitHub Issue では報告しないでください。**
 
-If you discover a security vulnerability, please report it privately:
+脆弱性を見つけた場合は、以下の手段で非公開に報告してください。
 
-1. **Email**: [Create a private security advisory](https://github.com/hk089660/instant-grant-core/security/advisories/new) on GitHub
-2. **Include**:
-   - Description of the vulnerability
-   - Steps to reproduce
-   - Potential impact
-   - Suggested fix (if any)
+1. GitHub の [Private Security Advisory](https://github.com/hk089660/instant-grant-core/security/advisories/new) を作成する
+2. 可能であれば以下を含める
+   - 脆弱性の概要
+   - 再現手順
+   - 想定される影響
+   - 修正案（あれば）
 
-We will acknowledge receipt within 48 hours and provide a detailed response within 7 days.
+受領後 48 時間以内に初回応答し、7 日以内を目安に詳細な返信を行います。
 
-## Supported Versions
+## サポート対象バージョン
 
-| Version | Supported          |
-| ------- | ------------------ |
-| main    | :white_check_mark: |
-| < main  | :x:                |
+| バージョン | サポート |
+| --- | --- |
+| `main` | ✅ |
+| `main` 以外の過去状態 | ❌ |
 
-## Security Model
+## セキュリティモデル
 
-### Smart Contract (grant_program)
+### Smart Contract（`grant_program`）
 
-- **Non-custodial**: Users maintain control of their wallets
-- **PDA-based**: All state accounts are Program Derived Addresses
-- **No admin keys**: Once deployed, no privileged operations except grant owner
-- **Audit status**: NOT AUDITED - use at your own risk
+- 非保管型: ユーザーは自分のウォレットを保持する
+- PDA ベース: 主要状態は Program Derived Address で管理する
+- 特権の最小化: grant owner 以外の常設管理キーを持たない設計を基本とする
+- 監査状況: **未監査**。本番利用前の外部監査が前提
 
-### Mobile App (wene-mobile)
+### Mobile App（`wene-mobile`）
 
-- **No private keys stored**: App never has access to wallet private keys
-- **Phantom integration**: Keys stay in Phantom wallet
-- **Session tokens**: Encrypted with NaCl box, stored in AsyncStorage
-- **Deep link validation**: Strict URL parsing to prevent injection
+- 秘密鍵を保持しない: アプリはウォレット秘密鍵へアクセスしない
+- Phantom 連携: 鍵は Phantom 側に留まる
+- セッショントークン: NaCl box を用いた暗号化レスポンスとして扱う
+- Deep link 検証: URL パラメータを厳格に検証する
 
-### Known Limitations
+## 既知の制約
 
-1. **Sybil resistance**: Allowlist-based, not identity-based
-2. **Replay attacks**: Prevented by period_index + ClaimReceipt PDA
-3. **Front-running**: Possible on public mempool (standard Solana limitation)
+1. Sybil resistance は現状 allowlist ベースであり、本人確認ベースではない
+2. リプレイ攻撃は `period_index + ClaimReceipt PDA` で抑止している
+3. Front-running は公開 mempool 上で理論上あり得るが、現行 claim モデルでは影響は限定的
 
-## Security Best Practices for Contributors
+## コントリビューター向けベストプラクティス
 
-1. **Never commit secrets**: Use `.env.example` as template
-2. **Validate all inputs**: Especially deep link parameters
-3. **Use constant-time comparisons**: For cryptographic operations
-4. **Audit dependencies**: Check for known vulnerabilities
-5. **Test edge cases**: Empty inputs, malformed data, timeouts
+1. 秘密情報をコミットしない
+   - `.env.example` をテンプレートとして使う
+2. 入力を必ず検証する
+   - 特に deep link と API 入力は厳格に扱う
+3. 暗号処理では constant-time 比較を優先する
+4. 依存関係の既知脆弱性を定期確認する
+5. 空入力、壊れた入力、タイムアウトなどの edge case をテストする
 
-## Disclosure Policy
+## 公開方針
 
-- We follow responsible disclosure
-- Public disclosure after fix is deployed
-- Credit given to reporters (unless anonymity requested)
+- responsible disclosure を採用する
+- 修正がデプロイされた後に公開開示する
+- 匿名希望がなければ報告者へクレジットを付与する
