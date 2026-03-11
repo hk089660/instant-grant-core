@@ -485,6 +485,7 @@ type TransferLogView = {
 };
 
 type TransferLogRoleView = 'admin' | 'master';
+type TransferLogModeView = 'onchain' | 'offchain';
 
 type UserTicketTransferSnapshot = {
   txSignature: string | null;
@@ -5829,8 +5830,10 @@ export class SchoolStore implements DurableObject {
   private async getTransferLogs(role: TransferLogRoleView, options: {
     limit: number;
     eventId?: string | null;
+    mode?: TransferLogModeView | null;
   }): Promise<TransferLogView[]> {
     const eventIdFilter = options.eventId?.trim() || null;
+    const modeFilter = options.mode ?? null;
     const scanMultiplier = eventIdFilter ? 50 : 6;
     const scanCap = eventIdFilter ? AUDIT_ENTRY_SCAN_LIMIT : 1000;
     const scanLimit = Math.min(scanCap, Math.max(options.limit * scanMultiplier, options.limit));
@@ -5847,6 +5850,7 @@ export class SchoolStore implements DurableObject {
       const view = this.toTransferLogView(entry);
       if (!view) continue;
       if (eventIdFilter && view.eventId !== eventIdFilter) continue;
+      if (modeFilter && view.transfer.mode !== modeFilter) continue;
       items.push(this.applyTransferRoleView(view, role));
       if (items.length >= options.limit) break;
     }
@@ -7041,13 +7045,16 @@ export class SchoolStore implements DurableObject {
       );
       const eventIdRaw = url.searchParams.get('eventId');
       const eventId = eventIdRaw && eventIdRaw.trim() ? eventIdRaw.trim() : null;
-      const items = await this.getTransferLogs('admin', { limit, eventId });
+      const modeRaw = this.normalizeStringField(url.searchParams.get('mode'));
+      const mode = modeRaw === 'onchain' || modeRaw === 'offchain' ? modeRaw : null;
+      const items = await this.getTransferLogs('admin', { limit, eventId, mode });
       return Response.json({
         roleView: 'admin',
         strictLevel: 'admin_transfer_visible_no_pii',
         checkedAt: new Date().toISOString(),
         limit,
         eventId,
+        ...(mode ? { mode } : {}),
         items,
       });
     }
@@ -7067,13 +7074,16 @@ export class SchoolStore implements DurableObject {
       );
       const eventIdRaw = url.searchParams.get('eventId');
       const eventId = eventIdRaw && eventIdRaw.trim() ? eventIdRaw.trim() : null;
-      const items = await this.getTransferLogs('master', { limit, eventId });
+      const modeRaw = this.normalizeStringField(url.searchParams.get('mode'));
+      const mode = modeRaw === 'onchain' || modeRaw === 'offchain' ? modeRaw : null;
+      const items = await this.getTransferLogs('master', { limit, eventId, mode });
       return Response.json({
         roleView: 'master',
         strictLevel: 'master_full',
         checkedAt: new Date().toISOString(),
         limit,
         eventId,
+        ...(mode ? { mode } : {}),
         items,
       });
     }

@@ -358,6 +358,118 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     expect(message[0]).toBe(2);
   });
 
+  it('serializes concurrent PoP proof requests without forking the chain', async () => {
+    const originalGet = state.storage.get.bind(state.storage);
+    const originalPut = state.storage.put.bind(state.storage);
+    state.storage.get = (async <T = unknown>(key: string): Promise<T | undefined> => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return originalGet<T>(key);
+    }) as typeof state.storage.get;
+    state.storage.put = (async (key: string, value: unknown): Promise<void> => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return originalPut(key, value);
+    }) as typeof state.storage.put;
+
+    const createRes = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'pop concurrent event',
+          datetime: '2026/02/21 10:15',
+          host: 'admin',
+          ticketTokenAmount: 1,
+        }),
+      })
+    );
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as { id: string };
+
+    const grant = 'So11111111111111111111111111111111111111112';
+    const claimers = Array.from({ length: 3 }, () => bs58.encode(nacl.sign.keyPair().publicKey));
+    const confirmationCodes: string[] = [];
+
+    for (let i = 0; i < 3; i += 1) {
+      const registerRes = await store.fetch(
+        new Request('https://example.com/api/users/register', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            userId: `pop-race-user-${i}`,
+            displayName: `PoP Race User ${i}`,
+            pin: '1234',
+          }),
+        })
+      );
+      expect(registerRes.status).toBe(200);
+      const registered = (await registerRes.json()) as { userId?: string };
+      expect(typeof registered.userId).toBe('string');
+
+      const claimRes = await store.fetch(
+        new Request(`https://example.com/api/events/${encodeURIComponent(created.id)}/claim`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            userId: registered.userId,
+            pin: '1234',
+          }),
+        })
+      );
+      expect(claimRes.status).toBe(200);
+      const claimBody = (await claimRes.json()) as { confirmationCode?: string };
+      expect(typeof claimBody.confirmationCode).toBe('string');
+      confirmationCodes.push(claimBody.confirmationCode as string);
+    }
+
+    const proofResponses = await Promise.all(
+      confirmationCodes.map((confirmationCode, index) =>
+        store.fetch(
+          new Request('https://example.com/v1/school/pop-proof', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              eventId: created.id,
+              confirmationCode,
+              grant,
+              claimer: claimers[index],
+              periodIndex: '0',
+            }),
+          })
+        )
+      )
+    );
+
+    for (const res of proofResponses) {
+      expect(res.status).toBe(200);
+    }
+
+    const proofs = await Promise.all(
+      proofResponses.map(async (res) => {
+        return (await res.json()) as {
+          entryHash?: string;
+          prevHash?: string;
+          streamPrevHash?: string;
+        };
+      })
+    );
+
+    const genesis = '0'.repeat(64);
+    expect(proofs[0].prevHash).toBe(genesis);
+    expect(proofs[0].streamPrevHash).toBe(genesis);
+    expect(proofs[1].prevHash).toBe(proofs[0].entryHash);
+    expect(proofs[1].streamPrevHash).toBe(proofs[0].entryHash);
+    expect(proofs[2].prevHash).toBe(proofs[1].entryHash);
+    expect(proofs[2].streamPrevHash).toBe(proofs[1].entryHash);
+
+    const uniqueEntryHashes = new Set(proofs.map((proof) => proof.entryHash));
+    expect(uniqueEntryHashes.size).toBe(3);
+
+    const globalKey = `pop_chain:lastHash:global:${grant}`;
+    const streamKey = `pop_chain:lastHash:stream:${grant}`;
+    expect(await state.storage.get(globalKey)).toBe(proofs[2].entryHash);
+    expect(await state.storage.get(streamKey)).toBe(proofs[2].entryHash);
+  });
+
   it('does not advance stored pop chain when client-provided expected hashes are used', async () => {
     const createRes = await store.fetch(
       new Request('https://example.com/v1/school/events', {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { View, StyleSheet, ScrollView, Platform, TextInput } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform, TextInput, useWindowDimensions } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as QRCode from 'qrcode';
 import { AppText, Button, Card, AdminShell, Loading } from '../../ui/components';
@@ -8,20 +8,14 @@ import { closeAdminEvent, fetchAdminEvent, fetchAdminTransferLogs, fetchClaimant
 import type { SchoolEvent } from '../../types/school';
 import { usePolling } from '../../hooks/usePolling';
 
-function isOnchainTransfer(item: TransferLogEntry): boolean {
-  return (
-    item.transfer.mode === 'onchain' ||
-    Boolean(item.transfer.txSignature) ||
-    Boolean(item.transfer.receiptPubkey)
-  );
-}
-
 export const AdminEventDetailScreen: React.FC = () => {
   const router = useRouter();
   const { eventId } = useLocalSearchParams<{ eventId: string }>();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const [event, setEvent] = useState<(SchoolEvent & { claimedCount: number }) | null>(null);
   const [claimants, setClaimants] = useState<Claimant[]>([]);
-  const [transfers, setTransfers] = useState<TransferLogEntry[]>([]);
+  const [onchainTransfers, setOnchainTransfers] = useState<TransferLogEntry[]>([]);
+  const [offchainTransfers, setOffchainTransfers] = useState<TransferLogEntry[]>([]);
   const [transferCheckedAt, setTransferCheckedAt] = useState<string | null>(null);
   const [transferStrictLevel, setTransferStrictLevel] = useState<string | null>(null);
   const [transferLoading, setTransferLoading] = useState(false);
@@ -33,6 +27,40 @@ export const AdminEventDetailScreen: React.FC = () => {
   const [closingEvent, setClosingEvent] = useState(false);
   const [lastPolledAt, setLastPolledAt] = useState<string | null>(null);
   const initialLoadDone = useRef(false);
+
+  const loadTransferLogs = useCallback(async () => {
+    if (!eventId) return;
+    const [onchainResult, offchainResult] = await Promise.allSettled([
+      fetchAdminTransferLogs({ eventId, limit: 50, mode: 'onchain' }),
+      fetchAdminTransferLogs({ eventId, limit: 50, mode: 'offchain' }),
+    ]);
+
+    const errors: string[] = [];
+    let checkedAt: string | null = null;
+    let strictLevel: string | null = null;
+
+    if (onchainResult.status === 'fulfilled') {
+      setOnchainTransfers(onchainResult.value.items ?? []);
+      checkedAt = onchainResult.value.checkedAt ?? checkedAt;
+      strictLevel = onchainResult.value.strictLevel ?? strictLevel;
+    } else {
+      setOnchainTransfers([]);
+      errors.push(`オンチェーン: ${onchainResult.reason instanceof Error ? onchainResult.reason.message : '取得失敗'}`);
+    }
+
+    if (offchainResult.status === 'fulfilled') {
+      setOffchainTransfers(offchainResult.value.items ?? []);
+      checkedAt = offchainResult.value.checkedAt ?? checkedAt;
+      strictLevel = offchainResult.value.strictLevel ?? strictLevel;
+    } else {
+      setOffchainTransfers([]);
+      errors.push(`オフチェーン: ${offchainResult.reason instanceof Error ? offchainResult.reason.message : '取得失敗'}`);
+    }
+
+    setTransferCheckedAt(checkedAt);
+    setTransferStrictLevel(strictLevel);
+    setTransferError(errors.length > 0 ? errors.join(' / ') : null);
+  }, [eventId]);
 
   useEffect(() => {
     if (!eventId) return;
@@ -56,19 +84,14 @@ export const AdminEventDetailScreen: React.FC = () => {
         if (!cancelled) setLoading(false);
       });
 
-    fetchAdminTransferLogs({ eventId, limit: 50 })
-      .then((transferRes) => {
-        if (!cancelled) {
-          setTransfers(transferRes.items ?? []);
-          setTransferCheckedAt(transferRes.checkedAt ?? null);
-          setTransferStrictLevel(transferRes.strictLevel ?? null);
-        }
-      })
+    loadTransferLogs()
       .catch((e) => {
         if (!cancelled) {
           setTransferError(e instanceof Error ? e.message : '送金監査ログの取得に失敗しました');
           setTransferCheckedAt(null);
           setTransferStrictLevel(null);
+          setOnchainTransfers([]);
+          setOffchainTransfers([]);
         }
       })
       .finally(() => {
@@ -79,7 +102,7 @@ export const AdminEventDetailScreen: React.FC = () => {
       });
 
     return () => { cancelled = true; };
-  }, [eventId]);
+  }, [eventId, loadTransferLogs]);
 
   // ポーリング: 15秒間隔でtransfer logsと参加者データをバックグラウンド更新
   const pollData = useCallback(async () => {
@@ -87,22 +110,20 @@ export const AdminEventDetailScreen: React.FC = () => {
     try {
       const [claimRes, transferRes] = await Promise.allSettled([
         fetchClaimants(eventId),
-        fetchAdminTransferLogs({ eventId, limit: 50 }),
+        loadTransferLogs(),
       ]);
       if (claimRes.status === 'fulfilled') {
         setClaimants(claimRes.value.items);
       }
-      if (transferRes.status === 'fulfilled') {
-        setTransfers(transferRes.value.items ?? []);
-        setTransferCheckedAt(transferRes.value.checkedAt ?? null);
-        setTransferStrictLevel(transferRes.value.strictLevel ?? null);
+      if (transferRes.status === 'rejected') {
+        setTransferError(transferRes.reason instanceof Error ? transferRes.reason.message : '送金監査ログの取得に失敗しました');
       }
       const now = new Date();
       setLastPolledAt(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`);
     } catch {
       // ポーリングエラーは無視（既存データを維持）
     }
-  }, [eventId]);
+  }, [eventId, loadTransferLogs]);
 
   usePolling(pollData, {
     intervalMs: 15_000,
@@ -138,16 +159,13 @@ export const AdminEventDetailScreen: React.FC = () => {
       .catch((e) => setError(e instanceof Error ? e.message : '読み込みに失敗しました'))
       .finally(() => setLoading(false));
 
-    fetchAdminTransferLogs({ eventId, limit: 50 })
-      .then((transferRes) => {
-        setTransfers(transferRes.items ?? []);
-        setTransferCheckedAt(transferRes.checkedAt ?? null);
-        setTransferStrictLevel(transferRes.strictLevel ?? null);
-      })
+    loadTransferLogs()
       .catch((e) => {
         setTransferError(e instanceof Error ? e.message : '送金監査ログの取得に失敗しました');
         setTransferCheckedAt(null);
         setTransferStrictLevel(null);
+        setOnchainTransfers([]);
+        setOffchainTransfers([]);
       })
       .finally(() => setTransferLoading(false));
   };
@@ -180,13 +198,11 @@ export const AdminEventDetailScreen: React.FC = () => {
     return `${value.slice(0, start)}...${value.slice(-end)}`;
   };
 
-  const onchainTransfers = useMemo(
-    () => transfers.filter((item) => isOnchainTransfer(item)),
-    [transfers]
-  );
-  const offchainTransfers = useMemo(
-    () => transfers.filter((item) => !isOnchainTransfer(item)),
-    [transfers]
+  const totalTransfers = onchainTransfers.length + offchainTransfers.length;
+  const splitTransferPanels = windowWidth >= 1080;
+  const transferLogMaxHeight = useMemo(
+    () => Math.max(280, Math.min(windowHeight * (splitTransferPanels ? 0.46 : 0.5), 560)),
+    [splitTransferPanels, windowHeight]
   );
   const registeredParticipantNames = useMemo(() => {
     const names = claimants
@@ -364,7 +380,7 @@ export const AdminEventDetailScreen: React.FC = () => {
         <View style={styles.sectionHeader}>
           <AppText variant="h3" style={styles.title}>送金監査 (Hash Chain)</AppText>
           <AppText variant="small" style={styles.muted}>
-            {transfers.length} 件 / レベル: {transferStrictLevel ?? '-'}
+            {totalTransfers} 件 / レベル: {transferStrictLevel ?? '-'}
           </AppText>
           <AppText variant="small" style={styles.muted}>
             On-chain署名: {onchainTransfers.length} 件 / Off-chain監査署名: {offchainTransfers.length} 件
@@ -385,105 +401,131 @@ export const AdminEventDetailScreen: React.FC = () => {
           </AppText>
         )}
 
-        <Card style={styles.card}>
-          {transferLoading ? (
-            <View style={styles.center}>
-              <AppText variant="caption" style={styles.cardMuted}>
-                送金監査ログを読み込み中です...
-              </AppText>
-            </View>
-          ) : transfers.length === 0 ? (
-            <View style={styles.center}>
-              <AppText variant="caption" style={styles.cardMuted}>
-                このイベントの送金監査ログはまだありません
-              </AppText>
-            </View>
-          ) : (
-            <>
-              <View style={styles.transferGroup}>
-                <View style={styles.transferGroupHeader}>
-                  <AppText variant="body" style={styles.cardText}>
-                    On-chain署名
-                  </AppText>
-                  <View style={[styles.transferModeBadge, styles.onchainBadge]}>
-                    <AppText variant="small" style={styles.transferModeText}>tx + receipt</AppText>
-                  </View>
-                </View>
-                {onchainTransfers.length === 0 ? (
-                  <AppText variant="caption" style={styles.cardMuted}>
-                    On-chain署名の記録はありません
-                  </AppText>
-                ) : (
-                  onchainTransfers.map((item) => (
-                    <View key={`on:${item.entryHash}`} style={styles.transferRow}>
-                      <View style={styles.transferHeader}>
-                        <AppText variant="small" style={styles.cardText}>
-                          {item.event} / {formatTime(item.ts)}
-                        </AppText>
-                      </View>
-                      <AppText variant="small" style={styles.cardMuted}>
-                        送金主: {item.transfer.sender.type}:{item.transfer.sender.id}
-                      </AppText>
-                      <AppText variant="small" style={styles.cardMuted}>
-                        送金先: {item.transfer.recipient.type}:{item.transfer.recipient.id}
-                      </AppText>
-                      <AppText variant="small" style={styles.cardMuted}>
-                        配布量: {item.transfer.amount ?? '-'} / Mint: {shorten(item.transfer.mint)}
-                      </AppText>
-                      <AppText variant="small" style={styles.hashMono}>
-                        tx: {shorten(item.transfer.txSignature)} / receipt: {shorten(item.transfer.receiptPubkey)}
-                      </AppText>
-                      <AppText variant="small" style={styles.hashMono}>
-                        hash: {shorten(item.prevHash, 8, 8)} → {shorten(item.entryHash, 8, 8)}
-                      </AppText>
-                    </View>
-                  ))
-                )}
+        <View style={[styles.transferPanels, splitTransferPanels && styles.transferPanelsSplit]}>
+          <Card style={StyleSheet.compose(styles.card, styles.transferPanelCard)}>
+            <View style={styles.transferGroupHeader}>
+              <View>
+                <AppText variant="body" style={styles.cardText}>
+                  On-chain署名ログ
+                </AppText>
+                <AppText variant="small" style={styles.cardMuted}>
+                  {onchainTransfers.length} 件
+                </AppText>
               </View>
+              <View style={[styles.transferModeBadge, styles.onchainBadge]}>
+                <AppText variant="small" style={styles.transferModeText}>tx + receipt</AppText>
+              </View>
+            </View>
 
-              <View style={styles.transferGroup}>
-                <View style={styles.transferGroupHeader}>
-                  <AppText variant="body" style={styles.cardText}>
-                    Off-chain監査署名
-                  </AppText>
-                  <View style={[styles.transferModeBadge, styles.offchainBadge]}>
-                    <AppText variant="small" style={styles.transferModeText}>hash chain receipt</AppText>
-                  </View>
-                </View>
-                {offchainTransfers.length === 0 ? (
-                  <AppText variant="caption" style={styles.cardMuted}>
-                    Off-chain監査署名の記録はありません
-                  </AppText>
-                ) : (
-                  offchainTransfers.map((item) => (
-                    <View key={`off:${item.entryHash}`} style={styles.transferRow}>
-                      <View style={styles.transferHeader}>
-                        <AppText variant="small" style={styles.cardText}>
-                          {item.event} / {formatTime(item.ts)}
-                        </AppText>
-                      </View>
-                      <AppText variant="small" style={styles.cardMuted}>
-                        送金主: {item.transfer.sender.type}:{item.transfer.sender.id}
-                      </AppText>
-                      <AppText variant="small" style={styles.cardMuted}>
-                        送金先: {item.transfer.recipient.type}:{item.transfer.recipient.id}
-                      </AppText>
-                      <AppText variant="small" style={styles.cardMuted}>
-                        配布量: {item.transfer.amount ?? '-'} / Mint: {shorten(item.transfer.mint)}
-                      </AppText>
-                      <AppText variant="small" style={styles.hashMono}>
-                        監査署名(hash): {shorten(item.entryHash, 10, 10)}
-                      </AppText>
-                      <AppText variant="small" style={styles.hashMono}>
-                        chain: {shorten(item.prevHash, 8, 8)} → {shorten(item.entryHash, 8, 8)}
+            {transferLoading ? (
+              <View style={styles.center}>
+                <AppText variant="caption" style={styles.cardMuted}>
+                  On-chain署名ログを読み込み中です...
+                </AppText>
+              </View>
+            ) : onchainTransfers.length === 0 ? (
+              <View style={styles.center}>
+                <AppText variant="caption" style={styles.cardMuted}>
+                  On-chain署名の記録はありません
+                </AppText>
+              </View>
+            ) : (
+              <ScrollView
+                style={[styles.transferScroll, { maxHeight: transferLogMaxHeight }]}
+                contentContainerStyle={styles.transferScrollContent}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator
+              >
+                {onchainTransfers.map((item) => (
+                  <View key={`on:${item.entryHash}`} style={styles.transferRow}>
+                    <View style={styles.transferHeader}>
+                      <AppText variant="small" style={styles.cardText}>
+                        {item.event} / {formatTime(item.ts)}
                       </AppText>
                     </View>
-                  ))
-                )}
+                    <AppText variant="small" style={styles.cardMuted}>
+                      送金主: {item.transfer.sender.type}:{item.transfer.sender.id}
+                    </AppText>
+                    <AppText variant="small" style={styles.cardMuted}>
+                      送金先: {item.transfer.recipient.type}:{item.transfer.recipient.id}
+                    </AppText>
+                    <AppText variant="small" style={styles.cardMuted}>
+                      配布量: {item.transfer.amount ?? '-'} / Mint: {shorten(item.transfer.mint)}
+                    </AppText>
+                    <AppText variant="small" style={styles.hashMono}>
+                      tx: {shorten(item.transfer.txSignature)} / receipt: {shorten(item.transfer.receiptPubkey)}
+                    </AppText>
+                    <AppText variant="small" style={styles.hashMono}>
+                      chain: {shorten(item.prevHash, 8, 8)} → {shorten(item.entryHash, 8, 8)}
+                    </AppText>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </Card>
+
+          <Card style={StyleSheet.compose(styles.card, styles.transferPanelCard)}>
+            <View style={styles.transferGroupHeader}>
+              <View>
+                <AppText variant="body" style={styles.cardText}>
+                  Off-chain監査署名ログ
+                </AppText>
+                <AppText variant="small" style={styles.cardMuted}>
+                  {offchainTransfers.length} 件
+                </AppText>
               </View>
-            </>
-          )}
-        </Card>
+              <View style={[styles.transferModeBadge, styles.offchainBadge]}>
+                <AppText variant="small" style={styles.transferModeText}>hash chain receipt</AppText>
+              </View>
+            </View>
+
+            {transferLoading ? (
+              <View style={styles.center}>
+                <AppText variant="caption" style={styles.cardMuted}>
+                  Off-chain監査署名ログを読み込み中です...
+                </AppText>
+              </View>
+            ) : offchainTransfers.length === 0 ? (
+              <View style={styles.center}>
+                <AppText variant="caption" style={styles.cardMuted}>
+                  Off-chain監査署名の記録はありません
+                </AppText>
+              </View>
+            ) : (
+              <ScrollView
+                style={[styles.transferScroll, { maxHeight: transferLogMaxHeight }]}
+                contentContainerStyle={styles.transferScrollContent}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator
+              >
+                {offchainTransfers.map((item) => (
+                  <View key={`off:${item.entryHash}`} style={styles.transferRow}>
+                    <View style={styles.transferHeader}>
+                      <AppText variant="small" style={styles.cardText}>
+                        {item.event} / {formatTime(item.ts)}
+                      </AppText>
+                    </View>
+                    <AppText variant="small" style={styles.cardMuted}>
+                      送金主: {item.transfer.sender.type}:{item.transfer.sender.id}
+                    </AppText>
+                    <AppText variant="small" style={styles.cardMuted}>
+                      送金先: {item.transfer.recipient.type}:{item.transfer.recipient.id}
+                    </AppText>
+                    <AppText variant="small" style={styles.cardMuted}>
+                      配布量: {item.transfer.amount ?? '-'} / Mint: {shorten(item.transfer.mint)}
+                    </AppText>
+                    <AppText variant="small" style={styles.hashMono}>
+                      監査署名(hash): {shorten(item.entryHash, 10, 10)}
+                    </AppText>
+                    <AppText variant="small" style={styles.hashMono}>
+                      chain: {shorten(item.prevHash, 8, 8)} → {shorten(item.entryHash, 8, 8)}
+                    </AppText>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </Card>
+        </View>
 
         {/* CSV ダウンロード */}
         <Button
@@ -619,8 +661,25 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: adminTheme.colors.border,
   },
+  transferPanels: {
+    marginBottom: adminTheme.spacing.lg,
+  },
+  transferPanelsSplit: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: adminTheme.spacing.md,
+  },
+  transferPanelCard: {
+    flex: 1,
+  },
   transferGroup: {
     marginBottom: adminTheme.spacing.md,
+  },
+  transferScroll: {
+    marginTop: adminTheme.spacing.xs,
+  },
+  transferScrollContent: {
+    paddingRight: adminTheme.spacing.xs,
   },
   transferGroupHeader: {
     flexDirection: 'row',

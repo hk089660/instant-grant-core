@@ -754,6 +754,7 @@ export interface AdminTransferLogsResponse {
   checkedAt: string;
   limit: number;
   eventId: string | null;
+  mode?: 'onchain' | 'offchain';
   items: TransferLogEntry[];
 }
 
@@ -763,6 +764,7 @@ export interface MasterTransferLogsResponse {
   checkedAt: string;
   limit: number;
   eventId: string | null;
+  mode?: 'onchain' | 'offchain';
   items: TransferLogEntry[];
 }
 
@@ -908,12 +910,16 @@ export async function fetchMasterSearchResults(
 export async function fetchAdminTransferLogs(params?: {
   eventId?: string;
   limit?: number;
+  mode?: 'onchain' | 'offchain';
 }): Promise<AdminTransferLogsResponse> {
   const base = getBaseUrl();
   const query = new URLSearchParams();
   if (params?.eventId?.trim()) query.set('eventId', params.eventId.trim());
   if (typeof params?.limit === 'number' && Number.isFinite(params.limit)) {
     query.set('limit', String(Math.max(1, Math.floor(params.limit))));
+  }
+  if (params?.mode === 'onchain' || params?.mode === 'offchain') {
+    query.set('mode', params.mode);
   }
   const suffix = query.toString() ? `?${query.toString()}` : '';
 
@@ -925,13 +931,16 @@ export async function fetchAdminTransferLogs(params?: {
 
 export async function fetchMasterTransferLogs(
   masterPassword: string,
-  params?: { eventId?: string; limit?: number }
+  params?: { eventId?: string; limit?: number; mode?: 'onchain' | 'offchain' }
 ): Promise<MasterTransferLogsResponse> {
   const base = getBaseUrl();
   const query = new URLSearchParams();
   if (params?.eventId?.trim()) query.set('eventId', params.eventId.trim());
   if (typeof params?.limit === 'number' && Number.isFinite(params.limit)) {
     query.set('limit', String(Math.max(1, Math.floor(params.limit))));
+  }
+  if (params?.mode === 'onchain' || params?.mode === 'offchain') {
+    query.set('mode', params.mode);
   }
   const suffix = query.toString() ? `?${query.toString()}` : '';
   const res = await fetch(`${base}/api/master/transfers${suffix}`, {
@@ -948,6 +957,7 @@ export async function fetchMasterTransferLogs(
       checkedAt: new Date().toISOString(),
       limit: typeof params?.limit === 'number' ? params.limit : 50,
       eventId: params?.eventId?.trim() || null,
+      mode: params?.mode,
       items: [],
     };
   }

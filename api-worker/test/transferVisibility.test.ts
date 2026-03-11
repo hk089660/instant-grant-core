@@ -258,6 +258,72 @@ describe('transfer visibility role levels (master > admin)', () => {
     expect(userEntry?.pii?.displayName).toBe('User B');
   });
 
+  it('supports mode-filtered transfer logs so on-chain entries are not hidden by off-chain volume', async () => {
+    const eventId = await createEvent();
+    const adminToken = await createAdminInvite();
+
+    for (let i = 0; i < 6; i += 1) {
+      const walletClaimRes = await store.fetch(
+        new Request('https://example.com/v1/school/claims', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            eventId,
+            walletAddress: `wallet-off-${i}`,
+          }),
+        })
+      );
+      expect(walletClaimRes.status).toBe(200);
+    }
+
+    const onchainClaimRes = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId,
+          walletAddress: 'wallet-onchain-1',
+          txSignature: '5KJvsngHeMpm884twD2r5kPu6x2R2h32L6M9n7Yjv9ByM8r4WQ6xAzM9Y4o7b2w1',
+          receiptPubkey: 'BPFLoader1111111111111111111111111111111111',
+        }),
+      })
+    );
+    expect(onchainClaimRes.status).toBe(200);
+
+    const onchainOnlyRes = await store.fetch(
+      new Request(`https://example.com/api/admin/transfers?eventId=${encodeURIComponent(eventId)}&limit=5&mode=onchain`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${adminToken}` },
+      })
+    );
+    expect(onchainOnlyRes.status).toBe(200);
+    const onchainOnlyBody = (await onchainOnlyRes.json()) as {
+      mode?: string;
+      items?: TransferLogItem[];
+    };
+    expect(onchainOnlyBody.mode).toBe('onchain');
+    expect(onchainOnlyBody.items?.length).toBe(1);
+    expect(onchainOnlyBody.items?.[0]?.transfer.mode).toBe('onchain');
+    expect(onchainOnlyBody.items?.[0]?.transfer.txSignature).toBe(
+      '5KJvsngHeMpm884twD2r5kPu6x2R2h32L6M9n7Yjv9ByM8r4WQ6xAzM9Y4o7b2w1'
+    );
+
+    const offchainOnlyRes = await store.fetch(
+      new Request(`https://example.com/api/admin/transfers?eventId=${encodeURIComponent(eventId)}&limit=5&mode=offchain`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${adminToken}` },
+      })
+    );
+    expect(offchainOnlyRes.status).toBe(200);
+    const offchainOnlyBody = (await offchainOnlyRes.json()) as {
+      mode?: string;
+      items?: TransferLogItem[];
+    };
+    expect(offchainOnlyBody.mode).toBe('offchain');
+    expect(offchainOnlyBody.items?.length).toBe(5);
+    expect(offchainOnlyBody.items?.every((item) => item.transfer.mode === 'offchain')).toBe(true);
+  });
+
   it('rejects unauthenticated transfer endpoint access', async () => {
     const adminRes = await store.fetch(
       new Request('https://example.com/api/admin/transfers', { method: 'GET' })
