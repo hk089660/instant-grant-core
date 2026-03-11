@@ -1,6 +1,6 @@
 # instant-grant-core
 
-Prototype for auditable school participation and grant operations on Solana.
+Prototype platform for addressing the social problem of black-box grant administration by making school participation operations and grant operations auditable on Solana.
 This repository combines an Anchor program, a Cloudflare Worker API, and an Expo / Cloudflare Pages frontend for the We-ne / Asuka Network Core prototype.
 
 ![We-ne mobile flow from first-time registration to event participation and token receipt](./docs/media/wene-mobile-onboarding-flow.gif)
@@ -20,6 +20,8 @@ Verified on 2026-03-10.
 | User app | `https://instant-grant-core.pages.dev/` |
 | Admin app | `https://instant-grant-core.pages.dev/admin/login` |
 | Worker API | `https://instant-grant-core.haruki-kira3.workers.dev` |
+
+Admin demo passcode: `83284ab4d9874e54b301dcf7ea6a6056`
 
 ### Public Readiness Endpoints
 
