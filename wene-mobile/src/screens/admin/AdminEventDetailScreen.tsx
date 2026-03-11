@@ -20,20 +20,96 @@ export const AdminEventDetailScreen: React.FC = () => {
   const [transferStrictLevel, setTransferStrictLevel] = useState<string | null>(null);
   const [transferLoading, setTransferLoading] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
+  const [claimantsLoading, setClaimantsLoading] = useState(false);
+  const [claimantsError, setClaimantsError] = useState<string | null>(null);
   const [participantNameQuery, setParticipantNameQuery] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [screenLoading, setScreenLoading] = useState(true);
+  const [screenError, setScreenError] = useState<string | null>(null);
+  const [eventLoading, setEventLoading] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [closingEvent, setClosingEvent] = useState(false);
   const [lastPolledAt, setLastPolledAt] = useState<string | null>(null);
   const initialLoadDone = useRef(false);
+  const mountedRef = useRef(true);
+  const eventRef = useRef<(SchoolEvent & { claimedCount: number }) | null>(null);
+  const eventLoadSeq = useRef(0);
+  const claimantsLoadSeq = useRef(0);
+  const transferLoadSeq = useRef(0);
 
-  const loadTransferLogs = useCallback(async () => {
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
+
+  useEffect(() => {
+    eventRef.current = event;
+  }, [event]);
+
+  const loadEventData = useCallback(async (options?: { silent?: boolean }) => {
     if (!eventId) return;
+    const requestId = ++eventLoadSeq.current;
+    if (!options?.silent) {
+      setEventLoading(true);
+    }
+
+    try {
+      const nextEvent = await fetchAdminEvent(eventId);
+      if (!mountedRef.current || eventLoadSeq.current !== requestId) return;
+      setEvent(nextEvent);
+      setScreenError(null);
+      if (!options?.silent) {
+        setActionError(null);
+      }
+    } catch (e) {
+      if (!mountedRef.current || eventLoadSeq.current !== requestId) return;
+      const message = e instanceof Error ? e.message : 'イベント詳細の取得に失敗しました';
+      if (initialLoadDone.current && eventRef.current) {
+        setActionError(message);
+      } else {
+        setScreenError(message);
+      }
+    } finally {
+      if (!options?.silent && mountedRef.current && eventLoadSeq.current === requestId) {
+        setEventLoading(false);
+      }
+    }
+  }, [eventId]);
+
+  const loadClaimants = useCallback(async (options?: { silent?: boolean }) => {
+    if (!eventId) return;
+    const requestId = ++claimantsLoadSeq.current;
+    if (!options?.silent) {
+      setClaimantsLoading(true);
+      setClaimantsError(null);
+    }
+
+    try {
+      const nextClaimants = await fetchClaimants(eventId);
+      if (!mountedRef.current || claimantsLoadSeq.current !== requestId) return;
+      setClaimants(nextClaimants.items);
+      setClaimantsError(null);
+    } catch (e) {
+      if (!mountedRef.current || claimantsLoadSeq.current !== requestId) return;
+      setClaimantsError(e instanceof Error ? e.message : '参加者一覧の取得に失敗しました');
+    } finally {
+      if (!options?.silent && mountedRef.current && claimantsLoadSeq.current === requestId) {
+        setClaimantsLoading(false);
+      }
+    }
+  }, [eventId]);
+
+  const loadTransferLogs = useCallback(async (options?: { silent?: boolean }) => {
+    if (!eventId) return;
+    const requestId = ++transferLoadSeq.current;
+    if (!options?.silent) {
+      setTransferLoading(true);
+      setTransferError(null);
+    }
     const [onchainResult, offchainResult] = await Promise.allSettled([
       fetchAdminTransferLogs({ eventId, limit: 50, mode: 'onchain' }),
       fetchAdminTransferLogs({ eventId, limit: 50, mode: 'offchain' }),
     ]);
+    if (!mountedRef.current || transferLoadSeq.current !== requestId) return;
 
     const errors: string[] = [];
     let checkedAt: string | null = null;
@@ -60,70 +136,63 @@ export const AdminEventDetailScreen: React.FC = () => {
     setTransferCheckedAt(checkedAt);
     setTransferStrictLevel(strictLevel);
     setTransferError(errors.length > 0 ? errors.join(' / ') : null);
+    if (!options?.silent && mountedRef.current && transferLoadSeq.current === requestId) {
+      setTransferLoading(false);
+    }
   }, [eventId]);
+
+  const loadInitialData = useCallback(async () => {
+    if (!eventId) return;
+    setScreenLoading(true);
+    setScreenError(null);
+    setActionError(null);
+    setClaimantsError(null);
+    setTransferError(null);
+    setEvent(null);
+    setClaimants([]);
+    setOnchainTransfers([]);
+    setOffchainTransfers([]);
+    setTransferCheckedAt(null);
+    setTransferStrictLevel(null);
+    setLastPolledAt(null);
+    initialLoadDone.current = false;
+
+    await Promise.allSettled([
+      loadEventData({ silent: true }),
+      loadClaimants({ silent: true }),
+      loadTransferLogs({ silent: true }),
+    ]);
+
+    if (!mountedRef.current) return;
+    setScreenLoading(false);
+    initialLoadDone.current = true;
+  }, [eventId, loadClaimants, loadEventData, loadTransferLogs]);
 
   useEffect(() => {
     if (!eventId) return;
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setTransferLoading(true);
-    setTransferError(null);
-
-    Promise.all([fetchAdminEvent(eventId), fetchClaimants(eventId)])
-      .then(([ev, cl]) => {
-        if (!cancelled) {
-          setEvent(ev);
-          setClaimants(cl.items);
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : '読み込みに失敗しました');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    loadTransferLogs()
-      .catch((e) => {
-        if (!cancelled) {
-          setTransferError(e instanceof Error ? e.message : '送金監査ログの取得に失敗しました');
-          setTransferCheckedAt(null);
-          setTransferStrictLevel(null);
-          setOnchainTransfers([]);
-          setOffchainTransfers([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setTransferLoading(false);
-          initialLoadDone.current = true;
-        }
-      });
-
-    return () => { cancelled = true; };
-  }, [eventId, loadTransferLogs]);
+    void loadInitialData();
+  }, [eventId, loadInitialData]);
 
   // ポーリング: 15秒間隔でtransfer logsと参加者データをバックグラウンド更新
   const pollData = useCallback(async () => {
     if (!eventId || !initialLoadDone.current) return;
     try {
       const [claimRes, transferRes] = await Promise.allSettled([
-        fetchClaimants(eventId),
-        loadTransferLogs(),
+        loadClaimants({ silent: true }),
+        loadTransferLogs({ silent: true }),
       ]);
-      if (claimRes.status === 'fulfilled') {
-        setClaimants(claimRes.value.items);
-      }
       if (transferRes.status === 'rejected') {
         setTransferError(transferRes.reason instanceof Error ? transferRes.reason.message : '送金監査ログの取得に失敗しました');
+      }
+      if (claimRes.status === 'rejected') {
+        setClaimantsError(claimRes.reason instanceof Error ? claimRes.reason.message : '参加者一覧の取得に失敗しました');
       }
       const now = new Date();
       setLastPolledAt(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`);
     } catch {
       // ポーリングエラーは無視（既存データを維持）
     }
-  }, [eventId, loadTransferLogs]);
+  }, [eventId, loadClaimants, loadTransferLogs]);
 
   usePolling(pollData, {
     intervalMs: 15_000,
@@ -144,41 +213,37 @@ export const AdminEventDetailScreen: React.FC = () => {
       .catch(() => setQrDataUrl(null));
   }, [scanUrl]);
 
-  const handleRefresh = () => {
-    if (!eventId) return;
-    setLoading(true);
-    setError(null);
-    setTransferLoading(true);
+  const handleRefreshAll = useCallback(() => {
+    setActionError(null);
+    setClaimantsError(null);
     setTransferError(null);
+    void Promise.allSettled([
+      loadEventData(),
+      loadClaimants(),
+      loadTransferLogs(),
+    ]);
+  }, [loadClaimants, loadEventData, loadTransferLogs]);
 
-    Promise.all([fetchAdminEvent(eventId), fetchClaimants(eventId)])
-      .then(([ev, cl]) => {
-        setEvent(ev);
-        setClaimants(cl.items);
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : '読み込みに失敗しました'))
-      .finally(() => setLoading(false));
+  const handleRefreshClaimants = useCallback(() => {
+    setClaimantsError(null);
+    void loadClaimants();
+  }, [loadClaimants]);
 
-    loadTransferLogs()
-      .catch((e) => {
-        setTransferError(e instanceof Error ? e.message : '送金監査ログの取得に失敗しました');
-        setTransferCheckedAt(null);
-        setTransferStrictLevel(null);
-        setOnchainTransfers([]);
-        setOffchainTransfers([]);
-      })
-      .finally(() => setTransferLoading(false));
-  };
+  const handleRefreshTransfers = useCallback(() => {
+    setTransferError(null);
+    void loadTransferLogs();
+  }, [loadTransferLogs]);
 
   const handleCloseEvent = async () => {
     if (!eventId || !event || event.state === 'ended' || closingEvent) return;
     setClosingEvent(true);
-    setError(null);
+    setActionError(null);
     try {
       const updated = await closeAdminEvent(eventId);
+      eventLoadSeq.current += 1;
       setEvent(updated);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'イベントのクローズに失敗しました');
+      setActionError(e instanceof Error ? e.message : 'イベントのクローズに失敗しました');
     } finally {
       setClosingEvent(false);
     }
@@ -215,8 +280,9 @@ export const AdminEventDetailScreen: React.FC = () => {
     if (!q) return claimants;
     return claimants.filter((c) => c.displayName.toLowerCase().includes(q));
   }, [claimants, participantNameQuery]);
+  const refreshingAny = eventLoading || claimantsLoading || transferLoading;
 
-  if (loading) {
+  if (screenLoading) {
     return (
       <AdminShell title="イベント詳細" role="admin">
         <View style={styles.center}>
@@ -226,12 +292,12 @@ export const AdminEventDetailScreen: React.FC = () => {
     );
   }
 
-  if (error || !event) {
+  if (screenError || !event) {
     return (
       <AdminShell title="イベント詳細" role="admin">
         <View style={styles.center}>
-          <AppText style={styles.errorText}>{error ?? 'イベントが見つかりません'}</AppText>
-          <Button title="再読み込み" variant="secondary" dark onPress={handleRefresh} style={{ marginTop: 12 }} />
+          <AppText style={styles.errorText}>{screenError ?? 'イベントが見つかりません'}</AppText>
+          <Button title="再読み込み" variant="secondary" dark onPress={() => void loadInitialData()} style={{ marginTop: 12 }} />
           <Button title="戻る" variant="secondary" dark onPress={() => router.back()} style={{ marginTop: 8 }} />
         </View>
       </AdminShell>
@@ -256,10 +322,24 @@ export const AdminEventDetailScreen: React.FC = () => {
                 style={styles.closeEventHeaderButton}
               />
             )}
-            <Button title="更新" variant="secondary" dark onPress={handleRefresh} />
+            <Button
+              title={refreshingAny ? '更新中…' : '全体更新'}
+              variant="secondary"
+              dark
+              onPress={handleRefreshAll}
+              loading={refreshingAny}
+            />
             <Button title="戻る" variant="secondary" dark onPress={() => router.back()} />
           </View>
         </View>
+
+        {actionError && (
+          <Card style={styles.inlineErrorCard}>
+            <AppText variant="small" style={styles.transferError}>
+              {actionError}
+            </AppText>
+          </Card>
+        )}
 
         {/* イベント情報 */}
         <Card style={styles.card}>
@@ -275,6 +355,11 @@ export const AdminEventDetailScreen: React.FC = () => {
           <AppText variant="caption" style={styles.cardMuted}>{event.datetime}</AppText>
           <AppText variant="caption" style={styles.cardMuted}>主催: {event.host}</AppText>
           <AppText variant="small" style={styles.cardDim}>ID: {event.id}</AppText>
+          {eventLoading && (
+            <AppText variant="small" style={styles.cardDim}>
+              基本情報を更新中です…
+            </AppText>
+          )}
           {event.state !== 'ended' ? (
             <AppText variant="small" style={styles.cardDim}>
               このイベントをクローズすると受付は停止されます
@@ -325,10 +410,27 @@ export const AdminEventDetailScreen: React.FC = () => {
         {/* 参加者一覧 */}
         <View style={styles.sectionHeader}>
           <AppText variant="h3" style={styles.title}>参加者一覧</AppText>
-          <AppText variant="small" style={styles.muted}>
-            合計 {claimants.length} 名 / 表示 {filteredClaimants.length} 名
-          </AppText>
+          <View style={styles.sectionHeaderMeta}>
+            <AppText variant="small" style={styles.muted}>
+              合計 {claimants.length} 名 / 表示 {filteredClaimants.length} 名
+            </AppText>
+            <Button
+              title={claimantsLoading ? '更新中…' : '参加者更新'}
+              variant="secondary"
+              dark
+              size="medium"
+              onPress={handleRefreshClaimants}
+              loading={claimantsLoading}
+              style={styles.sectionRefreshButton}
+            />
+          </View>
         </View>
+
+        {claimantsError && (
+          <AppText variant="small" style={styles.transferError}>
+            参加者一覧取得エラー: {claimantsError}
+          </AppText>
+        )}
 
         <Card style={styles.card}>
           <TextInput
@@ -379,15 +481,28 @@ export const AdminEventDetailScreen: React.FC = () => {
         {/* 送金監査ログ */}
         <View style={styles.sectionHeader}>
           <AppText variant="h3" style={styles.title}>送金監査 (Hash Chain)</AppText>
-          <AppText variant="small" style={styles.muted}>
-            {totalTransfers} 件 / レベル: {transferStrictLevel ?? '-'}
-          </AppText>
-          <AppText variant="small" style={styles.muted}>
-            On-chain署名: {onchainTransfers.length} 件 / Off-chain監査署名: {offchainTransfers.length} 件
-          </AppText>
-          <AppText variant="small" style={styles.muted}>
-            最終取得: {formatTime(transferCheckedAt ?? undefined)}
-          </AppText>
+          <View style={styles.sectionHeaderMeta}>
+            <View>
+              <AppText variant="small" style={styles.muted}>
+                {totalTransfers} 件 / レベル: {transferStrictLevel ?? '-'}
+              </AppText>
+              <AppText variant="small" style={styles.muted}>
+                On-chain署名: {onchainTransfers.length} 件 / Off-chain監査署名: {offchainTransfers.length} 件
+              </AppText>
+              <AppText variant="small" style={styles.muted}>
+                最終取得: {formatTime(transferCheckedAt ?? undefined)}
+              </AppText>
+            </View>
+            <Button
+              title={transferLoading ? '更新中…' : '監査更新'}
+              variant="secondary"
+              dark
+              size="medium"
+              onPress={handleRefreshTransfers}
+              loading={transferLoading}
+              style={styles.sectionRefreshButton}
+            />
+          </View>
           {lastPolledAt && (
             <AppText variant="small" style={styles.muted}>
               自動更新: {lastPolledAt}
@@ -641,6 +756,19 @@ const styles = StyleSheet.create({
   },
   sectionHeader: {
     marginBottom: adminTheme.spacing.sm,
+  },
+  sectionHeaderMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: adminTheme.spacing.sm,
+    marginTop: adminTheme.spacing.xs,
+  },
+  sectionRefreshButton: {
+    minWidth: 120,
+  },
+  inlineErrorCard: {
+    marginBottom: adminTheme.spacing.md,
   },
   tableHeader: {
     flexDirection: 'row',

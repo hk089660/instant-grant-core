@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AppText, Button, CountBadge, EventRow, AdminShell, StatusBadge, Loading } from '../../ui/components';
@@ -15,53 +15,100 @@ import { copyTextWithFeedback } from '../../utils/copyText';
 export const AdminEventsScreen: React.FC = () => {
   const router = useRouter();
   const [events, setEvents] = useState<SchoolEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [eventsRefreshing, setEventsRefreshing] = useState(false);
+  const [eventsError, setEventsError] = useState<string | null>(null);
   const [popStatus, setPopStatus] = useState<PopStatusResponse | null>(null);
   const [popStatusLoading, setPopStatusLoading] = useState(true);
   const [popStatusError, setPopStatusError] = useState<string | null>(null);
   const [popStatusCheckedAt, setPopStatusCheckedAt] = useState<string | null>(null);
   const [closingEventId, setClosingEventId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const eventsLoadSeq = useRef(0);
+  const popStatusLoadSeq = useRef(0);
 
-  const loadDashboard = useCallback(() => {
-    setLoading(true);
-    setError(null);
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
+
+  const loadEvents = useCallback(async (options?: { silent?: boolean }) => {
+    const requestId = ++eventsLoadSeq.current;
+    if (options?.silent) {
+      setEventsLoading(true);
+    } else {
+      setEventsRefreshing(true);
+    }
+
+    try {
+      const nextEvents = await fetchAdminEvents();
+      if (!mountedRef.current || eventsLoadSeq.current !== requestId) return;
+      setEvents(nextEvents);
+      setEventsError(null);
+      if (!options?.silent) {
+        setActionError(null);
+      }
+    } catch (e) {
+      if (!mountedRef.current || eventsLoadSeq.current !== requestId) return;
+      const message = e instanceof Error ? e.message : '読み込みに失敗しました。再読み込みしてください。';
+      if (options?.silent) {
+        setEvents([]);
+        setEventsError(message);
+      } else {
+        setActionError(message);
+      }
+    } finally {
+      if (!mountedRef.current || eventsLoadSeq.current !== requestId) return;
+      if (options?.silent) {
+        setEventsLoading(false);
+      } else {
+        setEventsRefreshing(false);
+      }
+    }
+  }, []);
+
+  const loadPopStatus = useCallback(async () => {
+    const requestId = ++popStatusLoadSeq.current;
     setPopStatusLoading(true);
     setPopStatusError(null);
 
-    Promise.allSettled([
-      fetchAdminEvents(),
-      fetchPopStatus(),
-    ])
-      .then(([eventsResult, popResult]) => {
-        if (eventsResult.status === 'fulfilled') {
-          setEvents(eventsResult.value);
-        } else {
-          setError(eventsResult.reason instanceof Error ? eventsResult.reason.message : '読み込みに失敗しました。再読み込みしてください。');
-          setEvents([]);
-        }
-
-        if (popResult.status === 'fulfilled') {
-          setPopStatus(popResult.value);
-          setPopStatusCheckedAt(new Date().toISOString());
-        } else {
-          setPopStatus(null);
-          setPopStatusError(popResult.reason instanceof Error ? popResult.reason.message : 'PoP状態の取得に失敗しました。');
-        }
-      })
-      .finally(() => {
-        setLoading(false);
+    try {
+      const nextPopStatus = await fetchPopStatus();
+      if (!mountedRef.current || popStatusLoadSeq.current !== requestId) return;
+      setPopStatus(nextPopStatus);
+      setPopStatusCheckedAt(new Date().toISOString());
+    } catch (e) {
+      if (!mountedRef.current || popStatusLoadSeq.current !== requestId) return;
+      setPopStatus(null);
+      setPopStatusError(e instanceof Error ? e.message : 'PoP状態の取得に失敗しました。');
+    } finally {
+      if (mountedRef.current && popStatusLoadSeq.current === requestId) {
         setPopStatusLoading(false);
-      });
+      }
+    }
   }, []);
 
-  useEffect(() => {
-    loadDashboard();
-  }, [loadDashboard]);
+  const loadInitialDashboard = useCallback(async () => {
+    setEventsError(null);
+    setActionError(null);
+    setPopStatusError(null);
+    await Promise.allSettled([
+      loadEvents({ silent: true }),
+      loadPopStatus(),
+    ]);
+  }, [loadEvents, loadPopStatus]);
 
-  const handleRetry = () => {
-    loadDashboard();
-  };
+  useEffect(() => {
+    void loadInitialDashboard();
+  }, [loadInitialDashboard]);
+
+  const handleRefreshEvents = useCallback(() => {
+    void loadEvents();
+  }, [loadEvents]);
+
+  const handleRefreshPopStatus = useCallback(() => {
+    void loadPopStatus();
+  }, [loadPopStatus]);
 
   const handleCopyPopStatus = useCallback(async () => {
     if (!popStatus) return;
@@ -83,9 +130,10 @@ export const AdminEventsScreen: React.FC = () => {
   const handleCloseEvent = useCallback(async (eventId: string) => {
     if (!eventId || closingEventId) return;
     setClosingEventId(eventId);
-    setError(null);
+    setActionError(null);
     try {
       const updated = await closeAdminEvent(eventId);
+      eventsLoadSeq.current += 1;
       setEvents((prev) =>
         prev.map((event) =>
           event.id === eventId
@@ -98,7 +146,7 @@ export const AdminEventsScreen: React.FC = () => {
         )
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'イベントのクローズに失敗しました。');
+      setActionError(e instanceof Error ? e.message : 'イベントのクローズに失敗しました。');
     } finally {
       setClosingEventId(null);
     }
@@ -111,12 +159,30 @@ export const AdminEventsScreen: React.FC = () => {
           <AppText variant="h2" style={styles.title}>
             イベント一覧
           </AppText>
-          <Button
-            title="＋ 新規発行"
-            variant="primary"
-            onPress={() => router.push('/admin/create' as any)}
-          />
+          <View style={styles.headerActions}>
+            <Button
+              title={eventsRefreshing ? '更新中…' : '更新'}
+              variant="secondary"
+              dark
+              onPress={handleRefreshEvents}
+              loading={eventsRefreshing}
+              style={styles.headerRefreshButton}
+            />
+            <Button
+              title="＋ 新規発行"
+              variant="primary"
+              onPress={() => router.push('/admin/create' as any)}
+            />
+          </View>
         </View>
+
+        {actionError && (
+          <View style={styles.inlineErrorBanner}>
+            <AppText variant="small" style={styles.errorText}>
+              {actionError}
+            </AppText>
+          </View>
+        )}
 
         <View style={styles.teacherMessage}>
           <AppText variant="body" style={styles.teacherMessageText}>
@@ -133,7 +199,7 @@ export const AdminEventsScreen: React.FC = () => {
               title={popStatusLoading ? '確認中…' : '再確認'}
               variant="secondary"
               dark
-              onPress={handleRetry}
+              onPress={handleRefreshPopStatus}
               disabled={popStatusLoading}
               style={styles.popRefreshButton}
             />
@@ -196,18 +262,18 @@ export const AdminEventsScreen: React.FC = () => {
         </View>
 
         <View style={styles.list}>
-          {loading ? (
+          {eventsLoading ? (
             <View style={styles.stateContainer}>
               <Loading message="イベントを読み込み中です..." size="large" mode="admin" />
             </View>
-          ) : error ? (
+          ) : eventsError ? (
             <View style={styles.stateContainer}>
-              <AppText style={styles.errorText}>{error}</AppText>
+              <AppText style={styles.errorText}>{eventsError}</AppText>
               <Button
                 title="再読み込み"
                 variant="secondary"
                 dark
-                onPress={handleRetry}
+                onPress={() => void loadInitialDashboard()}
                 style={styles.retryButton}
               />
             </View>
@@ -290,8 +356,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: adminTheme.spacing.md,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: adminTheme.spacing.sm,
+  },
+  headerRefreshButton: {
+    minWidth: 96,
+  },
   title: {
     color: adminTheme.colors.text,
+  },
+  inlineErrorBanner: {
+    backgroundColor: adminTheme.colors.surface,
+    borderRadius: adminTheme.radius.md,
+    borderWidth: 1,
+    borderColor: adminTheme.colors.border,
+    paddingHorizontal: adminTheme.spacing.md,
+    paddingVertical: adminTheme.spacing.sm,
+    marginBottom: adminTheme.spacing.md,
   },
   teacherMessage: {
     backgroundColor: adminTheme.colors.surface,
