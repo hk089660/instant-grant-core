@@ -489,7 +489,7 @@ type TransferLogView = {
 type TransferLogRoleView = 'admin' | 'master';
 type TransferLogModeView = 'onchain' | 'offchain';
 
-type UserTicketTransferSnapshot = {
+type ClaimTransferSnapshot = {
   txSignature: string | null;
   receiptPubkey: string | null;
   mint: string | null;
@@ -5911,6 +5911,19 @@ export class SchoolStore implements DurableObject {
     };
   }
 
+  private buildClaimTransferSnapshot(view: TransferLogView): ClaimTransferSnapshot | null {
+    const txSignature = this.normalizeStringField(view.transfer.txSignature) ?? null;
+    const receiptPubkey = this.normalizeStringField(view.transfer.receiptPubkey) ?? null;
+    if (!txSignature && !receiptPubkey) {
+      return null;
+    }
+    return {
+      txSignature,
+      receiptPubkey,
+      mint: this.normalizeStringField(view.transfer.mint) ?? null,
+    };
+  }
+
   private async getTransferLogs(role: TransferLogRoleView, options: {
     limit: number;
     eventId?: string | null;
@@ -5944,9 +5957,9 @@ export class SchoolStore implements DurableObject {
   private async getLatestUserTransferSnapshots(
     userId: string,
     eventIds: Set<string>
-  ): Promise<Map<string, UserTicketTransferSnapshot>> {
+  ): Promise<Map<string, ClaimTransferSnapshot>> {
     const normalizedUserId = this.normalizeUserId(userId);
-    const snapshots = new Map<string, UserTicketTransferSnapshot>();
+    const snapshots = new Map<string, ClaimTransferSnapshot>();
     if (!normalizedUserId || eventIds.size === 0) return snapshots;
 
     const rows = await this.ctx.storage.list({
@@ -5972,15 +5985,70 @@ export class SchoolStore implements DurableObject {
           ? this.normalizeUserId(view.transfer.recipient.id)
           : '';
       if (piiUserId !== normalizedUserId && recipientUserId !== normalizedUserId) continue;
+      const snapshot = this.buildClaimTransferSnapshot(view);
+      if (!snapshot) continue;
 
-      snapshots.set(entry.eventId, {
-        txSignature: view.transfer.txSignature,
-        receiptPubkey: view.transfer.receiptPubkey,
-        mint: view.transfer.mint,
-      });
+      snapshots.set(entry.eventId, snapshot);
     }
 
     return snapshots;
+  }
+
+  private async getLatestUserTransferSnapshot(
+    userId: string,
+    eventId: string
+  ): Promise<ClaimTransferSnapshot | null> {
+    const snapshots = await this.getLatestUserTransferSnapshots(userId, new Set([eventId]));
+    return snapshots.get(eventId) ?? null;
+  }
+
+  private async getLatestWalletTransferSnapshot(params: {
+    eventId: string;
+    walletAddress?: string | null;
+    joinToken?: string | null;
+  }): Promise<ClaimTransferSnapshot | null> {
+    const eventId = params.eventId.trim();
+    const walletAddress = this.normalizeStringField(params.walletAddress);
+    const joinToken = this.normalizeStringField(params.joinToken);
+    if (!eventId || (!walletAddress && !joinToken)) return null;
+
+    const rows = await this.ctx.storage.list({
+      prefix: AUDIT_HISTORY_PREFIX,
+      limit: AUDIT_ENTRY_SCAN_LIMIT,
+      reverse: true,
+    });
+
+    for (const value of rows.values()) {
+      if (!value || typeof value !== 'object') continue;
+      const entry = value as AuditEvent;
+      if (entry.event !== 'WALLET_CLAIM' || entry.eventId !== eventId) continue;
+
+      const view = this.toTransferLogView(entry);
+      if (!view) continue;
+
+      const snapshot = this.buildClaimTransferSnapshot(view);
+      if (!snapshot) continue;
+
+      const piiWalletAddress = this.normalizeStringField(view.pii?.walletAddress);
+      const piiJoinToken = this.normalizeStringField(view.pii?.joinToken);
+      const recipientWalletAddress =
+        view.transfer.recipient.type === 'wallet'
+          ? this.normalizeStringField(view.transfer.recipient.id)
+          : null;
+      const recipientJoinToken =
+        view.transfer.recipient.type === 'join_token'
+          ? this.normalizeStringField(view.transfer.recipient.id)
+          : null;
+
+      if (walletAddress && (piiWalletAddress === walletAddress || recipientWalletAddress === walletAddress)) {
+        return snapshot;
+      }
+      if (joinToken && (piiJoinToken === joinToken || recipientJoinToken === joinToken)) {
+        return snapshot;
+      }
+    }
+
+    return null;
   }
 
   private async buildUserTicketSyncItems(userId: string): Promise<UserTicketSyncItem[]> {
@@ -9224,6 +9292,17 @@ export class SchoolStore implements DurableObject {
             ? await this.getParticipationTicketReceipt(eventId, subject, confirmationCode)
             : null;
         let needsTicketReceiptBackfill = false;
+        const existingOnchainSnapshot = hasOnchainProof
+          ? null
+          : await this.getLatestWalletTransferSnapshot({
+            eventId,
+            walletAddress,
+            joinToken,
+          });
+        const resolvedOnchainResponseFields = this.buildOnchainClaimResponseFields({
+          txSignature: txSignature ?? existingOnchainSnapshot?.txSignature,
+          receiptPubkey: receiptPubkey ?? existingOnchainSnapshot?.receiptPubkey,
+        });
 
         if (hasOnchainProof) {
           if (!ticketReceipt) {
@@ -9281,7 +9360,7 @@ export class SchoolStore implements DurableObject {
           ...result,
           ...(confirmationCode ? { confirmationCode } : {}),
           ...(ticketReceipt ? { ticketReceipt } : {}),
-          ...onchainResponseFields,
+          ...resolvedOnchainResponseFields,
         };
         return Response.json(alreadyResponse);
       }
@@ -9617,6 +9696,13 @@ export class SchoolStore implements DurableObject {
         await this.ensureConfirmationCodeIndexed(eventId, userId, confirmationCode);
         let ticketReceipt = await this.getParticipationTicketReceipt(eventId, userId, confirmationCode);
         let needsTicketReceiptBackfill = false;
+        const existingOnchainSnapshot = hasOnchainProof
+          ? null
+          : await this.getLatestUserTransferSnapshot(userId, eventId);
+        const resolvedOnchainResponseFields = this.buildOnchainClaimResponseFields({
+          txSignature: proofFields.txSignature || existingOnchainSnapshot?.txSignature,
+          receiptPubkey: proofFields.receiptPubkey || existingOnchainSnapshot?.receiptPubkey,
+        });
         if (hasOnchainProof) {
           if (!ticketReceipt) {
             // 旧データで receipt が欠損している場合は、on-chain 同期時に再発行して監査整合を回復する。
@@ -9672,7 +9758,7 @@ export class SchoolStore implements DurableObject {
           confirmationCode,
           ...(ticketReceipt ? { ticketReceipt } : {}),
           claimQuota,
-          ...onchainResponseFields,
+          ...resolvedOnchainResponseFields,
         } as UserClaimResponse);
       }
       let confirmationCode: string | null = null;

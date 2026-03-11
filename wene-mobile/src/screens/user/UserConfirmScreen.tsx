@@ -576,22 +576,39 @@ export const UserConfirmScreen: React.FC = () => {
       let popSigner: string | undefined;
       let tokenReflectedInWallet = false;
       let onchainBlockedByPeriod = false;
+      const existingTicket = getTicketByEventId(targetEventId);
       const resultExplorerTxUrl = normalizeOptionalString(result?.explorerTxUrl);
       const resultTxSignature =
         normalizeOptionalString(result?.txSignature) ??
         parseTxSignatureFromExplorerUrl(resultExplorerTxUrl);
       const resultReceiptPubkey = normalizeOptionalString(result?.receiptPubkey);
+      const storedTxSignature = normalizeOptionalString(existingTicket?.txSignature);
+      const storedReceiptPubkey = normalizeOptionalString(existingTicket?.receiptPubkey);
       if (resultTxSignature) {
         txSignature = resultTxSignature;
       }
       if (resultReceiptPubkey) {
         receiptPubkey = resultReceiptPubkey;
       }
+      if (!txSignature && storedTxSignature) {
+        txSignature = storedTxSignature;
+      }
+      if (!receiptPubkey && storedReceiptPubkey) {
+        receiptPubkey = storedReceiptPubkey;
+      }
       if (resultExplorerTxUrl) {
         explorerTxUrl = resultExplorerTxUrl;
       } else if (resultTxSignature) {
         explorerTxUrl = buildExplorerTxUrl(resultTxSignature);
       }
+      distributedMint =
+        normalizeOptionalString(existingTicket?.mintAddress) ??
+        event.solanaMint ??
+        undefined;
+      popEntryHash = normalizeOptionalString(existingTicket?.popEntryHash);
+      popAuditHash = normalizeOptionalString(existingTicket?.popAuditHash);
+      popSigner = normalizeOptionalString(existingTicket?.popSigner);
+      const hasExistingOnchainProof = Boolean(txSignature && receiptPubkey);
       const shouldAttemptOnchainBase = Boolean(
         offchainReceiptReady &&
         walletReady &&
@@ -610,8 +627,8 @@ export const UserConfirmScreen: React.FC = () => {
           onchainReadyErrorMessage = mapOnchainReadinessError(readiness.reason);
         }
       }
-      const shouldAttemptOnchain = shouldAttemptOnchainBase && onchainReadyForClaim;
-      if (forceOnchainMode && !shouldAttemptOnchain) {
+      const shouldAttemptOnchain = shouldAttemptOnchainBase && onchainReadyForClaim && !hasExistingOnchainProof;
+      if (forceOnchainMode && !shouldAttemptOnchain && !hasExistingOnchainProof) {
         if (!eventHasOnchainConfig) {
           throw new Error('このイベントはオンチェーン受け取りに対応していません');
         }

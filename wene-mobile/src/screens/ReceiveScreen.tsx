@@ -894,6 +894,9 @@ ${st.balanceLamports ?? 'null'}
 
         setLastSignature(signature);
         setLastDoneAt(Date.now());
+        if (campaignId && walletPubkey) {
+          await markAsClaimed(campaignId, walletPubkey);
+        }
         setState('Done');
 
         // Add to the UserEventsScreen ticket list

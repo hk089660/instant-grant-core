@@ -174,6 +174,28 @@ describe('participation audit receipt', () => {
     expect(claimBody.explorerTxUrl).toContain('https://explorer.solana.com/tx/');
     expect(claimBody.explorerTxUrl).toContain('cluster=devnet');
 
+    const replayRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(eventId)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          pin: '1234',
+        }),
+      })
+    );
+    expect(replayRes.status).toBe(200);
+    const replayBody = (await replayRes.json()) as {
+      status?: string;
+      txSignature?: string;
+      receiptPubkey?: string;
+      explorerTxUrl?: string;
+    };
+    expect(replayBody.status).toBe('already');
+    expect(replayBody.txSignature).toBe('5'.repeat(64));
+    expect(replayBody.receiptPubkey).toBe('6'.repeat(32));
+    expect(replayBody.explorerTxUrl).toContain('https://explorer.solana.com/tx/');
+
     const syncRes = await store.fetch(
       new Request('https://example.com/api/users/tickets/sync', {
         method: 'POST',
@@ -355,6 +377,30 @@ describe('participation audit receipt', () => {
     expect(secondClaimBody.receiptPubkey).toBe('6'.repeat(32));
     expect(secondClaimBody.explorerTxUrl).toContain('https://explorer.solana.com/tx/');
     expect(secondClaimBody.ticketReceipt?.confirmationCode).toBe(firstClaimBody.confirmationCode);
+
+    const replayClaimRes = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: event.id,
+          walletAddress,
+        }),
+      })
+    );
+    expect(replayClaimRes.status).toBe(200);
+    const replayClaimBody = (await replayClaimRes.json()) as {
+      success: boolean;
+      alreadyJoined?: boolean;
+      txSignature?: string;
+      receiptPubkey?: string;
+      explorerTxUrl?: string;
+    };
+    expect(replayClaimBody.success).toBe(true);
+    expect(replayClaimBody.alreadyJoined).toBe(true);
+    expect(replayClaimBody.txSignature).toBe('5'.repeat(64));
+    expect(replayClaimBody.receiptPubkey).toBe('6'.repeat(32));
+    expect(replayClaimBody.explorerTxUrl).toContain('https://explorer.solana.com/tx/');
 
     const transferRes = await store.fetch(
       new Request(`https://example.com/api/admin/transfers?eventId=${encodeURIComponent(event.id)}&limit=50`, {
