@@ -1,94 +1,86 @@
 # instant-grant-core
 
-Prototype for auditable school participation and grant operations on Solana.
-This repository combines an Anchor program, a Cloudflare Worker API, and an Expo / Cloudflare Pages frontend for the We-ne / Asuka Network Core prototype.
+Solana 上で学校参加運用と給付運用を監査可能にするプロトタイプです。
+このリポジトリは、We-ne / Asuka Network Core プロトタイプとして、Anchor プログラム、Cloudflare Worker API、Expo / Cloudflare Pages フロントエンドをまとめています。
 
-[Japanese README](./README.ja.md)
+[English README](./README.en.md)
 
-## Snapshot
+## 概要
 
-Verified on 2026-03-10.
+2026-03-10 時点で確認済みです。
 
-- User app: `https://instant-grant-core.pages.dev/`
-- Admin app: `https://instant-grant-core.pages.dev/admin/login`
-- Worker API: `https://instant-grant-core.haruki-kira3.workers.dev`
-- Public readiness endpoints:
-  - `https://instant-grant-core.pages.dev/v1/school/pop-status`
-  - `https://instant-grant-core.pages.dev/v1/school/runtime-status`
-  - `https://instant-grant-core.pages.dev/v1/school/audit-status`
-- Public runtime state observed on 2026-03-10:
-  - `runtime-status.ready=true`
-  - `pop-status.enforceOnchainPop=true`
-  - `pop-status.signerConfigured=true`
-  - `audit-status.operationalReady=true`
+### 公開 URL
 
-Local validation executed on 2026-03-10:
+| 画面 | URL |
+| --- | --- |
+| 利用者アプリ | `https://instant-grant-core.pages.dev/` |
+| 管理者アプリ | `https://instant-grant-core.pages.dev/admin/login` |
+| Worker API | `https://instant-grant-core.haruki-kira3.workers.dev` |
 
-- `api-worker`: `npm test` -> 80 tests passed
-- `wene-mobile`: `npm run test:server` -> 18 tests passed
-- `api-worker`: `npx tsc --noEmit` -> passed
-- `wene-mobile`: `npx tsc --noEmit` -> passed
-- `grant_program`: `anchor build` -> passed
-- `grant_program`: `anchor test --skip-build --provider.cluster localnet` -> passed
-- root: `npm run check:lockfiles` -> passed
-- root: `npm run verify:production` -> 11/11 checks passed
+### 公開 Readiness Endpoint
 
-## What This Repo Does
+| Endpoint | URL | 2026-03-10 時点の確認結果 |
+| --- | --- | --- |
+| PoP status | `https://instant-grant-core.pages.dev/v1/school/pop-status` | `enforceOnchainPop=true`, `signerConfigured=true` |
+| Runtime status | `https://instant-grant-core.pages.dev/v1/school/runtime-status` | `ready=true` |
+| Audit status | `https://instant-grant-core.pages.dev/v1/school/audit-status` | `operationalReady=true` |
 
-The prototype has three layers:
+### 2026-03-10 に実施したローカル検証
 
-1. `grant_program/`
-   - Solana program built with Anchor.
-   - Handles on-chain grant claim execution.
-   - When the on-chain route is used, PoP-linked claim evidence is required inside claim instructions.
-2. `api-worker/`
-   - Cloudflare Worker + Durable Object backend.
-   - Issues off-chain participation receipts, exposes admin/master audit APIs, and publishes readiness endpoints.
-3. `wene-mobile/`
-   - Expo application used for user, admin, and local master flows.
-   - Deployed as Cloudflare Pages for the web surfaces.
+| 対象 | コマンド | 結果 |
+| --- | --- | --- |
+| `api-worker` | `npm test` | 80 tests passed |
+| `wene-mobile` | `npm run test:server` | 18 tests passed |
+| `api-worker` | `npx tsc --noEmit` | passed |
+| `wene-mobile` | `npx tsc --noEmit` | passed |
+| `grant_program` | `anchor build` | passed |
+| `grant_program` | `anchor test --skip-build --provider.cluster localnet` | passed |
+| root | `npm run check:lockfiles` | passed |
+| root | `npm run verify:production` | 11/11 checks passed |
 
-Current implemented flow:
+## 構成
 
-- Attend: off-chain participation issuance with `confirmationCode` and immutable `ticketReceipt`
-- Optional walletless claim path when event policy allows it
-- Policy-gated on-chain redeem path with PoP proof and Solana transaction evidence
-- Admin participant search, transfer audit, and runtime readiness UI
-- Master-only disclosure and indexed search APIs
-- API guardrails for rate limiting, payload limits, and Cost of Forgery integration hooks
+### リポジトリの 3 レイヤー
 
-## Verification Model
+| Directory | 役割 | 補足 |
+| --- | --- | --- |
+| `grant_program/` | Anchor で構築した Solana プログラム | オンチェーンの grant claim 実行を担います。オンチェーン経路を使う場合、claim 命令内で PoP に紐づく証跡が必須です。 |
+| `api-worker/` | Cloudflare Worker + Durable Object バックエンド | オフチェーン参加レシートの発行、admin/master 向け監査 API、readiness endpoint を提供します。 |
+| `wene-mobile/` | user、admin、ローカル master フローで使う Expo アプリ | Web 向け画面は Cloudflare Pages にデプロイされています。 |
 
-- Off-chain Attend can be verified through public receipt APIs such as `/api/audit/receipts/verify-code`, but this still relies on the Worker and stored audit data.
-- On-chain Redeem can be verified independently from Solana transaction and account state.
-- Current trust model is still prototype-centralized: the system uses a single PoP signer / operator boundary today. Planned decentralization work is tracked in [docs/ROADMAP.md](./docs/ROADMAP.md).
+### 実装済みフロー
 
-## Repository Layout
+- Attend: `confirmationCode` と不変 `ticketReceipt` を使うオフチェーン参加発行
+- イベント方針が許す場合の walletless claim 経路
+- PoP 証跡と Solana トランザクション証拠を伴う、方針連動の on-chain redeem 経路
+- admin 向けの参加者検索、送金監査、runtime readiness UI
+- master 限定の開示 API とインデックス検索 API
+- レート制限、payload 制限、Cost of Forgery 連携フックを含む API ガードレール
 
-- `grant_program/`: Solana contract workspace; commands are defined in [grant_program/package.json](./grant_program/package.json)
-- [api-worker/README.md](./api-worker/README.md): API contract, Worker variables, audit and PoP operations
-- [wene-mobile/README.md](./wene-mobile/README.md): app-specific flow, mobile/web usage, and Expo details
-- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md): architecture overview
-- [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md): contributor setup
-- [docs/DEVNET_SETUP.md](./docs/DEVNET_SETUP.md): devnet claim verification
-- [docs/SECURITY.md](./docs/SECURITY.md): security model and operational controls
-- [docs/POP_CHAIN_OPERATIONS.md](./docs/POP_CHAIN_OPERATIONS.md): PoP chain recovery and cutover
-- [docs/ROADMAP.md](./docs/ROADMAP.md): planned decentralization and pilot milestones
+## 信頼モデルと検証
 
-## Prerequisites
+- オフチェーン Attend は `POST /api/audit/receipts/verify-code` などの公開レシート API で検証できますが、Worker と保存済み監査データへの依存は残ります。
+- オンチェーン Redeem は Solana の transaction と account state だけで独立検証できます。
+- 現在の trust model はまだ prototype-centralized で、PoP signer / operator 境界は単一主体です。分散化計画は [docs/ROADMAP.md](./docs/ROADMAP.md) にあります。
 
-Validated locally on 2026-03-10 with:
+## クイックスタート
 
-- Node.js `v20.19.4`
-- npm `10.8.2`
-- `anchor-cli 0.31.1`
-- `solana-cli 3.0.13`
-- `rustc 1.92.0`
+### 前提環境
 
-For app-only work, Node.js and npm are enough.
-For contract work, you also need Rust, Solana CLI, and Anchor.
+2026-03-10 にローカルで確認した環境:
 
-## Install Dependencies
+| ツール | バージョン |
+| --- | --- |
+| Node.js | `v20.19.4` |
+| npm | `10.8.2` |
+| `anchor-cli` | `0.31.1` |
+| `solana-cli` | `3.0.13` |
+| `rustc` | `1.92.0` |
+
+アプリだけ触る場合は Node.js と npm で足ります。
+コントラクトも扱う場合は Rust、Solana CLI、Anchor も必要です。
+
+### 依存関係のインストール
 
 ```bash
 npm ci
@@ -103,9 +95,55 @@ cd ../grant_program
 npm ci
 ```
 
-## Validate The Repo
+### ローカル起動
 
-Run the checks that were used for this README refresh:
+1. Worker API を起動します。
+
+```bash
+cd api-worker
+npx wrangler dev
+```
+
+API は `http://localhost:8787` で起動します。
+
+2. フロントエンドを設定します。
+
+```bash
+cd wene-mobile
+cp .env.example .env.local
+```
+
+最低限必要な設定:
+
+```bash
+EXPO_PUBLIC_API_BASE_URL=http://localhost:8787
+EXPO_PUBLIC_API_MODE=http
+```
+
+オンチェーンフローを使う場合は、[wene-mobile/.env.example](./wene-mobile/.env.example) の Solana 関連設定も入れてください。特に必要なのは次です。
+
+- `EXPO_PUBLIC_SOLANA_RPC_URL`
+- `EXPO_PUBLIC_SOLANA_CLUSTER`
+- `PROGRAM_ID`
+
+3. Web 画面を起動します。
+
+```bash
+cd wene-mobile
+npm run web
+```
+
+ターミナルに出るローカル Expo Web URL を開き、必要な画面に移動します。
+
+- `/` 利用者画面
+- `/admin/login` 管理者画面
+- `/master/login` ローカル master 画面
+
+## 検証とデプロイ確認
+
+### ローカル検証コマンド
+
+今回の README 同期で使った確認コマンド:
 
 ```bash
 npm run check:lockfiles
@@ -123,59 +161,15 @@ anchor build
 anchor test --skip-build --provider.cluster localnet
 ```
 
-Notes:
+補足:
 
-- Root `npm run build` runs `anchor build` and the mobile TypeScript check.
-- Root `npm run test` only runs the Anchor test suite.
-- `wene-mobile` uses `npm ci --legacy-peer-deps` intentionally.
+- ルートの `npm run build` は `anchor build` と mobile の TypeScript チェックを実行します。
+- ルートの `npm run test` は Anchor テストだけを実行します。
+- `wene-mobile` は意図的に `npm ci --legacy-peer-deps` を使います。
 
-## Run Locally
+### デプロイ済み環境の確認
 
-### 1. Start the Worker API
-
-```bash
-cd api-worker
-npx wrangler dev
-```
-
-This starts the API at `http://localhost:8787`.
-
-### 2. Configure the frontend
-
-```bash
-cd wene-mobile
-cp .env.example .env.local
-```
-
-Set at least:
-
-```bash
-EXPO_PUBLIC_API_BASE_URL=http://localhost:8787
-EXPO_PUBLIC_API_MODE=http
-```
-
-For on-chain flows, also configure the Solana values in [wene-mobile/.env.example](./wene-mobile/.env.example), especially:
-
-- `EXPO_PUBLIC_SOLANA_RPC_URL`
-- `EXPO_PUBLIC_SOLANA_CLUSTER`
-- `PROGRAM_ID`
-
-### 3. Start the web surface
-
-```bash
-cd wene-mobile
-npm run web
-```
-
-Open the local Expo web URL shown in the terminal, then navigate to:
-
-- `/` for the user surface
-- `/admin/login` for the admin surface
-- `/master/login` for the local master surface
-
-## Verify The Deployed Environment
-
-Quick public checks:
+公開 endpoint の簡易確認:
 
 ```bash
 BASE="https://instant-grant-core.pages.dev"
@@ -185,45 +179,50 @@ curl -s "$BASE/v1/school/runtime-status"
 curl -s "$BASE/v1/school/audit-status"
 ```
 
-Full production readiness check:
+本番 readiness の一括確認:
 
 ```bash
 npm run verify:production
 ```
 
-Optional environment variables:
+任意の環境変数:
 
 - `WORKER_BASE_URL`
 - `PAGES_BASE_URL`
 - `SOLANA_RPC_URL`
-- `MASTER_TOKEN` for master-protected checks
+- master 保護 API まで確認する場合の `MASTER_TOKEN`
 
-The current readiness script validates:
+現在の readiness script が検証する内容:
 
 - Worker root health
 - PoP status
 - audit status
 - runtime readiness
 - Pages proxy readiness
-- on-chain `pop-config` alignment for published events
-- expected `401` behavior on protected master endpoints without a token
+- 公開中イベントに対する on-chain `pop-config` 整合
+- token なしで protected master endpoint に `401` が返ること
 
-## Key Public Endpoints
+## リポジトリガイド
 
-- `GET /v1/school/pop-status`
-- `GET /v1/school/runtime-status`
-- `GET /v1/school/audit-status`
-- `POST /api/audit/receipts/verify-code`
+| Path | 用途 |
+| --- | --- |
+| `grant_program/` | Solana コントラクトのワークスペース。コマンドは [grant_program/package.json](./grant_program/package.json) を参照 |
+| [api-worker/README.md](./api-worker/README.md) | API 契約、Worker 変数、監査と PoP 運用 |
+| [wene-mobile/README.md](./wene-mobile/README.md) | アプリ固有フロー、mobile/web 利用方法、Expo 詳細 |
+| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | アーキテクチャ概要 |
+| [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md) | 開発環境セットアップ |
+| [docs/DEVNET_SETUP.md](./docs/DEVNET_SETUP.md) | Devnet claim 検証手順 |
+| [docs/SECURITY.md](./docs/SECURITY.md) | セキュリティモデルと運用制御 |
+| [docs/POP_CHAIN_OPERATIONS.md](./docs/POP_CHAIN_OPERATIONS.md) | PoP chain の復旧と cutover |
+| [docs/ROADMAP.md](./docs/ROADMAP.md) | 分散化と pilot の計画 |
 
-See [api-worker/README.md](./api-worker/README.md) for the complete API contract and Worker configuration.
+## 開発メモ
 
-## Development Notes
+- 正式な package manager は `npm`
+- 正式な lockfile は root / `api-worker` / `wene-mobile` / `grant_program` の `package-lock.json`
+- CI は lockfile policy を強制し、`yarn.lock`、`pnpm-lock.yaml`、非正規名の lockfile を拒否します
+- ルートの本番検証スクリプト: [scripts/verify-production-readiness.mjs](./scripts/verify-production-readiness.mjs)
 
-- Canonical package manager: `npm`
-- Canonical lockfiles: root / `api-worker` / `wene-mobile` / `grant_program` `package-lock.json`
-- CI enforces the lockfile policy and rejects `yarn.lock`, `pnpm-lock.yaml`, and non-canonical lockfile names
-- Root production verification script is [scripts/verify-production-readiness.mjs](./scripts/verify-production-readiness.mjs)
-
-## License
+## ライセンス
 
 [MIT](./LICENSE)

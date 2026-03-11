@@ -206,7 +206,8 @@ Recommended browsers for `/u/*`: Safari (iOS) / Chrome (Android). Other browsers
 
 **Links:**
 
-* 日本語版 README: `../README.ja.md`
+* 日本語版 README: `../README.md`
+* English README: `../README.en.md`
 * Architecture: `../docs/ARCHITECTURE.md`
 * Development Guide: `../docs/DEVELOPMENT.md`
 * Static Verification Report: `docs/STATIC_VERIFICATION_REPORT.md`
