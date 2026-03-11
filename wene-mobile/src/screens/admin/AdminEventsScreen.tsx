@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { View, StyleSheet, ScrollView, TextInput } from 'react-native';
+import { View, StyleSheet, ScrollView, TextInput, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AppText, Button, CountBadge, EventRow, AdminShell, StatusBadge, Loading } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
@@ -14,7 +14,9 @@ import { copyTextWithFeedback } from '../../utils/copyText';
 
 export const AdminEventsScreen: React.FC = () => {
   const router = useRouter();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const [events, setEvents] = useState<SchoolEvent[]>([]);
+  const [activeQuery, setActiveQuery] = useState('');
   const [deletedQuery, setDeletedQuery] = useState('');
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsRefreshing, setEventsRefreshing] = useState(false);
@@ -157,6 +159,16 @@ export const AdminEventsScreen: React.FC = () => {
     () => events.filter((event) => (event.state ?? 'draft') !== 'ended'),
     [events]
   );
+  const filteredActiveEvents = useMemo(() => {
+    const q = activeQuery.trim().toLowerCase();
+    if (!q) return activeEvents;
+    return activeEvents.filter((event) =>
+      event.title.toLowerCase().includes(q) ||
+      event.host.toLowerCase().includes(q) ||
+      event.datetime.toLowerCase().includes(q) ||
+      event.id.toLowerCase().includes(q)
+    );
+  }, [activeEvents, activeQuery]);
   const deletedEvents = useMemo(
     () => events.filter((event) => (event.state ?? 'draft') === 'ended'),
     [events]
@@ -171,6 +183,15 @@ export const AdminEventsScreen: React.FC = () => {
       event.id.toLowerCase().includes(q)
     );
   }, [deletedEvents, deletedQuery]);
+  const splitEventPanels = windowWidth >= 1180;
+  const activeListMaxHeight = useMemo(
+    () => Math.max(260, Math.min(windowHeight * (splitEventPanels ? 0.5 : 0.46), 620)),
+    [splitEventPanels, windowHeight]
+  );
+  const archivedListMaxHeight = useMemo(
+    () => Math.max(220, Math.min(windowHeight * (splitEventPanels ? 0.42 : 0.38), 520)),
+    [splitEventPanels, windowHeight]
+  );
 
   return (
     <AdminShell title="イベント一覧" role="admin">
@@ -283,104 +304,130 @@ export const AdminEventsScreen: React.FC = () => {
 
         <View style={styles.sectionHeader}>
           <AppText variant="h3" style={styles.sectionTitle}>
-            イベント一覧
+            イベントパネル
           </AppText>
           <AppText variant="small" style={styles.sectionNote}>
-            消去済みイベントは下の別一覧に移動します
+            オープンなイベントを中心に表示し、消去済みイベントは別パネルで管理します
           </AppText>
         </View>
 
-        <View style={styles.list}>
-          {eventsLoading ? (
-            <View style={styles.stateContainer}>
-              <Loading message="イベントを読み込み中です..." size="large" mode="admin" />
-            </View>
-          ) : eventsError ? (
-            <View style={styles.stateContainer}>
-              <AppText style={styles.errorText}>{eventsError}</AppText>
-              <Button
-                title="再読み込み"
-                variant="secondary"
-                dark
-                onPress={() => void loadInitialDashboard()}
-                style={styles.retryButton}
-              />
-            </View>
-          ) : activeEvents.length === 0 ? (
-            <View style={styles.stateContainer}>
-              <AppText style={styles.emptyText}>表示中のイベントはありません。</AppText>
-            </View>
-          ) : (
-            activeEvents.map((event) => {
-              const state = event.state ?? 'draft';
-              const isPublished = state === 'published';
-              const isDraft = state === 'draft';
-
-              return (
-                <EventRow
-                  key={event.id}
-                  title={event.title}
-                  datetime={event.datetime}
-                  host={event.host}
-                  textColor={adminTheme.colors.text}
-                  leftSlot={
-                    <CountBadge
-                      value={event.claimedCount ?? 0}
-                      backgroundColor={adminTheme.colors.muted}
-                      textColor={adminTheme.colors.textSecondary}
-                    />
-                  }
-                  rightSlot={
-                    <View style={styles.cardRight}>
-                      <StatusBadge state={state} />
-                      {isPublished ? (
-                        <>
-                          <Button
-                            title="印刷用PDF"
-                            variant="primary"
-                            onPress={() => router.push(`/admin/print/${event.id}` as any)}
-                            style={styles.printButton}
-                          />
-                          <Button
-                            title="イベントをクローズ"
-                            variant="secondary"
-                            dark
-                            size="medium"
-                            onPress={() => void handleCloseEvent(event.id)}
-                            loading={closingEventId === event.id}
-                            disabled={Boolean(closingEventId && closingEventId !== event.id)}
-                            style={styles.closeButton}
-                          />
-                        </>
-                      ) : (
-                        <AppText variant="small" style={styles.warningText}>
-                          {isDraft
-                            ? '未公開のため受付QRは出せません'
-                            : '終了済みのため受付QRは出せません'}
-                        </AppText>
-                      )}
-                    </View>
-                  }
-                  onPress={() => router.push(`/admin/events/${event.id}` as any)}
-                  style={styles.row}
+        <View style={[styles.eventPanels, splitEventPanels && styles.eventPanelsSplit]}>
+          <View style={[styles.list, styles.activePanel, splitEventPanels && styles.activePanelSplit]}>
+            {eventsLoading ? (
+              <View style={styles.stateContainer}>
+                <Loading message="イベントを読み込み中です..." size="large" mode="admin" />
+              </View>
+            ) : eventsError ? (
+              <View style={styles.stateContainer}>
+                <AppText style={styles.errorText}>{eventsError}</AppText>
+                <Button
+                  title="再読み込み"
+                  variant="secondary"
+                  dark
+                  onPress={() => void loadInitialDashboard()}
+                  style={styles.retryButton}
                 />
-              );
-            })
-          )}
-        </View>
+              </View>
+            ) : (
+              <>
+                <AppText variant="h3" style={styles.sectionTitle}>
+                  オープンなイベント
+                </AppText>
+                <AppText variant="small" style={styles.sectionNote}>
+                  {activeEvents.length} 件 / 表示 {filteredActiveEvents.length} 件
+                </AppText>
+                <TextInput
+                  style={styles.searchInput}
+                  value={activeQuery}
+                  onChangeText={setActiveQuery}
+                  placeholder="オープンなイベントを検索（イベント名 / 主催 / ID）"
+                  placeholderTextColor={adminTheme.colors.textTertiary}
+                />
 
-        {!eventsLoading && !eventsError && (
-          <>
-            <View style={styles.sectionHeader}>
+                {activeEvents.length === 0 ? (
+                  <View style={styles.stateContainer}>
+                    <AppText style={styles.emptyText}>表示中のイベントはありません。</AppText>
+                  </View>
+                ) : filteredActiveEvents.length === 0 ? (
+                  <View style={styles.stateContainer}>
+                    <AppText style={styles.emptyText}>該当するオープンなイベントが見つかりません。</AppText>
+                  </View>
+                ) : (
+                  <ScrollView
+                    style={[styles.activeListScroll, { maxHeight: activeListMaxHeight }]}
+                    contentContainerStyle={styles.activeListContent}
+                    nestedScrollEnabled
+                    showsVerticalScrollIndicator
+                  >
+                    {filteredActiveEvents.map((event) => {
+                      const state = event.state ?? 'draft';
+                      const isPublished = state === 'published';
+                      const isDraft = state === 'draft';
+
+                      return (
+                        <EventRow
+                          key={event.id}
+                          title={event.title}
+                          datetime={event.datetime}
+                          host={event.host}
+                          textColor={adminTheme.colors.text}
+                          leftSlot={
+                            <CountBadge
+                              value={event.claimedCount ?? 0}
+                              backgroundColor={adminTheme.colors.muted}
+                              textColor={adminTheme.colors.textSecondary}
+                            />
+                          }
+                          rightSlot={
+                            <View style={styles.cardRight}>
+                              <StatusBadge state={state} />
+                              {isPublished ? (
+                                <>
+                                  <Button
+                                    title="印刷用PDF"
+                                    variant="primary"
+                                    onPress={() => router.push(`/admin/print/${event.id}` as any)}
+                                    style={styles.printButton}
+                                  />
+                                  <Button
+                                    title="イベントをクローズ"
+                                    variant="secondary"
+                                    dark
+                                    size="medium"
+                                    onPress={() => void handleCloseEvent(event.id)}
+                                    loading={closingEventId === event.id}
+                                    disabled={Boolean(closingEventId && closingEventId !== event.id)}
+                                    style={styles.closeButton}
+                                  />
+                                </>
+                              ) : (
+                                <AppText variant="small" style={styles.warningText}>
+                                  {isDraft
+                                    ? '未公開のため受付QRは出せません'
+                                    : '終了済みのため受付QRは出せません'}
+                                </AppText>
+                              )}
+                            </View>
+                          }
+                          onPress={() => router.push(`/admin/events/${event.id}` as any)}
+                          style={styles.row}
+                        />
+                      );
+                    })}
+                  </ScrollView>
+                )}
+              </>
+            )}
+          </View>
+
+          {!eventsLoading && !eventsError && (
+            <View style={[styles.archivedCard, splitEventPanels && styles.archivedPanelSplit]}>
               <AppText variant="h3" style={styles.sectionTitle}>
                 消去済みイベント
               </AppText>
               <AppText variant="small" style={styles.sectionNote}>
                 {deletedEvents.length} 件 / 表示 {filteredDeletedEvents.length} 件
               </AppText>
-            </View>
-
-            <View style={styles.archivedCard}>
               <TextInput
                 style={styles.searchInput}
                 value={deletedQuery}
@@ -398,36 +445,43 @@ export const AdminEventsScreen: React.FC = () => {
                   <AppText style={styles.emptyText}>該当する消去済みイベントが見つかりません。</AppText>
                 </View>
               ) : (
-                filteredDeletedEvents.map((event) => (
-                  <EventRow
-                    key={`archived:${event.id}`}
-                    title={event.title}
-                    datetime={event.datetime}
-                    host={event.host}
-                    textColor={adminTheme.colors.text}
-                    leftSlot={
-                      <CountBadge
-                        value={event.claimedCount ?? 0}
-                        backgroundColor={adminTheme.colors.muted}
-                        textColor={adminTheme.colors.textSecondary}
-                      />
-                    }
-                    rightSlot={
-                      <View style={styles.cardRight}>
-                        <StatusBadge state="ended" />
-                        <AppText variant="small" style={styles.warningText}>
-                          消去済み一覧からのみ表示
-                        </AppText>
-                      </View>
-                    }
-                    onPress={() => router.push(`/admin/events/${event.id}` as any)}
-                    style={styles.row}
-                  />
-                ))
+                <ScrollView
+                  style={[styles.archivedListScroll, { maxHeight: archivedListMaxHeight }]}
+                  contentContainerStyle={styles.archivedListContent}
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator
+                >
+                  {filteredDeletedEvents.map((event) => (
+                    <EventRow
+                      key={`archived:${event.id}`}
+                      title={event.title}
+                      datetime={event.datetime}
+                      host={event.host}
+                      textColor={adminTheme.colors.text}
+                      leftSlot={
+                        <CountBadge
+                          value={event.claimedCount ?? 0}
+                          backgroundColor={adminTheme.colors.muted}
+                          textColor={adminTheme.colors.textSecondary}
+                        />
+                      }
+                      rightSlot={
+                        <View style={styles.cardRight}>
+                          <StatusBadge state="ended" />
+                          <AppText variant="small" style={styles.warningText}>
+                            消去済み一覧からのみ表示
+                          </AppText>
+                        </View>
+                      }
+                      onPress={() => router.push(`/admin/events/${event.id}` as any)}
+                      style={styles.row}
+                    />
+                  ))}
+                </ScrollView>
               )}
             </View>
-          </>
-        )}
+          )}
+        </View>
 
         <AppText variant="small" style={styles.note}>
           RT=現在までの参加完了数
@@ -528,6 +582,14 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     minWidth: 140,
   },
+  eventPanels: {
+    marginBottom: adminTheme.spacing.lg,
+  },
+  eventPanelsSplit: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: adminTheme.spacing.md,
+  },
   list: {
     backgroundColor: adminTheme.colors.surface,
     borderRadius: adminTheme.radius.md,
@@ -537,6 +599,13 @@ const styles = StyleSheet.create({
     paddingVertical: adminTheme.spacing.sm,
     marginBottom: adminTheme.spacing.lg,
   },
+  activePanel: {
+    flex: 1,
+  },
+  activePanelSplit: {
+    flex: 1.08,
+    marginBottom: 0,
+  },
   archivedCard: {
     backgroundColor: adminTheme.colors.surface,
     borderRadius: adminTheme.radius.md,
@@ -545,6 +614,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: adminTheme.spacing.md,
     paddingVertical: adminTheme.spacing.sm,
     marginBottom: adminTheme.spacing.lg,
+  },
+  archivedPanelSplit: {
+    flex: 0.92,
+    marginBottom: 0,
+  },
+  activeListScroll: {
+    marginTop: adminTheme.spacing.xs,
+  },
+  activeListContent: {
+    paddingRight: adminTheme.spacing.xs,
+  },
+  archivedListScroll: {
+    marginTop: adminTheme.spacing.xs,
+  },
+  archivedListContent: {
+    paddingRight: adminTheme.spacing.xs,
   },
   searchInput: {
     borderWidth: 1,
