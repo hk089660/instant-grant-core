@@ -78,6 +78,7 @@ Solanaのネイティブ機能である**「署名者（Signer）とガス代支
 * CSS print（`@media print`）による **印刷向けQRレイアウト**（現場でのバックアップ運用を想定）
 * 共有端末向けの **ロール制限（viewer / operator / admin）**
 * 開発用ロール切替（本番では非表示）
+* on-chain claim 時の PoP proof 再取得は Worker 側で短時間 idempotent に再利用され、別端末からの再送でも不要な重複発行を避ける
 
 ### School Participation Flow Refactor
 

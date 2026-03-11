@@ -14,6 +14,7 @@ Non-custodial, transparent, and auditable distribution flows for public-support 
 * Added **print-friendly QR layout** using CSS print (`@media print`) for reliable offline and backup operations
 * Implemented **role-based UI restrictions** (viewer / operator / admin) to improve safety on shared school devices
 * Added a development-only role switcher for faster testing and demos (**not visible in production**)
+* On-chain claim retries now benefit from short-lived idempotent PoP proof reuse in the Worker, avoiding unnecessary duplicate issuance when the same claim is retried from another device
 
 These updates focus on stability, operational safety, and real-world school usage.
 

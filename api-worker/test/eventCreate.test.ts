@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import bs58 from 'bs58';
 import nacl from 'tweetnacl';
 import { SchoolStore, type Env } from '../src/storeDO';
@@ -470,6 +470,206 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
     expect(await state.storage.get(streamKey)).toBe(proofs[2].entryHash);
   });
 
+  it('reuses a fresh PoP proof for identical repeated requests', async () => {
+    const createRes = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'pop idempotent event',
+          datetime: '2026/02/21 10:20',
+          host: 'admin',
+          ticketTokenAmount: 1,
+        }),
+      })
+    );
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as { id: string };
+
+    const registerRes = await store.fetch(
+      new Request('https://example.com/api/users/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: 'pop-idempotent-user',
+          displayName: 'PoP Idempotent User',
+          pin: '1234',
+        }),
+      })
+    );
+    expect(registerRes.status).toBe(200);
+    const registered = (await registerRes.json()) as { userId?: string };
+    expect(typeof registered.userId).toBe('string');
+
+    const claimRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(created.id)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: registered.userId,
+          pin: '1234',
+        }),
+      })
+    );
+    expect(claimRes.status).toBe(200);
+    const claimBody = (await claimRes.json()) as { confirmationCode?: string };
+    expect(typeof claimBody.confirmationCode).toBe('string');
+
+    const proofRequestBody = {
+      eventId: created.id,
+      confirmationCode: claimBody.confirmationCode,
+      grant: 'So11111111111111111111111111111111111111112',
+      claimer: '11111111111111111111111111111111',
+      periodIndex: '0',
+    };
+
+    const firstProofRes = await store.fetch(
+      new Request('https://example.com/v1/school/pop-proof', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(proofRequestBody),
+      })
+    );
+    expect(firstProofRes.status).toBe(200);
+    const firstProof = (await firstProofRes.json()) as {
+      entryHash?: string;
+      prevHash?: string;
+      streamPrevHash?: string;
+      issuedAt?: number;
+      messageBase64?: string;
+      signatureBase64?: string;
+    };
+
+    const secondProofRes = await store.fetch(
+      new Request('https://example.com/v1/school/pop-proof', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(proofRequestBody),
+      })
+    );
+    expect(secondProofRes.status).toBe(200);
+    const secondProof = (await secondProofRes.json()) as {
+      entryHash?: string;
+      prevHash?: string;
+      streamPrevHash?: string;
+      issuedAt?: number;
+      messageBase64?: string;
+      signatureBase64?: string;
+    };
+
+    expect(secondProof.entryHash).toBe(firstProof.entryHash);
+    expect(secondProof.prevHash).toBe(firstProof.prevHash);
+    expect(secondProof.streamPrevHash).toBe(firstProof.streamPrevHash);
+    expect(secondProof.issuedAt).toBe(firstProof.issuedAt);
+    expect(secondProof.messageBase64).toBe(firstProof.messageBase64);
+    expect(secondProof.signatureBase64).toBe(firstProof.signatureBase64);
+
+    const grant = proofRequestBody.grant;
+    const globalKey = `pop_chain:lastHash:global:${grant}`;
+    const streamKey = `pop_chain:lastHash:stream:${grant}`;
+    expect(await state.storage.get(globalKey)).toBe(firstProof.entryHash);
+    expect(await state.storage.get(streamKey)).toBe(firstProof.entryHash);
+
+    const history = await state.storage.list({ prefix: 'pop_chain:history:' });
+    expect(history.size).toBe(1);
+  });
+
+  it('reissues PoP proof after the reuse window expires', async () => {
+    const baseNow = Date.parse('2026-02-21T00:00:00.000Z');
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(baseNow);
+    try {
+      const createRes = await store.fetch(
+        new Request('https://example.com/v1/school/events', {
+          method: 'POST',
+          headers: adminHeaders,
+          body: JSON.stringify({
+            title: 'pop reissue event',
+            datetime: '2026/02/21 10:25',
+            host: 'admin',
+            ticketTokenAmount: 1,
+          }),
+        })
+      );
+      expect(createRes.status).toBe(201);
+      const created = (await createRes.json()) as { id: string };
+
+      const registerRes = await store.fetch(
+        new Request('https://example.com/api/users/register', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            userId: 'pop-reissue-user',
+            displayName: 'PoP Reissue User',
+            pin: '1234',
+          }),
+        })
+      );
+      expect(registerRes.status).toBe(200);
+      const registered = (await registerRes.json()) as { userId?: string };
+      expect(typeof registered.userId).toBe('string');
+
+      const claimRes = await store.fetch(
+        new Request(`https://example.com/api/events/${encodeURIComponent(created.id)}/claim`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            userId: registered.userId,
+            pin: '1234',
+          }),
+        })
+      );
+      expect(claimRes.status).toBe(200);
+      const claimBody = (await claimRes.json()) as { confirmationCode?: string };
+      expect(typeof claimBody.confirmationCode).toBe('string');
+
+      const proofRequestBody = {
+        eventId: created.id,
+        confirmationCode: claimBody.confirmationCode,
+        grant: 'So11111111111111111111111111111111111111112',
+        claimer: '11111111111111111111111111111111',
+        periodIndex: '0',
+      };
+
+      const firstProofRes = await store.fetch(
+        new Request('https://example.com/v1/school/pop-proof', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(proofRequestBody),
+        })
+      );
+      expect(firstProofRes.status).toBe(200);
+      const firstProof = (await firstProofRes.json()) as { entryHash?: string; issuedAt?: number };
+      expect(firstProof.entryHash).toMatch(/^[0-9a-f]{64}$/);
+
+      nowSpy.mockReturnValue(baseNow + (11 * 60 * 1000));
+
+      const secondProofRes = await store.fetch(
+        new Request('https://example.com/v1/school/pop-proof', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(proofRequestBody),
+        })
+      );
+      expect(secondProofRes.status).toBe(200);
+      const secondProof = (await secondProofRes.json()) as { entryHash?: string; prevHash?: string; issuedAt?: number };
+      expect(secondProof.entryHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(secondProof.entryHash).not.toBe(firstProof.entryHash);
+      expect(secondProof.prevHash).toBe(firstProof.entryHash);
+      expect(secondProof.issuedAt).toBeGreaterThan(firstProof.issuedAt ?? 0);
+
+      const grant = proofRequestBody.grant;
+      const globalKey = `pop_chain:lastHash:global:${grant}`;
+      const streamKey = `pop_chain:lastHash:stream:${grant}`;
+      expect(await state.storage.get(globalKey)).toBe(secondProof.entryHash);
+      expect(await state.storage.get(streamKey)).toBe(secondProof.entryHash);
+
+      const history = await state.storage.list({ prefix: 'pop_chain:history:' });
+      expect(history.size).toBe(2);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('does not advance stored pop chain when client-provided expected hashes are used', async () => {
     const createRes = await store.fetch(
       new Request('https://example.com/v1/school/events', {
@@ -558,12 +758,53 @@ describe('POST /v1/school/events ticketTokenAmount validation', () => {
       })
     );
     expect(secondProofRes.status).toBe(200);
-    const secondProof = (await secondProofRes.json()) as { entryHash?: string };
+    const secondProof = (await secondProofRes.json()) as {
+      entryHash?: string;
+      prevHash?: string;
+      streamPrevHash?: string;
+      issuedAt?: number;
+      messageBase64?: string;
+      signatureBase64?: string;
+    };
     expect(secondProof.entryHash).toMatch(/^[0-9a-f]{64}$/);
     expect(secondProof.entryHash).not.toBe(firstProof.entryHash);
 
+    const repeatedExpectedHashProofRes = await store.fetch(
+      new Request('https://example.com/v1/school/pop-proof', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: created.id,
+          confirmationCode: claimBody.confirmationCode,
+          grant,
+          claimer,
+          periodIndex: '1',
+          expectedPrevHash: firstProof.entryHash,
+          expectedStreamPrevHash: firstProof.entryHash,
+        }),
+      })
+    );
+    expect(repeatedExpectedHashProofRes.status).toBe(200);
+    const repeatedExpectedHashProof = (await repeatedExpectedHashProofRes.json()) as {
+      entryHash?: string;
+      prevHash?: string;
+      streamPrevHash?: string;
+      issuedAt?: number;
+      messageBase64?: string;
+      signatureBase64?: string;
+    };
+    expect(repeatedExpectedHashProof.entryHash).toBe(secondProof.entryHash);
+    expect(repeatedExpectedHashProof.prevHash).toBe(secondProof.prevHash);
+    expect(repeatedExpectedHashProof.streamPrevHash).toBe(secondProof.streamPrevHash);
+    expect(repeatedExpectedHashProof.issuedAt).toBe(secondProof.issuedAt);
+    expect(repeatedExpectedHashProof.messageBase64).toBe(secondProof.messageBase64);
+    expect(repeatedExpectedHashProof.signatureBase64).toBe(secondProof.signatureBase64);
+
     expect(await state.storage.get(globalKey)).toBe(firstProof.entryHash);
     expect(await state.storage.get(streamKey)).toBe(firstProof.entryHash);
+
+    const history = await state.storage.list({ prefix: 'pop_chain:history:' });
+    expect(history.size).toBe(2);
   });
 
   it('rejects duplicate on-chain grant config across events', async () => {

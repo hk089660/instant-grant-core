@@ -11,7 +11,7 @@ _We-ne mobile flow from first-time registration to event participation and token
 
 ## At a Glance
 
-Verified on 2026-03-10.
+This README reflects the public-environment snapshot from 2026-03-10 plus implementation updates through 2026-03-12.
 
 ### Public Surfaces
 
@@ -31,18 +31,25 @@ Admin demo passcode: `83284ab4d9874e54b301dcf7ea6a6056`
 | Runtime status | `https://instant-grant-core.pages.dev/v1/school/runtime-status` | `ready=true` |
 | Audit status | `https://instant-grant-core.pages.dev/v1/school/audit-status` | `operationalReady=true` |
 
-### Local Validation Executed on 2026-03-10
+### Implementation Update on 2026-03-12
 
-| Area | Command | Result |
-| --- | --- | --- |
-| `api-worker` | `npm test` | 80 tests passed |
-| `wene-mobile` | `npm run test:server` | 18 tests passed |
-| `api-worker` | `npx tsc --noEmit` | passed |
-| `wene-mobile` | `npx tsc --noEmit` | passed |
-| `grant_program` | `anchor build` | passed |
-| `grant_program` | `anchor test --skip-build --provider.cluster localnet` | passed |
-| root | `npm run check:lockfiles` | passed |
-| root | `npm run verify:production` | 11/11 checks passed |
+- `api-worker` `POST /v1/school/pop-proof` now reuses a fresh proof for the same claim request, preventing unnecessary PoP chain advancement when users or admins retry from another device
+- PoP proof issuance is still serialized with `popProofLock`, so both concurrent access and rapid repeated retries are handled on the Worker side
+- Combined with duplicate `solanaAuthority + solanaMint + solanaGrantId` rejection, this reduces grant-scoped PoP stream contention in multi-terminal operations
+- The `api-worker` regression check for this change was rerun with `npm test`, and passed with `84 tests passed`
+
+### Local Validation Snapshot
+
+| Area | Command | Verified on | Result |
+| --- | --- | --- | --- |
+| `api-worker` | `npm test` | 2026-03-12 | 84 tests passed |
+| `wene-mobile` | `npm run test:server` | 2026-03-10 | 18 tests passed |
+| `api-worker` | `npx tsc --noEmit` | 2026-03-10 | passed |
+| `wene-mobile` | `npx tsc --noEmit` | 2026-03-10 | passed |
+| `grant_program` | `anchor build` | 2026-03-10 | passed |
+| `grant_program` | `anchor test --skip-build --provider.cluster localnet` | 2026-03-10 | passed |
+| root | `npm run check:lockfiles` | 2026-03-10 | passed |
+| root | `npm run verify:production` | 2026-03-10 | 11/11 checks passed |
 
 ## Architecture
 
@@ -59,6 +66,7 @@ Admin demo passcode: `83284ab4d9874e54b301dcf7ea6a6056`
 - Attend: off-chain participation issuance with `confirmationCode` and immutable `ticketReceipt`
 - Optional walletless claim path when event policy allows it
 - Policy-gated on-chain redeem path with PoP proof and Solana transaction evidence
+- Worker-side contention control for multi-terminal PoP proof retries on the same claim via short-lived idempotent proof reuse
 - Admin participant search, transfer audit, and runtime readiness UI
 - Master-only disclosure and indexed search APIs
 - API guardrails for rate limiting, payload limits, and Cost of Forgery integration hooks
@@ -67,6 +75,7 @@ Admin demo passcode: `83284ab4d9874e54b301dcf7ea6a6056`
 
 - Off-chain Attend can be verified through public receipt APIs such as `POST /api/audit/receipts/verify-code`, but this still relies on the Worker and stored audit data.
 - On-chain Redeem can be verified independently from Solana transaction and account state.
+- Worker-side PoP proof issuance is serialized per grant, and fresh repeated access for the same claim returns the same proof to suppress duplicate multi-device issuance.
 - The current trust model is still prototype-centralized: the system uses a single PoP signer / operator boundary today. Planned decentralization work is tracked in [docs/ROADMAP.md](./docs/ROADMAP.md).
 
 ## Quick Start
@@ -149,7 +158,7 @@ Open the local Expo web URL shown in the terminal, then navigate to:
 
 ### Local Validation Commands
 
-Run the checks that were used for this README refresh:
+Use these commands when refreshing the verification snapshot in this README:
 
 ```bash
 npm run check:lockfiles
@@ -219,7 +228,7 @@ The current readiness script validates:
 | [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md) | Contributor setup |
 | [docs/DEVNET_SETUP.md](./docs/DEVNET_SETUP.md) | Devnet claim verification |
 | [docs/SECURITY.md](./docs/SECURITY.md) | Security model and operational controls |
-| [docs/POP_CHAIN_OPERATIONS.md](./docs/POP_CHAIN_OPERATIONS.md) | PoP chain recovery and cutover |
+| [docs/POP_CHAIN_OPERATIONS.md](./docs/POP_CHAIN_OPERATIONS.md) | PoP chain recovery, grant reuse guardrails, and multi-terminal contention handling |
 | [docs/ROADMAP.md](./docs/ROADMAP.md) | Planned decentralization and pilot milestones |
 
 ## Development Notes

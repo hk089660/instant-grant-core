@@ -78,6 +78,7 @@
 - `confirmationCode + ticketReceipt` の発行
 - admin / master 向け監査ビュー
 - PoP proof 発行とチェーン整合
+- 同一 claim に対する PoP proof の短時間 idempotent 再利用による multi-terminal 競合抑制
 - immutable audit sink への固定化
 
 主要モジュール:
@@ -147,6 +148,7 @@
 - wallet、`txSignature`、`receiptPubkey` が必要
 - PoP 検証を claim 命令内で実施する
 - Solana の状態だけで独立検証しやすい
+- 同一 claim を別端末から再送しても、fresh window 内は Worker が同一 PoP proof を返し、不要な重複 entry を増やさない
 
 ## 主要データモデル
 

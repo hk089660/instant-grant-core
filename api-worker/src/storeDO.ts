@@ -187,10 +187,12 @@ const MINT_BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const TX_SIGNATURE_BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{64,128}$/;
 const POP_CHAIN_GLOBAL_PREFIX = 'pop_chain:lastHash:global:';
 const POP_CHAIN_STREAM_PREFIX = 'pop_chain:lastHash:stream:';
+const POP_PROOF_CACHE_PREFIX = 'pop_proof:claim:';
 const POP_HASH_LEN = 32;
 const POP_MESSAGE_VERSION = 2;
 const POP_MESSAGE_LEN = 1 + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 8;
 const POP_HASH_GENESIS_HEX = '0'.repeat(64);
+const POP_PROOF_REUSE_MAX_AGE_SECONDS = 8 * 60;
 const USER_ID_CHAIN_LAST_HASH_KEY = 'user_id_chain:last_hash';
 const USER_ID_MIN_LENGTH = 3;
 const USER_ID_MAX_LENGTH = 32;
@@ -2793,6 +2795,72 @@ export class SchoolStore implements DurableObject {
     return out;
   }
 
+  private async buildPopClaimProofCacheKey(params: {
+    eventId: string;
+    confirmationCode: string;
+    grant: string;
+    claimer: string;
+    periodIndex: bigint;
+    expectedPrevHash: string | null;
+    expectedStreamPrevHash: string | null;
+  }): Promise<string> {
+    const fingerprint = await sha256Hex(canonicalize({
+      eventId: params.eventId,
+      confirmationCode: params.confirmationCode,
+      grant: params.grant,
+      claimer: params.claimer,
+      periodIndex: params.periodIndex.toString(),
+      expectedPrevHash: params.expectedPrevHash,
+      expectedStreamPrevHash: params.expectedStreamPrevHash,
+    }));
+    return `${POP_PROOF_CACHE_PREFIX}${fingerprint}`;
+  }
+
+  private parseStoredPopClaimProof(raw: unknown): PopProofResponse | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const signerPubkey = this.normalizeStringField(obj.signerPubkey);
+    const messageBase64 = this.normalizeStringField(obj.messageBase64);
+    const signatureBase64 = this.normalizeStringField(obj.signatureBase64);
+    const auditHash = this.normalizeStringField(obj.auditHash)?.toLowerCase() ?? null;
+    const prevHash = this.normalizeStringField(obj.prevHash)?.toLowerCase() ?? null;
+    const streamPrevHash = this.normalizeStringField(obj.streamPrevHash)?.toLowerCase() ?? null;
+    const entryHash = this.normalizeStringField(obj.entryHash)?.toLowerCase() ?? null;
+    const issuedAt = Number(obj.issuedAt);
+    if (
+      !signerPubkey ||
+      !messageBase64 ||
+      !signatureBase64 ||
+      !auditHash ||
+      !prevHash ||
+      !streamPrevHash ||
+      !entryHash
+    ) {
+      return null;
+    }
+    if (!isHashHex(auditHash) || !isHashHex(prevHash) || !isHashHex(streamPrevHash) || !isHashHex(entryHash)) {
+      return null;
+    }
+    if (!Number.isFinite(issuedAt) || !Number.isInteger(issuedAt) || issuedAt < 0) {
+      return null;
+    }
+    return {
+      signerPubkey,
+      messageBase64,
+      signatureBase64,
+      auditHash,
+      prevHash,
+      streamPrevHash,
+      entryHash,
+      issuedAt,
+    };
+  }
+
+  private isReusablePopClaimProof(proof: PopProofResponse, nowUnix: number): boolean {
+    const ageSeconds = nowUnix - proof.issuedAt;
+    return Number.isFinite(ageSeconds) && ageSeconds >= 0 && ageSeconds <= POP_PROOF_REUSE_MAX_AGE_SECONDS;
+  }
+
   private async issuePopClaimProof(body: PopProofBody): Promise<PopProofResponse> {
     const task = this.popProofLock.then(async () => {
       const signer = this.getPopSigner();
@@ -2847,6 +2915,20 @@ export class SchoolStore implements DurableObject {
       if (Boolean(expectedPrevHashHex) !== Boolean(expectedStreamPrevHashHex)) {
         throw new Error('expected prev hashes must be provided together');
       }
+      const proofCacheKey = await this.buildPopClaimProofCacheKey({
+        eventId,
+        confirmationCode,
+        grant: grantRaw,
+        claimer: claimerRaw,
+        periodIndex,
+        expectedPrevHash: expectedPrevHashHex,
+        expectedStreamPrevHash: expectedStreamPrevHashHex,
+      });
+      const nowUnix = Math.floor(Date.now() / 1000);
+      const cachedProof = this.parseStoredPopClaimProof(await this.ctx.storage.get(proofCacheKey));
+      if (cachedProof && this.isReusablePopClaimProof(cachedProof, nowUnix)) {
+        return cachedProof;
+      }
       const storedPrevHashHex = readHashHex(await this.ctx.storage.get<string>(globalKey));
       const storedStreamPrevHashHex = readHashHex(await this.ctx.storage.get<string>(streamKey));
       const prevHashHex = expectedPrevHashHex ?? storedPrevHashHex;
@@ -2855,7 +2937,7 @@ export class SchoolStore implements DurableObject {
       const popChainAdvanced = !expectedPrevHashHex;
       const prevHash = hexToBytes(prevHashHex);
       const streamPrevHash = hexToBytes(streamPrevHashHex);
-      const issuedAt = BigInt(Math.floor(Date.now() / 1000));
+      const issuedAt = BigInt(nowUnix);
       const auditHashHex = readHashHex(ticketReceipt.receiptHash);
       const auditHash = hexToBytes(auditHashHex);
 
@@ -2929,7 +3011,7 @@ export class SchoolStore implements DurableObject {
       });
       const signature = nacl.sign.detached(message, signer.secretKey);
 
-      return {
+      const proof: PopProofResponse = {
         signerPubkey: signer.signerPubkey,
         messageBase64: encodeBase64(message),
         signatureBase64: encodeBase64(signature),
@@ -2939,6 +3021,8 @@ export class SchoolStore implements DurableObject {
         entryHash: entryHashHex,
         issuedAt: Number(issuedAt),
       };
+      await this.ctx.storage.put(proofCacheKey, proof);
+      return proof;
     });
 
     this.popProofLock = task.then(() => { }, () => { });

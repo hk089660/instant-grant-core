@@ -2,12 +2,13 @@
 
 この文書は、PoP チェーン（`prev_hash` / `stream_prev_hash`）の実運用上の前提と、障害時の復旧手順を明確化するための運用ランブックです。
 
-## 1. 現行モデル（2026-02-22 時点）
+## 1. 現行モデル（2026-03-12 時点）
 
 - On-chain 検証（`grant_program`）は `PopState` を grant 単位で 1 本保持します。
   - `last_global_hash`
   - `last_stream_hash`
 - PoP proof 発行（`api-worker`）は `popProofLock` で直列化されます。
+  - 同一 claim（`eventId + confirmationCode + grant + claimer + periodIndex + expectedPrevHash pair`）への fresh な再アクセスは短時間 idempotent に再利用されます。
   - global head key: `pop_chain:lastHash:global:<grant>`
   - stream head key: `pop_chain:lastHash:stream:<grant>`
 - したがって stream 境界は「grant 単位」です。1 grant を複数イベントで再利用すると、運用上の競合リスクが上がります。
@@ -19,6 +20,7 @@
   - 対象: `solanaAuthority + solanaMint + solanaGrantId` の同一組み合わせ
   - 挙動: `POST /v1/school/events` は 409（`on-chain grant config already linked ...`）を返します。
 - PoP proof は `api-worker` の `/v1/school/pop-proof` 経由に限定し、別経路で同一 grant の proof を並列発行しないことを必須にします。
+- 利用者/管理者が別端末から同一 claim の PoP を再取得しても、fresh window 内は同じ proof を返して重複 entry を増やさない設計です。
 
 ## 3. 障害シグナル（検知）
 
