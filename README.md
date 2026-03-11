@@ -1,6 +1,6 @@
 # instant-grant-core
 
-Solana 上で学校参加運用と給付運用を監査可能にするプロトタイプです。
+助成金運用のブラックボックス化という社会課題を解決するため、 Solana 上で学校参加運用と給付運用を監査可能にするプロトタイプ基盤です。
 このリポジトリは、We-ne / Asuka Network Core プロトタイプとして、Anchor プログラム、Cloudflare Worker API、Expo / Cloudflare Pages フロントエンドをまとめています。
 
 ![We-ne モバイル版の初回登録からイベント参加、トークン受け取りまでのフロー](./docs/media/wene-mobile-onboarding-flow.gif)
