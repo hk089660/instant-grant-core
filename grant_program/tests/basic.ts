@@ -467,4 +467,253 @@ describe("grant_program (PDA)", () => {
     }
     assert.equal(threw, true);
   });
+
+  it("accepts concurrent-style PoP proofs that share the same previous hash", async () => {
+    const authority = provider.wallet as anchor.Wallet;
+    const popSigner = anchor.web3.Keypair.generate();
+    const claimerA = anchor.web3.Keypair.generate();
+    const claimerB = anchor.web3.Keypair.generate();
+
+    for (const claimer of [claimerA, claimerB]) {
+      const sig = await provider.connection.requestAirdrop(
+        claimer.publicKey,
+        2 * anchor.web3.LAMPORTS_PER_SOL
+      );
+      await provider.connection.confirmTransaction(sig, "confirmed");
+    }
+
+    const mint = await createMint(
+      provider.connection,
+      authority.payer,
+      authority.publicKey,
+      null,
+      6
+    );
+
+    const grantId = new anchor.BN(4);
+    const amountPerPeriod = new anchor.BN(1_000);
+    const periodSeconds = new anchor.BN(300);
+    const startTs = new anchor.BN(Math.floor(Date.now() / 1000) - 5);
+    const expiresAt = new anchor.BN(0);
+
+    const [grantPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("grant"),
+        authority.publicKey.toBuffer(),
+        mint.toBuffer(),
+        u64LE(grantId),
+      ],
+      program.programId
+    );
+
+    const [vaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), grantPda.toBuffer()],
+      program.programId
+    );
+    const [popConfigPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("pop-config"), authority.publicKey.toBuffer()],
+      program.programId
+    );
+    const [popStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("pop-state"), grantPda.toBuffer()],
+      program.programId
+    );
+
+    await program.methods
+      .createGrant(grantId, amountPerPeriod, periodSeconds, startTs, expiresAt)
+      .accounts({
+        grant: grantPda,
+        mint,
+        vault: vaultPda,
+        authority: authority.publicKey,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      } as any)
+      .rpc();
+
+    const fromAta = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      authority.payer,
+      mint,
+      authority.publicKey
+    );
+
+    const fundAmount = BigInt(10_000);
+    await mintTo(
+      provider.connection,
+      authority.payer,
+      mint,
+      fromAta.address,
+      authority.publicKey,
+      fundAmount
+    );
+
+    await program.methods
+      .fundGrant(new anchor.BN(fundAmount.toString()))
+      .accounts({
+        grant: grantPda,
+        mint,
+        vault: vaultPda,
+        fromAta: fromAta.address,
+        funder: authority.publicKey,
+        authority: authority.publicKey,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      } as any)
+      .rpc();
+
+    await program.methods
+      .upsertPopConfig(popSigner.publicKey)
+      .accounts({
+        popConfig: popConfigPda,
+        authority: authority.publicKey,
+        systemProgram: SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      } as any)
+      .rpc();
+
+    const claimerAtaA = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      authority.payer,
+      mint,
+      claimerA.publicKey
+    );
+    const claimerAtaB = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      authority.payer,
+      mint,
+      claimerB.publicKey
+    );
+
+    const periodIndex = new anchor.BN(0);
+    const sharedPrevHash = Buffer.alloc(32, 0);
+    const sharedStreamPrevHash = Buffer.alloc(32, 0);
+    const issuedAtOlder = BigInt(Math.floor(Date.now() / 1000));
+    const issuedAtNewer = issuedAtOlder + BigInt(1);
+    const auditHashA = createHash("sha256")
+      .update(Buffer.from("audit-anchor:concurrent:a"))
+      .digest();
+    const auditHashB = createHash("sha256")
+      .update(Buffer.from("audit-anchor:concurrent:b"))
+      .digest();
+
+    const [receiptPdaA] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("receipt"),
+        grantPda.toBuffer(),
+        claimerA.publicKey.toBuffer(),
+        u64LE(periodIndex),
+      ],
+      program.programId
+    );
+    const [receiptPdaB] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("receipt"),
+        grantPda.toBuffer(),
+        claimerB.publicKey.toBuffer(),
+        u64LE(periodIndex),
+      ],
+      program.programId
+    );
+
+    const entryHashOlder = popEntryHash({
+      version: POP_MESSAGE_VERSION_V2,
+      prevHash: sharedPrevHash,
+      streamPrevHash: sharedStreamPrevHash,
+      auditHash: auditHashA,
+      grant: grantPda,
+      claimer: claimerA.publicKey,
+      periodIndex: BigInt(periodIndex.toString()),
+      issuedAt: issuedAtOlder,
+    });
+    const entryHashNewer = popEntryHash({
+      version: POP_MESSAGE_VERSION_V2,
+      prevHash: sharedPrevHash,
+      streamPrevHash: sharedStreamPrevHash,
+      auditHash: auditHashB,
+      grant: grantPda,
+      claimer: claimerB.publicKey,
+      periodIndex: BigInt(periodIndex.toString()),
+      issuedAt: issuedAtNewer,
+    });
+
+    const popIxOlder = Ed25519Program.createInstructionWithPrivateKey({
+      privateKey: popSigner.secretKey,
+      message: buildPopProofMessage({
+        version: POP_MESSAGE_VERSION_V2,
+        grant: grantPda,
+        claimer: claimerA.publicKey,
+        periodIndex: BigInt(periodIndex.toString()),
+        prevHash: sharedPrevHash,
+        streamPrevHash: sharedStreamPrevHash,
+        auditHash: auditHashA,
+        entryHash: entryHashOlder,
+        issuedAt: issuedAtOlder,
+      }),
+    });
+    const popIxNewer = Ed25519Program.createInstructionWithPrivateKey({
+      privateKey: popSigner.secretKey,
+      message: buildPopProofMessage({
+        version: POP_MESSAGE_VERSION_V2,
+        grant: grantPda,
+        claimer: claimerB.publicKey,
+        periodIndex: BigInt(periodIndex.toString()),
+        prevHash: sharedPrevHash,
+        streamPrevHash: sharedStreamPrevHash,
+        auditHash: auditHashB,
+        entryHash: entryHashNewer,
+        issuedAt: issuedAtNewer,
+      }),
+    });
+
+    await program.methods
+      .claimGrant(periodIndex)
+      .accounts({
+        grant: grantPda,
+        mint,
+        vault: vaultPda,
+        claimer: claimerB.publicKey,
+        claimerAta: claimerAtaB.address,
+        receipt: receiptPdaB,
+        popState: popStatePda,
+        popConfig: popConfigPda,
+        instructionsSysvar: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      } as any)
+      .preInstructions([popIxNewer])
+      .signers([claimerB])
+      .rpc();
+
+    await program.methods
+      .claimGrant(periodIndex)
+      .accounts({
+        grant: grantPda,
+        mint,
+        vault: vaultPda,
+        claimer: claimerA.publicKey,
+        claimerAta: claimerAtaA.address,
+        receipt: receiptPdaA,
+        popState: popStatePda,
+        popConfig: popConfigPda,
+        instructionsSysvar: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      } as any)
+      .preInstructions([popIxOlder])
+      .signers([claimerA])
+      .rpc();
+
+    const afterA = await getAccount(provider.connection, claimerAtaA.address);
+    const afterB = await getAccount(provider.connection, claimerAtaB.address);
+    assert.equal(afterA.amount, BigInt(amountPerPeriod.toString()));
+    assert.equal(afterB.amount, BigInt(amountPerPeriod.toString()));
+
+    const popState = await (program.account as any).popState.fetch(popStatePda);
+    assert.equal(Buffer.from(popState.lastGlobalHash).toString("hex"), entryHashNewer.toString("hex"));
+    assert.equal(Buffer.from(popState.lastStreamHash).toString("hex"), entryHashNewer.toString("hex"));
+    assert.equal(popState.lastIssuedAt.toString(), issuedAtNewer.toString());
+  });
 });

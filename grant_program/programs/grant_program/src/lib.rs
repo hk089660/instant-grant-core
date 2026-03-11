@@ -700,31 +700,27 @@ fn verify_and_record_pop_proof<'info>(
     require!(skew <= POP_MAX_SKEW_SECONDS, ErrorCode::PopProofExpired);
 
     let pop_state = &mut accounts.pop_state;
-    if pop_state.initialized {
+    let was_initialized = pop_state.initialized;
+    if was_initialized {
         require!(pop_state.grant == accounts.grant.key(), ErrorCode::PopStateGrantMismatch);
-        require!(
-            pop_state.last_global_hash == message.prev_hash,
-            ErrorCode::PopHashChainBroken
-        );
-        require!(
-            pop_state.last_stream_hash == message.stream_prev_hash,
-            ErrorCode::PopStreamChainBroken
-        );
     } else {
-        require!(message.prev_hash == [0u8; 32], ErrorCode::PopGenesisMismatch);
-        require!(
-            message.stream_prev_hash == [0u8; 32],
-            ErrorCode::PopGenesisMismatch
-        );
         pop_state.grant = accounts.grant.key();
         pop_state.bump = pop_state_bump;
         pop_state.initialized = true;
     }
 
-    pop_state.last_global_hash = message.entry_hash;
-    pop_state.last_stream_hash = message.entry_hash;
-    pop_state.last_period_index = message.period_index;
-    pop_state.last_issued_at = message.issued_at;
+    // PoP proof issuance can legitimately race across multiple claimers.
+    // We keep verifying signer/authenticity and entry-hash integrity, but no longer
+    // require a strictly linear on-chain prev-hash chain for acceptance.
+    // The state only tracks the newest observed head so later claims can keep
+    // anchoring from a recent accepted proof without rejecting concurrent claims.
+    let should_advance_head = !was_initialized || message.issued_at >= pop_state.last_issued_at;
+    if should_advance_head {
+        pop_state.last_global_hash = message.entry_hash;
+        pop_state.last_stream_hash = message.entry_hash;
+        pop_state.last_period_index = message.period_index;
+        pop_state.last_issued_at = message.issued_at;
+    }
 
     Ok(())
 }
