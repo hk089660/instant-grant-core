@@ -3,7 +3,7 @@
  * claimKey = claim:${eventId}:${subject} / prefix = claim:${eventId}:
  */
 
-import type { SchoolClaimResult, SchoolEvent, ClaimBody } from './types';
+import type { SchoolClaimResult, SchoolEvent, ClaimBody, ClaimQuotaStatus } from './types';
 
 export const SEED_EVENTS: SchoolEvent[] = [
   { id: 'evt-001', title: '地域清掃ボランティア', datetime: '2026/02/02 09:00-10:30', host: '生徒会', state: 'published' },
@@ -31,6 +31,7 @@ interface ClaimAllowance {
   allowed: boolean;
   latestConfirmationCode?: string;
   nextAvailableAt?: number;
+  claimQuota: ClaimQuotaStatus;
 }
 
 export function claimKey(eventId: string, subject: string): string {
@@ -146,6 +147,44 @@ function resolveClaimPolicy(event?: SchoolEvent | null): ClaimPolicy {
   };
 }
 
+function buildClaimQuotaStatus(
+  history: ClaimHistoryEntry[],
+  event?: SchoolEvent | null,
+  now: number = Date.now()
+): ClaimQuotaStatus {
+  const policy = resolveClaimPolicy(event);
+  const windowMs = policy.claimIntervalDays * 24 * 60 * 60 * 1000;
+  const windowStart = now - windowMs;
+  const inWindow = history.filter((entry) => entry.at >= windowStart);
+
+  if (policy.maxClaimsPerInterval === null) {
+    return {
+      claimIntervalDays: policy.claimIntervalDays,
+      maxClaimsPerInterval: null,
+      claimsUsedInCurrentInterval: inWindow.length,
+      remainingClaimsInCurrentInterval: null,
+      canClaimNow: true,
+    };
+  }
+
+  const remainingClaimsInCurrentInterval = Math.max(policy.maxClaimsPerInterval - inWindow.length, 0);
+  let nextAvailableAt: number | undefined;
+  if (remainingClaimsInCurrentInterval === 0) {
+    const thresholdIndex = inWindow.length - policy.maxClaimsPerInterval;
+    const thresholdEntry = inWindow[Math.max(0, thresholdIndex)];
+    nextAvailableAt = thresholdEntry ? thresholdEntry.at + windowMs : undefined;
+  }
+
+  return {
+    claimIntervalDays: policy.claimIntervalDays,
+    maxClaimsPerInterval: policy.maxClaimsPerInterval,
+    claimsUsedInCurrentInterval: inWindow.length,
+    remainingClaimsInCurrentInterval,
+    canClaimNow: remainingClaimsInCurrentInterval > 0,
+    ...(nextAvailableAt ? { nextAvailableAt } : {}),
+  };
+}
+
 export class ClaimStore {
   constructor(private storage: IClaimStorage) { }
 
@@ -177,32 +216,25 @@ export class ClaimStore {
     now: number = Date.now()
   ): Promise<ClaimAllowance> {
     const history = await this.getClaimHistory(eventId, subject);
-    if (history.length === 0) return { allowed: true };
-
     const latest = history[history.length - 1];
-    const policy = resolveClaimPolicy(event);
-    if (policy.maxClaimsPerInterval === null) {
-      return { allowed: true, latestConfirmationCode: latest.code };
-    }
-
-    const windowMs = policy.claimIntervalDays * 24 * 60 * 60 * 1000;
-    const windowStart = now - windowMs;
-    const inWindow = history.filter((entry) => entry.at >= windowStart);
-    if (inWindow.length < policy.maxClaimsPerInterval) {
-      return { allowed: true, latestConfirmationCode: latest.code };
-    }
-
-    const thresholdIndex = inWindow.length - policy.maxClaimsPerInterval;
-    const thresholdEntry = inWindow[Math.max(0, thresholdIndex)];
-    const nextAvailableAt = thresholdEntry
-      ? thresholdEntry.at + windowMs
-      : undefined;
+    const claimQuota = buildClaimQuotaStatus(history, event, now);
 
     return {
-      allowed: false,
-      latestConfirmationCode: latest.code,
-      nextAvailableAt,
+      allowed: claimQuota.canClaimNow,
+      latestConfirmationCode: latest?.code,
+      nextAvailableAt: claimQuota.nextAvailableAt,
+      claimQuota,
     };
+  }
+
+  async getClaimQuotaStatus(
+    eventId: string,
+    subject: string,
+    event?: SchoolEvent | null,
+    now: number = Date.now()
+  ): Promise<ClaimQuotaStatus> {
+    const history = await this.getClaimHistory(eventId, subject);
+    return buildClaimQuotaStatus(history, event, now);
   }
 
   /**
@@ -452,15 +484,18 @@ export class ClaimStore {
         eventName: event.title,
         alreadyJoined: true,
         confirmationCode: allowance.latestConfirmationCode,
+        claimQuota: allowance.claimQuota,
       };
     }
 
     await this.addClaim(eventId, subject, options?.confirmationCode);
+    const claimQuota = await this.getClaimQuotaStatus(eventId, subject, event);
     return {
       success: true,
       eventName: event.title,
       alreadyJoined: false,
       confirmationCode: options?.confirmationCode,
+      claimQuota,
     };
   }
 }

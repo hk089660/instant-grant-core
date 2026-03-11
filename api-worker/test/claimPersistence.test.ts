@@ -90,14 +90,17 @@ describe('claim persistence (same subject = no count increase)', () => {
     const r1 = await store.submitClaim({ eventId: event.id, walletAddress: 'addr-limit' });
     expect(r1.success).toBe(true);
     expect((r1 as { alreadyJoined?: boolean }).alreadyJoined).toBe(false);
+    expect((r1 as { claimQuota?: { remainingClaimsInCurrentInterval?: number | null } }).claimQuota?.remainingClaimsInCurrentInterval).toBe(1);
 
     const r2 = await store.submitClaim({ eventId: event.id, walletAddress: 'addr-limit' });
     expect(r2.success).toBe(true);
     expect((r2 as { alreadyJoined?: boolean }).alreadyJoined).toBe(false);
+    expect((r2 as { claimQuota?: { remainingClaimsInCurrentInterval?: number | null } }).claimQuota?.remainingClaimsInCurrentInterval).toBe(0);
 
     const r3 = await store.submitClaim({ eventId: event.id, walletAddress: 'addr-limit' });
     expect(r3.success).toBe(true);
     expect((r3 as { alreadyJoined?: boolean }).alreadyJoined).toBe(true);
+    expect((r3 as { claimQuota?: { remainingClaimsInCurrentInterval?: number | null } }).claimQuota?.remainingClaimsInCurrentInterval).toBe(0);
   });
 
   it('custom policy: maxClaimsPerInterval = null は無制限', async () => {
@@ -119,5 +122,6 @@ describe('claim persistence (same subject = no count increase)', () => {
     expect((r1 as { alreadyJoined?: boolean }).alreadyJoined).toBe(false);
     expect((r2 as { alreadyJoined?: boolean }).alreadyJoined).toBe(false);
     expect((r3 as { alreadyJoined?: boolean }).alreadyJoined).toBe(false);
+    expect((r3 as { claimQuota?: { remainingClaimsInCurrentInterval?: number | null } }).claimQuota?.remainingClaimsInCurrentInterval).toBeNull();
   });
 });

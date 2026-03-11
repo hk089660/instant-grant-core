@@ -67,6 +67,15 @@ export interface CostOfForgeryRemediationFlow {
   actions: CostOfForgeryRemediationAction[];
 }
 
+export interface ClaimQuotaStatus {
+  claimIntervalDays: number;
+  maxClaimsPerInterval: number | null;
+  claimsUsedInCurrentInterval: number;
+  remainingClaimsInCurrentInterval: number | null;
+  canClaimNow: boolean;
+  nextAvailableAt?: number;
+}
+
 export interface SchoolClaimResultSuccess {
   success: true;
   eventName: string;
@@ -84,6 +93,8 @@ export interface SchoolClaimResultSuccess {
   confirmationCode?: string;
   /** 監査ログ不変レシート（第三者検証用） */
   ticketReceipt?: ParticipationTicketReceipt;
+  /** 現在の受給枠サマリ */
+  claimQuota?: ClaimQuotaStatus;
 }
 
 export interface ParticipationTicketReceipt {

@@ -16,6 +16,14 @@ import { useRecipientTicketStore } from '../store/recipientTicketStore';
 import { schoolRoutes } from '../lib/schoolRoutes';
 import { useEventIdFromParams } from '../hooks/useEventIdFromParams';
 import { copyTextWithFeedback } from '../utils/copyText';
+import {
+  canClaimAgain,
+  formatClaimPolicyLabel,
+  formatClaimQuotaNextAvailableAt,
+  getClaimQuotaHeadline,
+  getClaimQuotaUsageLabel,
+  supportsRepeatClaimPolicy,
+} from '../utils/claimQuota';
 
 export const SchoolClaimScreen: React.FC = () => {
   const router = useRouter();
@@ -26,6 +34,13 @@ export const SchoolClaimScreen: React.FC = () => {
   const confirmationCode = lastSuccess?.confirmationCode ?? ticket?.confirmationCode;
   const auditReceiptId = lastSuccess?.ticketReceipt?.receiptId ?? ticket?.auditReceiptId;
   const auditReceiptHash = lastSuccess?.ticketReceipt?.receiptHash ?? ticket?.auditReceiptHash;
+  const claimQuota = lastSuccess?.claimQuota ?? ticket?.claimQuota;
+  const showRepeatClaimCard = supportsRepeatClaimPolicy(claimQuota ?? event) && Boolean(claimQuota);
+  const canRepeatClaim = canClaimAgain(claimQuota);
+  const claimQuotaHeadline = getClaimQuotaHeadline(claimQuota);
+  const claimQuotaUsage = getClaimQuotaUsageLabel(claimQuota);
+  const claimPolicyLabel = formatClaimPolicyLabel(claimQuota ?? event);
+  const nextAvailableLabel = formatClaimQuotaNextAvailableAt(claimQuota?.nextAvailableAt);
 
   const handleCopyReceipt = useCallback(async () => {
     const payload = [
@@ -65,8 +80,9 @@ export const SchoolClaimScreen: React.FC = () => {
   }
 
   const joined = isJoined;
+  const showJoinedSummary = status !== 'loading' && status !== 'error' && (status === 'success' || status === 'already' || joined);
 
-  if (status === 'success' || status === 'already' || joined) {
+  if (showJoinedSummary) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -118,7 +134,42 @@ export const SchoolClaimScreen: React.FC = () => {
                 />
               </Card>
             )}
-            <Button title="ホームに戻る" onPress={() => router.replace(schoolRoutes.home as any)} variant="primary" style={styles.button} />
+            {showRepeatClaimCard && claimQuotaHeadline && (
+              <Card style={styles.mainCard}>
+                <AppText variant="body" style={styles.claimQuotaHeadline}>
+                  {claimQuotaHeadline}
+                </AppText>
+                {claimQuotaUsage && (
+                  <AppText variant="caption" style={styles.secondaryText}>
+                    {claimQuotaUsage}
+                  </AppText>
+                )}
+                {claimPolicyLabel && (
+                  <AppText variant="caption" style={styles.eventName}>
+                    受給ルール: {claimPolicyLabel}
+                  </AppText>
+                )}
+                {!canRepeatClaim && nextAvailableLabel && (
+                  <AppText variant="caption" style={styles.eventName}>
+                    次回受け取り可能: {nextAvailableLabel}
+                  </AppText>
+                )}
+                {canRepeatClaim && (
+                  <Button
+                    title="もう一度受け取る"
+                    onPress={handleClaim}
+                    variant="primary"
+                    style={styles.copyButton}
+                  />
+                )}
+              </Card>
+            )}
+            <Button
+              title="ホームに戻る"
+              onPress={() => router.replace(schoolRoutes.home as any)}
+              variant={canRepeatClaim ? 'secondary' : 'primary'}
+              style={styles.button}
+            />
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -130,7 +181,7 @@ export const SchoolClaimScreen: React.FC = () => {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.content}>
           <AppText variant="h2" style={styles.title}>
-            イベントに参加する
+            {joined ? 'もう一度受け取る' : 'イベントに参加する'}
           </AppText>
 
           <Card style={styles.mainCard}>
@@ -152,7 +203,15 @@ export const SchoolClaimScreen: React.FC = () => {
           )}
 
           <Button
-            title={status === 'loading' ? '処理中…' : status === 'error' && isRetryable ? '再試行' : '参加する'}
+            title={
+              status === 'loading'
+                ? '処理中…'
+                : status === 'error' && isRetryable
+                  ? '再試行'
+                  : joined
+                    ? 'もう一度受け取る'
+                    : '参加する'
+            }
             onPress={handleClaim}
             variant="primary"
             loading={status === 'loading'}
@@ -200,6 +259,10 @@ const styles = StyleSheet.create({
   eventName: {
     marginTop: theme.spacing.sm,
     color: theme.colors.textTertiary,
+  },
+  claimQuotaHeadline: {
+    fontWeight: '600',
+    marginBottom: theme.spacing.xs,
   },
   errorCard: {
     marginBottom: theme.spacing.md,

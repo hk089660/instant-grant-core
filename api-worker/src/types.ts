@@ -71,6 +71,15 @@ export interface CostOfForgeryRemediationFlow {
   actions: CostOfForgeryRemediationAction[];
 }
 
+export interface ClaimQuotaStatus {
+  claimIntervalDays: number;
+  maxClaimsPerInterval: number | null;
+  claimsUsedInCurrentInterval: number;
+  remainingClaimsInCurrentInterval: number | null;
+  canClaimNow: boolean;
+  nextAvailableAt?: number;
+}
+
 export interface SchoolClaimResultSuccess {
   success: true;
   eventName: string;
@@ -81,6 +90,7 @@ export interface SchoolClaimResultSuccess {
   explorerReceiptUrl?: string;
   confirmationCode?: string;
   ticketReceipt?: ParticipationTicketReceipt;
+  claimQuota?: ClaimQuotaStatus;
 }
 
 export interface SchoolClaimResultFailure {
@@ -172,6 +182,7 @@ export interface UserClaimResponse {
   txSignature?: string;
   receiptPubkey?: string;
   explorerTxUrl?: string;
+  claimQuota?: ClaimQuotaStatus;
 }
 
 /** POST /api/users/tickets/sync */
@@ -190,6 +201,7 @@ export interface UserTicketSyncItem {
   txSignature?: string;
   receiptPubkey?: string;
   mint?: string;
+  claimQuota?: ClaimQuotaStatus;
 }
 
 export interface UserTicketSyncResponse {

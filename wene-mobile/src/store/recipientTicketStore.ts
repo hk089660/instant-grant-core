@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { ClaimQuotaStatus } from '../types/school';
 
 const STORAGE_KEY_PREFIX = 'wene:recipient_tickets:v2';
 
@@ -34,6 +35,7 @@ export interface RecipientTicket {
   confirmationCode?: string;
   auditReceiptId?: string;
   auditReceiptHash?: string;
+  claimQuota?: ClaimQuotaStatus;
 }
 
 type OnchainReceiptLike = {
@@ -50,6 +52,54 @@ function normalizeString(value: unknown): string | undefined {
 
 function normalizeClaimedAt(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeNonNegativeInt(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : undefined;
+}
+
+function normalizeClaimQuota(value: unknown): ClaimQuotaStatus | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  const claimIntervalDays =
+    typeof raw.claimIntervalDays === 'number' && Number.isFinite(raw.claimIntervalDays) && raw.claimIntervalDays > 0
+      ? Math.floor(raw.claimIntervalDays)
+      : undefined;
+  const maxClaimsPerInterval =
+    raw.maxClaimsPerInterval === null
+      ? null
+      : (typeof raw.maxClaimsPerInterval === 'number' &&
+        Number.isFinite(raw.maxClaimsPerInterval) &&
+        raw.maxClaimsPerInterval > 0
+        ? Math.floor(raw.maxClaimsPerInterval)
+        : undefined);
+  const claimsUsedInCurrentInterval = normalizeNonNegativeInt(raw.claimsUsedInCurrentInterval);
+  const remainingClaimsInCurrentInterval =
+    raw.remainingClaimsInCurrentInterval === null
+      ? null
+      : normalizeNonNegativeInt(raw.remainingClaimsInCurrentInterval);
+  if (
+    claimIntervalDays === undefined ||
+    maxClaimsPerInterval === undefined ||
+    claimsUsedInCurrentInterval === undefined ||
+    typeof raw.canClaimNow !== 'boolean' ||
+    (maxClaimsPerInterval !== null && remainingClaimsInCurrentInterval === undefined)
+  ) {
+    return undefined;
+  }
+  const nextAvailableAt = normalizeNonNegativeInt(raw.nextAvailableAt);
+  const normalizedRemainingClaimsInCurrentInterval: number | null =
+    maxClaimsPerInterval === null ? null : (remainingClaimsInCurrentInterval as number);
+  return {
+    claimIntervalDays,
+    maxClaimsPerInterval,
+    claimsUsedInCurrentInterval,
+    remainingClaimsInCurrentInterval: normalizedRemainingClaimsInCurrentInterval,
+    canClaimNow: raw.canClaimNow,
+    ...(nextAvailableAt !== undefined ? { nextAvailableAt } : {}),
+  };
 }
 
 function normalizeOnchainReceipts(
@@ -148,6 +198,7 @@ const loadFromStorage = async (userId?: string | null): Promise<RecipientTicket[
           confirmationCode: typeof raw.confirmationCode === 'string' ? raw.confirmationCode : undefined,
           auditReceiptId: typeof raw.auditReceiptId === 'string' ? raw.auditReceiptId : undefined,
           auditReceiptHash: typeof raw.auditReceiptHash === 'string' ? raw.auditReceiptHash : undefined,
+          claimQuota: normalizeClaimQuota(raw.claimQuota),
         };
         return normalizeTicketOnchainFields(normalizedTicket);
       })
@@ -194,6 +245,7 @@ function mergeTicket(existing: RecipientTicket, incoming: RecipientTicket): Reci
     confirmationCode: incoming.confirmationCode ?? existing.confirmationCode,
     auditReceiptId: incoming.auditReceiptId ?? existing.auditReceiptId,
     auditReceiptHash: incoming.auditReceiptHash ?? existing.auditReceiptHash,
+    claimQuota: incoming.claimQuota ?? existing.claimQuota,
   };
 }
 

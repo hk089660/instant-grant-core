@@ -19,6 +19,14 @@ import {
   fetchPopConfigReadiness,
 } from '../../solana/popConfigReadiness';
 import { usePolling } from '../../hooks/usePolling';
+import {
+  canClaimAgain,
+  formatClaimPolicyLabel,
+  formatClaimQuotaNextAvailableAt,
+  getClaimQuotaHeadline,
+  getClaimQuotaUsageLabel,
+  supportsRepeatClaimPolicy,
+} from '../../utils/claimQuota';
 
 function shortenCode(value: string, head = 8, tail = 8): string {
   const normalized = value.trim();
@@ -213,8 +221,15 @@ export const UserSuccessScreen: React.FC = () => {
   const resolvedPopEntryHash = popEntryHash ?? storedTicket?.popEntryHash;
   const resolvedPopAuditHash = popAuditHash ?? storedTicket?.popAuditHash;
   const resolvedPopSigner = popSigner ?? storedTicket?.popSigner;
+  const resolvedClaimQuota = storedTicket?.claimQuota;
   const isWalletConnected = Boolean(walletPubkey);
   const isUserLoggedIn = Boolean(userId);
+  const showRepeatClaimCard = supportsRepeatClaimPolicy(resolvedClaimQuota ?? event) && Boolean(resolvedClaimQuota);
+  const canRepeatClaimNow = canClaimAgain(resolvedClaimQuota);
+  const claimQuotaHeadline = getClaimQuotaHeadline(resolvedClaimQuota);
+  const claimQuotaUsage = getClaimQuotaUsageLabel(resolvedClaimQuota);
+  const claimPolicyLabel = formatClaimPolicyLabel(resolvedClaimQuota ?? event);
+  const nextAvailableLabel = formatClaimQuotaNextAvailableAt(resolvedClaimQuota?.nextAvailableAt);
   const txParamClaimedAt = useRef(Date.now()).current;
   const onchainTxHistory = useMemo(
     () =>
@@ -508,6 +523,15 @@ export const UserSuccessScreen: React.FC = () => {
     router.push('/wallet' as any);
   }, [router]);
 
+  const handleRepeatClaim = useCallback(() => {
+    if (!targetEventId) return;
+    if (!isUserLoggedIn) {
+      router.push(schoolRoutes.login as any);
+      return;
+    }
+    router.push(schoolRoutes.confirm(targetEventId) as any);
+  }, [targetEventId, isUserLoggedIn, router]);
+
   if (!isValid) return null;
 
   return (
@@ -560,6 +584,40 @@ export const UserSuccessScreen: React.FC = () => {
             <AppText variant="h3">{event.title}</AppText>
             <AppText variant="caption" style={styles.eventMeta}>{event.datetime}</AppText>
             <AppText variant="caption" style={styles.eventMeta}>主催: {event.host}</AppText>
+          </Card>
+        )}
+
+        {showRepeatClaimCard && claimQuotaHeadline && (
+          <Card style={styles.card}>
+            <AppText variant="caption" style={styles.label}>
+              再受け取り
+            </AppText>
+            <AppText variant="body" style={styles.claimQuotaHeadline}>
+              {claimQuotaHeadline}
+            </AppText>
+            {claimQuotaUsage && (
+              <AppText variant="small" style={styles.codeHint}>
+                {claimQuotaUsage}
+              </AppText>
+            )}
+            {claimPolicyLabel && (
+              <AppText variant="small" style={styles.codeHint}>
+                受給ルール: {claimPolicyLabel}
+              </AppText>
+            )}
+            {!canRepeatClaimNow && nextAvailableLabel && (
+              <AppText variant="small" style={styles.codeHint}>
+                次回受け取り可能: {nextAvailableLabel}
+              </AppText>
+            )}
+            {canRepeatClaimNow && (
+              <Button
+                title={isUserLoggedIn ? 'もう一度受け取る' : 'ログインして受け取る'}
+                variant={isUserLoggedIn ? 'primary' : 'secondary'}
+                onPress={handleRepeatClaim}
+                style={styles.repeatClaimButton}
+              />
+            )}
           </Card>
         )}
 
@@ -924,6 +982,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: theme.spacing.xs,
   },
+  claimQuotaHeadline: {
+    color: theme.colors.text,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
   secondaryButton: {
     marginTop: theme.spacing.sm,
   },
@@ -1017,6 +1080,10 @@ const styles = StyleSheet.create({
     minWidth: 160,
   },
   onchainReceiveButton: {
+    marginTop: theme.spacing.sm,
+    minWidth: 220,
+  },
+  repeatClaimButton: {
     marginTop: theme.spacing.sm,
     minWidth: 220,
   },

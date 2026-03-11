@@ -5920,6 +5920,7 @@ export class SchoolStore implements DurableObject {
       const receipt = this.parseParticipationTicketReceipt(
         await this.ctx.storage.get(ticketReceiptBySubjectKey(claim.eventId, normalizedUserId))
       );
+      const claimQuota = await this.store.getClaimQuotaStatus(claim.eventId, normalizedUserId, event);
       const mint = snapshot?.mint ?? this.normalizeStringField(event?.solanaMint);
       const confirmationCode = claim.confirmationCode ?? receipt?.confirmationCode;
 
@@ -5933,6 +5934,7 @@ export class SchoolStore implements DurableObject {
         ...(snapshot?.txSignature ? { txSignature: snapshot.txSignature } : {}),
         ...(snapshot?.receiptPubkey ? { receiptPubkey: snapshot.receiptPubkey } : {}),
         ...(mint ? { mint } : {}),
+        claimQuota,
       });
     }
 
@@ -9494,10 +9496,12 @@ export class SchoolStore implements DurableObject {
           });
           await this.storeParticipationTicketReceipt(eventId, userId, ticketReceipt);
         }
+        const claimQuota = await this.store.getClaimQuotaStatus(eventId, userId, event);
         return Response.json({
           status: 'already',
           confirmationCode: requestedConfirmationCode,
           ...(ticketReceipt ? { ticketReceipt } : {}),
+          claimQuota,
           ...onchainResponseFields,
         } as UserClaimResponse);
       }
@@ -9578,10 +9582,12 @@ export class SchoolStore implements DurableObject {
           });
           await this.storeParticipationTicketReceipt(eventId, userId, ticketReceipt);
         }
+        const claimQuota = await this.store.getClaimQuotaStatus(eventId, userId, event);
         return Response.json({
           status: 'already',
           confirmationCode,
           ...(ticketReceipt ? { ticketReceipt } : {}),
+          claimQuota,
           ...onchainResponseFields,
         } as UserClaimResponse);
       }
@@ -9637,11 +9643,13 @@ export class SchoolStore implements DurableObject {
         auditEntry,
       });
       await this.storeParticipationTicketReceipt(eventId, userId, ticketReceipt);
+      const claimQuota = await this.store.getClaimQuotaStatus(eventId, userId, event);
 
       return Response.json({
         status: 'created',
         confirmationCode,
         ticketReceipt,
+        claimQuota,
         ...onchainResponseFields,
       } as UserClaimResponse);
     }

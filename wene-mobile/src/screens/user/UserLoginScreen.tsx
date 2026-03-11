@@ -55,6 +55,7 @@ export const UserLoginScreen: React.FC = () => {
           confirmationCode: ticket.confirmationCode,
           auditReceiptId: ticket.auditReceiptId,
           auditReceiptHash: ticket.auditReceiptHash,
+          claimQuota: ticket.claimQuota,
         }))
       );
       router.replace(schoolRoutes.scan as any);

@@ -91,6 +91,7 @@ export function useSchoolClaim(
           confirmationCode: result.confirmationCode,
           auditReceiptId: result.ticketReceipt?.receiptId,
           auditReceiptHash: result.ticketReceipt?.receiptHash,
+          claimQuota: result.claimQuota,
         }).catch(() => { });
       }
       onSuccess?.(result);

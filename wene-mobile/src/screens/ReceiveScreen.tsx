@@ -6,6 +6,7 @@ import { PublicKey } from '@solana/web3.js';
 import { useRecipientStore } from '../store/recipientStore';
 import { usePhantomStore } from '../store/phantomStore';
 import type { Grant } from '../types/grant';
+import type { ClaimQuotaStatus } from '../types/school';
 import { getGrantByCampaignId } from '../api/getGrant';
 import { verifyTicketReceiptByCode } from '../api/userApi';
 import { submitSchoolClaim } from '../api/schoolClaim';
@@ -869,6 +870,7 @@ ${st.balanceLamports ?? 'null'}
         let syncedAuditReceiptId: string | undefined;
         let syncedAuditReceiptHash: string | undefined;
         let syncedReceiptPubkey: string | undefined;
+        let syncedClaimQuota: ClaimQuotaStatus | undefined;
         try {
           const syncResult = await submitSchoolClaim(campaignId, {
             walletAddress: walletPubkey,
@@ -880,6 +882,7 @@ ${st.balanceLamports ?? 'null'}
             syncedAuditReceiptId = syncResult.ticketReceipt?.receiptId?.trim() || undefined;
             syncedAuditReceiptHash = syncResult.ticketReceipt?.receiptHash?.trim() || undefined;
             syncedReceiptPubkey = syncResult.receiptPubkey?.trim() || undefined;
+            syncedClaimQuota = syncResult.claimQuota;
           } else if (__DEV__) {
             console.warn('[CLAIM] on-chain proof sync failed:', syncResult.error);
           }
@@ -905,6 +908,7 @@ ${st.balanceLamports ?? 'null'}
             confirmationCode: syncedConfirmationCode ?? confirmationCode,
             auditReceiptId: syncedAuditReceiptId ?? offchainReceiptCheck.receipt.receiptId,
             auditReceiptHash: syncedAuditReceiptHash ?? offchainReceiptCheck.receipt.receiptHash,
+            claimQuota: syncedClaimQuota,
           }).catch(console.error);
         }
         if (Platform.OS === 'web') {

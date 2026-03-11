@@ -4,7 +4,7 @@
  */
 
 import { httpPost } from './http/httpClient';
-import type { ParticipationTicketReceipt } from '../types/school';
+import type { ClaimQuotaStatus, ParticipationTicketReceipt } from '../types/school';
 import { resolveApiBaseUrl } from './resolveApiBaseUrl';
 
 export function getBaseUrl(): string {
@@ -22,6 +22,7 @@ export interface UserClaimResponse {
   txSignature?: string;
   receiptPubkey?: string;
   explorerTxUrl?: string;
+  claimQuota?: ClaimQuotaStatus;
 }
 
 export interface UserClaimOnchainProof {
@@ -45,6 +46,7 @@ export interface UserTicketSyncItem {
   txSignature?: string;
   receiptPubkey?: string;
   mint?: string;
+  claimQuota?: ClaimQuotaStatus;
 }
 
 export interface UserTicketSyncResponse {

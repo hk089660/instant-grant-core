@@ -547,6 +547,7 @@ export const UserConfirmScreen: React.FC = () => {
           confirmationCode,
           auditReceiptId: offchainTicketReceipt.receiptId,
           auditReceiptHash: offchainTicketReceipt.receiptHash,
+          claimQuota: result.claimQuota,
         });
       } catch (offchainPersistError) {
         console.warn('[UserConfirmScreen] off-chain receipt reflect failed:', offchainPersistError);
@@ -652,6 +653,7 @@ export const UserConfirmScreen: React.FC = () => {
               popAuditHash: onchain.popAuditHash,
               popSigner: onchain.popSigner,
               confirmationCode,
+              claimQuota: result?.claimQuota,
             });
           } catch (ticketPersistError) {
             console.warn('[UserConfirmScreen] addTicket failed:', ticketPersistError);
@@ -714,6 +716,7 @@ export const UserConfirmScreen: React.FC = () => {
                   popAuditHash: attemptContext.popAuditHash,
                   popSigner: attemptContext.popSigner,
                   confirmationCode,
+                  claimQuota: result?.claimQuota,
                 });
               } catch (ticketPersistError) {
                 console.warn('[UserConfirmScreen] addTicket failed (on-chain already tx):', ticketPersistError);
