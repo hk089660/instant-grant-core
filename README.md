@@ -3,6 +3,10 @@
 Solana 上で学校参加運用と給付運用を監査可能にするプロトタイプです。
 このリポジトリは、We-ne / Asuka Network Core プロトタイプとして、Anchor プログラム、Cloudflare Worker API、Expo / Cloudflare Pages フロントエンドをまとめています。
 
+![We-ne モバイル版の初回登録からイベント参加、トークン受け取りまでのフロー](./docs/media/wene-mobile-onboarding-flow.gif)
+
+_We-ne モバイル版の初回登録からイベント参加、トークン受け取りまでのフロー_
+
 [English README](./README.en.md)
 
 ## 概要

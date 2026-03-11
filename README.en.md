@@ -3,6 +3,10 @@
 Prototype for auditable school participation and grant operations on Solana.
 This repository combines an Anchor program, a Cloudflare Worker API, and an Expo / Cloudflare Pages frontend for the We-ne / Asuka Network Core prototype.
 
+![We-ne mobile flow from first-time registration to event participation and token receipt](./docs/media/wene-mobile-onboarding-flow.gif)
+
+_We-ne mobile flow from first-time registration to event participation and token receipt_
+
 [日本語 README](./README.md)
 
 ## At a Glance
