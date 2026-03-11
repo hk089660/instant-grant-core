@@ -25,15 +25,16 @@ export const AdminParticipantsScreen: React.FC = () => {
     setError(null);
     try {
       const fetched = await fetchAdminEvents();
-      setEvents(fetched);
-      if (fetched.length === 0) {
+      const activeEvents = fetched.filter((event) => (event.state ?? 'draft') !== 'ended');
+      setEvents(activeEvents);
+      if (activeEvents.length === 0) {
         setSelectedEventId(null);
         setClaimants([]);
         return;
       }
       setSelectedEventId((current) => {
-        if (current && fetched.some((event) => event.id === current)) return current;
-        return fetched[0].id;
+        if (current && activeEvents.some((event) => event.id === current)) return current;
+        return activeEvents[0].id;
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'イベント一覧の読み込みに失敗しました');
@@ -154,13 +155,16 @@ export const AdminParticipantsScreen: React.FC = () => {
           <AppText variant="small" style={styles.cardDim}>
             イベントを選択
           </AppText>
+          <AppText variant="small" style={styles.cardDim}>
+            消去済みイベントは候補に表示しません
+          </AppText>
           {loadingEvents ? (
             <View style={styles.center}>
               <Loading message="イベント一覧を読み込み中です..." size="small" mode="admin" />
             </View>
           ) : events.length === 0 ? (
             <AppText variant="caption" style={styles.cardMuted}>
-              イベントがありません
+              表示できるイベントがありません
             </AppText>
           ) : (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.eventPills}>

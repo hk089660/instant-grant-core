@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { View, StyleSheet, ScrollView, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AppText, Button, CountBadge, EventRow, AdminShell, StatusBadge, Loading } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
@@ -15,6 +15,7 @@ import { copyTextWithFeedback } from '../../utils/copyText';
 export const AdminEventsScreen: React.FC = () => {
   const router = useRouter();
   const [events, setEvents] = useState<SchoolEvent[]>([]);
+  const [deletedQuery, setDeletedQuery] = useState('');
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsRefreshing, setEventsRefreshing] = useState(false);
   const [eventsError, setEventsError] = useState<string | null>(null);
@@ -152,6 +153,25 @@ export const AdminEventsScreen: React.FC = () => {
     }
   }, [closingEventId]);
 
+  const activeEvents = useMemo(
+    () => events.filter((event) => (event.state ?? 'draft') !== 'ended'),
+    [events]
+  );
+  const deletedEvents = useMemo(
+    () => events.filter((event) => (event.state ?? 'draft') === 'ended'),
+    [events]
+  );
+  const filteredDeletedEvents = useMemo(() => {
+    const q = deletedQuery.trim().toLowerCase();
+    if (!q) return deletedEvents;
+    return deletedEvents.filter((event) =>
+      event.title.toLowerCase().includes(q) ||
+      event.host.toLowerCase().includes(q) ||
+      event.datetime.toLowerCase().includes(q) ||
+      event.id.toLowerCase().includes(q)
+    );
+  }, [deletedEvents, deletedQuery]);
+
   return (
     <AdminShell title="イベント一覧" role="admin">
       <ScrollView contentContainerStyle={styles.content}>
@@ -261,6 +281,15 @@ export const AdminEventsScreen: React.FC = () => {
           )}
         </View>
 
+        <View style={styles.sectionHeader}>
+          <AppText variant="h3" style={styles.sectionTitle}>
+            イベント一覧
+          </AppText>
+          <AppText variant="small" style={styles.sectionNote}>
+            消去済みイベントは下の別一覧に移動します
+          </AppText>
+        </View>
+
         <View style={styles.list}>
           {eventsLoading ? (
             <View style={styles.stateContainer}>
@@ -277,12 +306,12 @@ export const AdminEventsScreen: React.FC = () => {
                 style={styles.retryButton}
               />
             </View>
-          ) : events.length === 0 ? (
+          ) : activeEvents.length === 0 ? (
             <View style={styles.stateContainer}>
-              <AppText style={styles.emptyText}>表示できるイベントがありません。</AppText>
+              <AppText style={styles.emptyText}>表示中のイベントはありません。</AppText>
             </View>
           ) : (
-            events.map((event) => {
+            activeEvents.map((event) => {
               const state = event.state ?? 'draft';
               const isPublished = state === 'published';
               const isDraft = state === 'draft';
@@ -340,6 +369,66 @@ export const AdminEventsScreen: React.FC = () => {
           )}
         </View>
 
+        {!eventsLoading && !eventsError && (
+          <>
+            <View style={styles.sectionHeader}>
+              <AppText variant="h3" style={styles.sectionTitle}>
+                消去済みイベント
+              </AppText>
+              <AppText variant="small" style={styles.sectionNote}>
+                {deletedEvents.length} 件 / 表示 {filteredDeletedEvents.length} 件
+              </AppText>
+            </View>
+
+            <View style={styles.archivedCard}>
+              <TextInput
+                style={styles.searchInput}
+                value={deletedQuery}
+                onChangeText={setDeletedQuery}
+                placeholder="消去済みイベントを検索（イベント名 / 主催 / ID）"
+                placeholderTextColor={adminTheme.colors.textTertiary}
+              />
+
+              {deletedEvents.length === 0 ? (
+                <View style={styles.stateContainer}>
+                  <AppText style={styles.emptyText}>消去済みイベントはありません。</AppText>
+                </View>
+              ) : filteredDeletedEvents.length === 0 ? (
+                <View style={styles.stateContainer}>
+                  <AppText style={styles.emptyText}>該当する消去済みイベントが見つかりません。</AppText>
+                </View>
+              ) : (
+                filteredDeletedEvents.map((event) => (
+                  <EventRow
+                    key={`archived:${event.id}`}
+                    title={event.title}
+                    datetime={event.datetime}
+                    host={event.host}
+                    textColor={adminTheme.colors.text}
+                    leftSlot={
+                      <CountBadge
+                        value={event.claimedCount ?? 0}
+                        backgroundColor={adminTheme.colors.muted}
+                        textColor={adminTheme.colors.textSecondary}
+                      />
+                    }
+                    rightSlot={
+                      <View style={styles.cardRight}>
+                        <StatusBadge state="ended" />
+                        <AppText variant="small" style={styles.warningText}>
+                          消去済み一覧からのみ表示
+                        </AppText>
+                      </View>
+                    }
+                    onPress={() => router.push(`/admin/events/${event.id}` as any)}
+                    style={styles.row}
+                  />
+                ))
+              )}
+            </View>
+          </>
+        )}
+
         <AppText variant="small" style={styles.note}>
           RT=現在までの参加完了数
         </AppText>
@@ -375,6 +464,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: adminTheme.spacing.md,
     paddingVertical: adminTheme.spacing.sm,
     marginBottom: adminTheme.spacing.md,
+  },
+  sectionHeader: {
+    marginBottom: adminTheme.spacing.sm,
+  },
+  sectionTitle: {
+    color: adminTheme.colors.text,
+  },
+  sectionNote: {
+    color: adminTheme.colors.textTertiary,
+    marginTop: 2,
   },
   teacherMessage: {
     backgroundColor: adminTheme.colors.surface,
@@ -437,6 +536,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: adminTheme.spacing.md,
     paddingVertical: adminTheme.spacing.sm,
     marginBottom: adminTheme.spacing.lg,
+  },
+  archivedCard: {
+    backgroundColor: adminTheme.colors.surface,
+    borderRadius: adminTheme.radius.md,
+    borderWidth: 1,
+    borderColor: adminTheme.colors.border,
+    paddingHorizontal: adminTheme.spacing.md,
+    paddingVertical: adminTheme.spacing.sm,
+    marginBottom: adminTheme.spacing.lg,
+  },
+  searchInput: {
+    borderWidth: 1,
+    borderColor: adminTheme.colors.border,
+    borderRadius: adminTheme.radius.sm,
+    paddingHorizontal: adminTheme.spacing.md,
+    paddingVertical: adminTheme.spacing.sm,
+    color: adminTheme.colors.text,
+    backgroundColor: adminTheme.colors.background,
+    marginBottom: adminTheme.spacing.sm,
   },
   stateContainer: {
     paddingVertical: adminTheme.spacing.lg,
