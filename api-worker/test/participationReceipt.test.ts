@@ -155,6 +155,7 @@ describe('participation audit receipt', () => {
           userId,
           pin: '1234',
           walletAddress: '4'.repeat(32),
+          confirmationCode: offchainClaimBody.confirmationCode,
           txSignature: '5'.repeat(64),
           receiptPubkey: '6'.repeat(32),
         }),
@@ -267,6 +268,7 @@ describe('participation audit receipt', () => {
         body: JSON.stringify({
           userId,
           pin: '1234',
+          confirmationCode: offchainClaimBody.confirmationCode,
           walletAddress: '4'.repeat(32),
           txSignature: '5'.repeat(64),
           receiptPubkey: '6'.repeat(32),
@@ -355,6 +357,7 @@ describe('participation audit receipt', () => {
         body: JSON.stringify({
           eventId: event.id,
           walletAddress,
+          confirmationCode: firstClaimBody.confirmationCode,
           txSignature: '5'.repeat(64),
           receiptPubkey: '6'.repeat(32),
         }),
@@ -444,6 +447,456 @@ describe('participation audit receipt', () => {
     expect(claimRes.status).toBe(409);
     const body = (await claimRes.json()) as { code?: string };
     expect(body.code).toBe('offchain_receipt_required');
+  });
+
+  it('counts remaining user claims from confirmed on-chain receipts and reuses pending off-chain receipt', async () => {
+    const createRes = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'user on-chain quota event',
+          datetime: '2026/02/25 10:00',
+          host: 'admin',
+          ticketTokenAmount: 1,
+          claimIntervalDays: 30,
+          maxClaimsPerInterval: 2,
+        }),
+      })
+    );
+    expect(createRes.status).toBe(201);
+    const event = (await createRes.json()) as { id: string };
+
+    const registerRes = await store.fetch(
+      new Request('https://example.com/api/users/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: 'quota-user',
+          displayName: 'Quota User',
+          pin: '1234',
+        }),
+      })
+    );
+    expect(registerRes.status).toBe(200);
+
+    const firstOffchainRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(event.id)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: 'quota-user',
+          pin: '1234',
+        }),
+      })
+    );
+    expect(firstOffchainRes.status).toBe(200);
+    const firstOffchainBody = (await firstOffchainRes.json()) as {
+      status?: string;
+      confirmationCode?: string;
+      ticketReceipt?: ParticipationTicketReceipt;
+      claimQuota?: {
+        claimsUsedInCurrentInterval?: number;
+        remainingClaimsInCurrentInterval?: number | null;
+      };
+    };
+    expect(firstOffchainBody.status).toBe('created');
+    expect(typeof firstOffchainBody.confirmationCode).toBe('string');
+    expect(firstOffchainBody.claimQuota?.claimsUsedInCurrentInterval).toBe(0);
+    expect(firstOffchainBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(2);
+
+    const pendingOffchainRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(event.id)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: 'quota-user',
+          pin: '1234',
+        }),
+      })
+    );
+    expect(pendingOffchainRes.status).toBe(200);
+    const pendingOffchainBody = (await pendingOffchainRes.json()) as {
+      status?: string;
+      confirmationCode?: string;
+      ticketReceipt?: ParticipationTicketReceipt;
+      claimQuota?: {
+        claimsUsedInCurrentInterval?: number;
+        remainingClaimsInCurrentInterval?: number | null;
+      };
+    };
+    expect(pendingOffchainBody.status).toBe('already');
+    expect(pendingOffchainBody.confirmationCode).toBe(firstOffchainBody.confirmationCode);
+    expect(pendingOffchainBody.ticketReceipt?.receiptId).toBe(firstOffchainBody.ticketReceipt?.receiptId);
+    expect(pendingOffchainBody.ticketReceipt?.receiptHash).toBe(firstOffchainBody.ticketReceipt?.receiptHash);
+    expect(pendingOffchainBody.claimQuota?.claimsUsedInCurrentInterval).toBe(0);
+    expect(pendingOffchainBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(2);
+
+    const firstOnchainSyncRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(event.id)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: 'quota-user',
+          pin: '1234',
+          walletAddress: '4'.repeat(32),
+          confirmationCode: firstOffchainBody.confirmationCode,
+          txSignature: '5'.repeat(64),
+          receiptPubkey: '6'.repeat(32),
+        }),
+      })
+    );
+    expect(firstOnchainSyncRes.status).toBe(200);
+    const firstOnchainSyncBody = (await firstOnchainSyncRes.json()) as {
+      status?: string;
+      confirmationCode?: string;
+      claimQuota?: {
+        claimsUsedInCurrentInterval?: number;
+        remainingClaimsInCurrentInterval?: number | null;
+        canClaimNow?: boolean;
+      };
+    };
+    expect(firstOnchainSyncBody.status).toBe('already');
+    expect(firstOnchainSyncBody.confirmationCode).toBe(firstOffchainBody.confirmationCode);
+    expect(firstOnchainSyncBody.claimQuota?.claimsUsedInCurrentInterval).toBe(1);
+    expect(firstOnchainSyncBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(1);
+    expect(firstOnchainSyncBody.claimQuota?.canClaimNow).toBe(true);
+
+    const secondOffchainRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(event.id)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: 'quota-user',
+          pin: '1234',
+        }),
+      })
+    );
+    expect(secondOffchainRes.status).toBe(200);
+    const secondOffchainBody = (await secondOffchainRes.json()) as {
+      status?: string;
+      confirmationCode?: string;
+      ticketReceipt?: ParticipationTicketReceipt;
+      claimQuota?: {
+        claimsUsedInCurrentInterval?: number;
+        remainingClaimsInCurrentInterval?: number | null;
+      };
+    };
+    expect(secondOffchainBody.status).toBe('created');
+    expect(secondOffchainBody.confirmationCode).toBeDefined();
+    expect(secondOffchainBody.confirmationCode).not.toBe(firstOffchainBody.confirmationCode);
+    expect(secondOffchainBody.claimQuota?.claimsUsedInCurrentInterval).toBe(1);
+    expect(secondOffchainBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(1);
+
+    const secondPendingOffchainRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(event.id)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: 'quota-user',
+          pin: '1234',
+        }),
+      })
+    );
+    expect(secondPendingOffchainRes.status).toBe(200);
+    const secondPendingOffchainBody = (await secondPendingOffchainRes.json()) as {
+      status?: string;
+      confirmationCode?: string;
+      ticketReceipt?: ParticipationTicketReceipt;
+      claimQuota?: {
+        claimsUsedInCurrentInterval?: number;
+        remainingClaimsInCurrentInterval?: number | null;
+      };
+    };
+    expect(secondPendingOffchainBody.status).toBe('already');
+    expect(secondPendingOffchainBody.confirmationCode).toBe(secondOffchainBody.confirmationCode);
+    expect(secondPendingOffchainBody.ticketReceipt?.receiptId).toBe(secondOffchainBody.ticketReceipt?.receiptId);
+    expect(secondPendingOffchainBody.ticketReceipt?.receiptHash).toBe(secondOffchainBody.ticketReceipt?.receiptHash);
+    expect(secondPendingOffchainBody.claimQuota?.claimsUsedInCurrentInterval).toBe(1);
+    expect(secondPendingOffchainBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(1);
+
+    const secondOnchainSyncRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(event.id)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: 'quota-user',
+          pin: '1234',
+          walletAddress: '7'.repeat(32),
+          confirmationCode: secondOffchainBody.confirmationCode,
+          txSignature: '8'.repeat(64),
+          receiptPubkey: '9'.repeat(32),
+        }),
+      })
+    );
+    expect(secondOnchainSyncRes.status).toBe(200);
+    const secondOnchainSyncBody = (await secondOnchainSyncRes.json()) as {
+      status?: string;
+      confirmationCode?: string;
+      claimQuota?: {
+        claimsUsedInCurrentInterval?: number;
+        remainingClaimsInCurrentInterval?: number | null;
+        canClaimNow?: boolean;
+      };
+    };
+    expect(secondOnchainSyncBody.status).toBe('already');
+    expect(secondOnchainSyncBody.confirmationCode).toBe(secondOffchainBody.confirmationCode);
+    expect(secondOnchainSyncBody.claimQuota?.claimsUsedInCurrentInterval).toBe(2);
+    expect(secondOnchainSyncBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(0);
+    expect(secondOnchainSyncBody.claimQuota?.canClaimNow).toBe(false);
+
+    const exhaustedRes = await store.fetch(
+      new Request(`https://example.com/api/events/${encodeURIComponent(event.id)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: 'quota-user',
+          pin: '1234',
+        }),
+      })
+    );
+    expect(exhaustedRes.status).toBe(200);
+    const exhaustedBody = (await exhaustedRes.json()) as {
+      status?: string;
+      confirmationCode?: string;
+      ticketReceipt?: ParticipationTicketReceipt;
+      claimQuota?: {
+        claimsUsedInCurrentInterval?: number;
+        remainingClaimsInCurrentInterval?: number | null;
+        canClaimNow?: boolean;
+      };
+    };
+    expect(exhaustedBody.status).toBe('already');
+    expect(exhaustedBody.confirmationCode).toBe(secondOffchainBody.confirmationCode);
+    expect(exhaustedBody.ticketReceipt?.receiptId).toBe(secondOffchainBody.ticketReceipt?.receiptId);
+    expect(exhaustedBody.claimQuota?.claimsUsedInCurrentInterval).toBe(2);
+    expect(exhaustedBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(0);
+    expect(exhaustedBody.claimQuota?.canClaimNow).toBe(false);
+  });
+
+  it('counts remaining wallet claims from confirmed on-chain receipts and reuses pending off-chain receipt', async () => {
+    const createRes = await store.fetch(
+      new Request('https://example.com/v1/school/events', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'wallet on-chain quota event',
+          datetime: '2026/02/26 10:00',
+          host: 'admin',
+          ticketTokenAmount: 1,
+          claimIntervalDays: 30,
+          maxClaimsPerInterval: 2,
+        }),
+      })
+    );
+    expect(createRes.status).toBe(201);
+    const event = (await createRes.json()) as { id: string };
+    const walletAddress = '4'.repeat(32);
+
+    const firstOffchainRes = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: event.id,
+          walletAddress,
+        }),
+      })
+    );
+    expect(firstOffchainRes.status).toBe(200);
+    const firstOffchainBody = (await firstOffchainRes.json()) as {
+      success?: boolean;
+      alreadyJoined?: boolean;
+      confirmationCode?: string;
+      ticketReceipt?: ParticipationTicketReceipt;
+      claimQuota?: {
+        claimsUsedInCurrentInterval?: number;
+        remainingClaimsInCurrentInterval?: number | null;
+      };
+    };
+    expect(firstOffchainBody.success).toBe(true);
+    expect(firstOffchainBody.alreadyJoined).toBe(false);
+    expect(typeof firstOffchainBody.confirmationCode).toBe('string');
+    expect(firstOffchainBody.claimQuota?.claimsUsedInCurrentInterval).toBe(0);
+    expect(firstOffchainBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(2);
+
+    const pendingOffchainRes = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: event.id,
+          walletAddress,
+        }),
+      })
+    );
+    expect(pendingOffchainRes.status).toBe(200);
+    const pendingOffchainBody = (await pendingOffchainRes.json()) as {
+      success?: boolean;
+      alreadyJoined?: boolean;
+      confirmationCode?: string;
+      ticketReceipt?: ParticipationTicketReceipt;
+      claimQuota?: {
+        claimsUsedInCurrentInterval?: number;
+        remainingClaimsInCurrentInterval?: number | null;
+      };
+    };
+    expect(pendingOffchainBody.success).toBe(true);
+    expect(pendingOffchainBody.alreadyJoined).toBe(true);
+    expect(pendingOffchainBody.confirmationCode).toBe(firstOffchainBody.confirmationCode);
+    expect(pendingOffchainBody.ticketReceipt?.receiptId).toBe(firstOffchainBody.ticketReceipt?.receiptId);
+    expect(pendingOffchainBody.ticketReceipt?.receiptHash).toBe(firstOffchainBody.ticketReceipt?.receiptHash);
+    expect(pendingOffchainBody.claimQuota?.claimsUsedInCurrentInterval).toBe(0);
+    expect(pendingOffchainBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(2);
+
+    const firstOnchainSyncRes = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: event.id,
+          walletAddress,
+          confirmationCode: firstOffchainBody.confirmationCode,
+          txSignature: '5'.repeat(64),
+          receiptPubkey: '6'.repeat(32),
+        }),
+      })
+    );
+    expect(firstOnchainSyncRes.status).toBe(200);
+    const firstOnchainSyncBody = (await firstOnchainSyncRes.json()) as {
+      success?: boolean;
+      alreadyJoined?: boolean;
+      confirmationCode?: string;
+      claimQuota?: {
+        claimsUsedInCurrentInterval?: number;
+        remainingClaimsInCurrentInterval?: number | null;
+        canClaimNow?: boolean;
+      };
+    };
+    expect(firstOnchainSyncBody.success).toBe(true);
+    expect(firstOnchainSyncBody.alreadyJoined).toBe(true);
+    expect(firstOnchainSyncBody.confirmationCode).toBe(firstOffchainBody.confirmationCode);
+    expect(firstOnchainSyncBody.claimQuota?.claimsUsedInCurrentInterval).toBe(1);
+    expect(firstOnchainSyncBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(1);
+    expect(firstOnchainSyncBody.claimQuota?.canClaimNow).toBe(true);
+
+    const secondOffchainRes = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: event.id,
+          walletAddress,
+        }),
+      })
+    );
+    expect(secondOffchainRes.status).toBe(200);
+    const secondOffchainBody = (await secondOffchainRes.json()) as {
+      success?: boolean;
+      alreadyJoined?: boolean;
+      confirmationCode?: string;
+      ticketReceipt?: ParticipationTicketReceipt;
+      claimQuota?: {
+        claimsUsedInCurrentInterval?: number;
+        remainingClaimsInCurrentInterval?: number | null;
+      };
+    };
+    expect(secondOffchainBody.success).toBe(true);
+    expect(secondOffchainBody.alreadyJoined).toBe(false);
+    expect(secondOffchainBody.confirmationCode).toBeDefined();
+    expect(secondOffchainBody.confirmationCode).not.toBe(firstOffchainBody.confirmationCode);
+    expect(secondOffchainBody.claimQuota?.claimsUsedInCurrentInterval).toBe(1);
+    expect(secondOffchainBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(1);
+
+    const secondPendingOffchainRes = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: event.id,
+          walletAddress,
+        }),
+      })
+    );
+    expect(secondPendingOffchainRes.status).toBe(200);
+    const secondPendingOffchainBody = (await secondPendingOffchainRes.json()) as {
+      success?: boolean;
+      alreadyJoined?: boolean;
+      confirmationCode?: string;
+      ticketReceipt?: ParticipationTicketReceipt;
+      claimQuota?: {
+        claimsUsedInCurrentInterval?: number;
+        remainingClaimsInCurrentInterval?: number | null;
+      };
+    };
+    expect(secondPendingOffchainBody.success).toBe(true);
+    expect(secondPendingOffchainBody.alreadyJoined).toBe(true);
+    expect(secondPendingOffchainBody.confirmationCode).toBe(secondOffchainBody.confirmationCode);
+    expect(secondPendingOffchainBody.ticketReceipt?.receiptId).toBe(secondOffchainBody.ticketReceipt?.receiptId);
+    expect(secondPendingOffchainBody.ticketReceipt?.receiptHash).toBe(secondOffchainBody.ticketReceipt?.receiptHash);
+    expect(secondPendingOffchainBody.claimQuota?.claimsUsedInCurrentInterval).toBe(1);
+    expect(secondPendingOffchainBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(1);
+
+    const secondOnchainSyncRes = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: event.id,
+          walletAddress,
+          confirmationCode: secondOffchainBody.confirmationCode,
+          txSignature: '7'.repeat(64),
+          receiptPubkey: '8'.repeat(32),
+        }),
+      })
+    );
+    expect(secondOnchainSyncRes.status).toBe(200);
+    const secondOnchainSyncBody = (await secondOnchainSyncRes.json()) as {
+      success?: boolean;
+      alreadyJoined?: boolean;
+      confirmationCode?: string;
+      claimQuota?: {
+        claimsUsedInCurrentInterval?: number;
+        remainingClaimsInCurrentInterval?: number | null;
+        canClaimNow?: boolean;
+      };
+    };
+    expect(secondOnchainSyncBody.success).toBe(true);
+    expect(secondOnchainSyncBody.alreadyJoined).toBe(true);
+    expect(secondOnchainSyncBody.confirmationCode).toBe(secondOffchainBody.confirmationCode);
+    expect(secondOnchainSyncBody.claimQuota?.claimsUsedInCurrentInterval).toBe(2);
+    expect(secondOnchainSyncBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(0);
+    expect(secondOnchainSyncBody.claimQuota?.canClaimNow).toBe(false);
+
+    const exhaustedRes = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId: event.id,
+          walletAddress,
+        }),
+      })
+    );
+    expect(exhaustedRes.status).toBe(200);
+    const exhaustedBody = (await exhaustedRes.json()) as {
+      success?: boolean;
+      alreadyJoined?: boolean;
+      confirmationCode?: string;
+      ticketReceipt?: ParticipationTicketReceipt;
+      claimQuota?: {
+        claimsUsedInCurrentInterval?: number;
+        remainingClaimsInCurrentInterval?: number | null;
+        canClaimNow?: boolean;
+      };
+    };
+    expect(exhaustedBody.success).toBe(true);
+    expect(exhaustedBody.alreadyJoined).toBe(true);
+    expect(exhaustedBody.confirmationCode).toBe(secondOffchainBody.confirmationCode);
+    expect(exhaustedBody.ticketReceipt?.receiptId).toBe(secondOffchainBody.ticketReceipt?.receiptId);
+    expect(exhaustedBody.claimQuota?.claimsUsedInCurrentInterval).toBe(2);
+    expect(exhaustedBody.claimQuota?.remainingClaimsInCurrentInterval).toBe(0);
+    expect(exhaustedBody.claimQuota?.canClaimNow).toBe(false);
   });
 
   it('links on-chain proof to existing confirmation code even when policy still allows additional claims', async () => {

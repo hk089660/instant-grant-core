@@ -105,6 +105,7 @@ export interface ClaimBody {
   eventId?: string;
   walletAddress?: string;
   joinToken?: string;
+  confirmationCode?: string;
   txSignature?: string;
   receiptPubkey?: string;
   costOfForgeryToken?: string;

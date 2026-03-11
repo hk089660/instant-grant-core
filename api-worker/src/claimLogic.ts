@@ -22,6 +22,16 @@ interface ClaimHistoryEntry {
   code?: string;
 }
 
+interface PendingClaimEntry {
+  at: number;
+  code: string;
+}
+
+interface ClaimState {
+  history: ClaimHistoryEntry[];
+  pending: PendingClaimEntry | null;
+}
+
 interface ClaimPolicy {
   claimIntervalDays: number;
   maxClaimsPerInterval: number | null;
@@ -115,6 +125,24 @@ function parseClaimHistory(raw: unknown): ClaimHistoryEntry[] {
   return out;
 }
 
+function parsePendingClaim(raw: unknown): PendingClaimEntry | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const pendingRaw = (raw as { pending?: unknown }).pending;
+  if (!pendingRaw || typeof pendingRaw !== 'object') return null;
+  const pendingObj = pendingRaw as { at?: unknown; code?: unknown };
+  const at = parsePositiveInt(pendingObj.at);
+  const code = typeof pendingObj.code === 'string' && pendingObj.code.trim() ? pendingObj.code.trim() : '';
+  if (!at || !code) return null;
+  return { at, code };
+}
+
+function parseClaimState(raw: unknown): ClaimState {
+  return {
+    history: parseClaimHistory(raw),
+    pending: parsePendingClaim(raw),
+  };
+}
+
 function serializeClaimHistory(entries: ClaimHistoryEntry[]): unknown {
   if (entries.length === 0) return undefined;
 
@@ -126,6 +154,30 @@ function serializeClaimHistory(entries: ClaimHistoryEntry[]): unknown {
     at: latest.at,
     code: latest.code,
     history: entries,
+  };
+}
+
+function serializeClaimState(state: ClaimState): unknown {
+  const serializedHistory = serializeClaimHistory(state.history);
+  if (!state.pending) {
+    return serializedHistory;
+  }
+
+  const historyObject =
+    serializedHistory && typeof serializedHistory === 'object'
+      ? { ...(serializedHistory as Record<string, unknown>) }
+      : {
+        at: state.pending.at,
+        code: state.pending.code,
+        history: state.history,
+      };
+
+  return {
+    ...historyObject,
+    pending: {
+      at: state.pending.at,
+      code: state.pending.code,
+    },
   };
 }
 
@@ -206,7 +258,34 @@ export class ClaimStore {
 
   private async getClaimHistory(eventId: string, subject: string): Promise<ClaimHistoryEntry[]> {
     const raw = await this.storage.get(claimKey(eventId, subject));
-    return parseClaimHistory(raw);
+    return parseClaimState(raw).history;
+  }
+
+  async getPendingClaim(
+    eventId: string,
+    subject: string
+  ): Promise<{ confirmationCode: string; issuedAt: number } | null> {
+    const raw = await this.storage.get(claimKey(eventId, subject));
+    const pending = parseClaimState(raw).pending;
+    if (!pending) return null;
+    return {
+      confirmationCode: pending.code,
+      issuedAt: pending.at,
+    };
+  }
+
+  async resolvePendingClaim(eventId: string, subject: string, confirmationCode?: string): Promise<void> {
+    const key = claimKey(eventId, subject);
+    const raw = await this.storage.get(key);
+    const state = parseClaimState(raw);
+    if (!state.pending) return;
+    const normalizedCode = typeof confirmationCode === 'string' ? confirmationCode.trim() : '';
+    if (normalizedCode && state.pending.code !== normalizedCode) return;
+    state.pending = null;
+    const serialized = serializeClaimState(state);
+    if (serialized !== undefined) {
+      await this.storage.put(key, serialized);
+    }
   }
 
   private async checkClaimAllowance(
@@ -262,33 +341,49 @@ export class ClaimStore {
   async setLatestClaimConfirmationCode(eventId: string, subject: string, confirmationCode: string): Promise<void> {
     const code = confirmationCode.trim();
     if (!code) return;
-    const history = await this.getClaimHistory(eventId, subject);
-    if (history.length === 0) return;
-    const latestIndex = history.length - 1;
-    history[latestIndex] = {
-      ...history[latestIndex],
+    const key = claimKey(eventId, subject);
+    const raw = await this.storage.get(key);
+    const state = parseClaimState(raw);
+    if (state.history.length === 0) return;
+    const latestIndex = state.history.length - 1;
+    state.history[latestIndex] = {
+      ...state.history[latestIndex],
       code,
     };
-    const serialized = serializeClaimHistory(history);
+    if (state.pending) {
+      state.pending = {
+        ...state.pending,
+        code,
+      };
+    }
+    const serialized = serializeClaimState(state);
     if (serialized !== undefined) {
-      await this.storage.put(claimKey(eventId, subject), serialized);
+      await this.storage.put(key, serialized);
     }
   }
 
   async addClaim(eventId: string, subject: string, confirmationCode?: string): Promise<void> {
-    const history = await this.getClaimHistory(eventId, subject);
-    history.push({
+    const key = claimKey(eventId, subject);
+    const raw = await this.storage.get(key);
+    const state = parseClaimState(raw);
+    const entry: ClaimHistoryEntry = {
       at: Date.now(),
       code: confirmationCode,
-    });
-    history.sort((a, b) => a.at - b.at);
+    };
+    state.history.push(entry);
+    state.history.sort((a, b) => a.at - b.at);
     const trimmed =
-      history.length > MAX_STORED_CLAIM_HISTORY
-        ? history.slice(history.length - MAX_STORED_CLAIM_HISTORY)
-        : history;
-    const serialized = serializeClaimHistory(trimmed);
+      state.history.length > MAX_STORED_CLAIM_HISTORY
+        ? state.history.slice(state.history.length - MAX_STORED_CLAIM_HISTORY)
+        : state.history;
+    state.history = trimmed;
+    state.pending =
+      typeof confirmationCode === 'string' && confirmationCode.trim()
+        ? { at: entry.at, code: confirmationCode.trim() }
+        : null;
+    const serialized = serializeClaimState(state);
     if (serialized !== undefined) {
-      await this.storage.put(claimKey(eventId, subject), serialized);
+      await this.storage.put(key, serialized);
     }
   }
 
@@ -299,7 +394,7 @@ export class ClaimStore {
     const out: Array<{ subject: string; claimedAt: number; confirmationCode?: string }> = [];
     map.forEach((value, key) => {
       const subject = key.slice(prefix.length);
-      const history = parseClaimHistory(value);
+      const history = parseClaimState(value).history;
       if (history.length === 0) {
         out.push({ subject, claimedAt: 0 });
         return;
@@ -327,7 +422,7 @@ export class ClaimStore {
       const claimSubject = suffix.slice(separatorAt + 1);
       if (claimSubject !== normalizedSubject) continue;
 
-      const history = parseClaimHistory(value);
+      const history = parseClaimState(value).history;
       if (history.length === 0) continue;
       const latest = history[history.length - 1];
       out.push({ eventId, claimedAt: latest.at, confirmationCode: latest.code });

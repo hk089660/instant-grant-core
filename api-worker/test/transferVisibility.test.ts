@@ -276,6 +276,22 @@ describe('transfer visibility role levels (master > admin)', () => {
       expect(walletClaimRes.status).toBe(200);
     }
 
+    const offchainOnchainWalletClaimRes = await store.fetch(
+      new Request('https://example.com/v1/school/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId,
+          walletAddress: 'wallet-onchain-1',
+        }),
+      })
+    );
+    expect(offchainOnchainWalletClaimRes.status).toBe(200);
+    const offchainOnchainWalletClaimBody = (await offchainOnchainWalletClaimRes.json()) as {
+      confirmationCode?: string;
+    };
+    expect(typeof offchainOnchainWalletClaimBody.confirmationCode).toBe('string');
+
     const onchainClaimRes = await store.fetch(
       new Request('https://example.com/v1/school/claims', {
         method: 'POST',
@@ -283,6 +299,7 @@ describe('transfer visibility role levels (master > admin)', () => {
         body: JSON.stringify({
           eventId,
           walletAddress: 'wallet-onchain-1',
+          confirmationCode: offchainOnchainWalletClaimBody.confirmationCode,
           txSignature: '5KJvsngHeMpm884twD2r5kPu6x2R2h32L6M9n7Yjv9ByM8r4WQ6xAzM9Y4o7b2w1',
           receiptPubkey: 'BPFLoader1111111111111111111111111111111111',
         }),

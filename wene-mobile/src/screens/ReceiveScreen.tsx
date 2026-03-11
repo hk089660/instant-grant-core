@@ -874,6 +874,7 @@ ${st.balanceLamports ?? 'null'}
         try {
           const syncResult = await submitSchoolClaim(campaignId, {
             walletAddress: walletPubkey,
+            confirmationCode,
             txSignature: signature,
             receiptPubkey: currentReceiptPubkey,
           });

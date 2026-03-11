@@ -2,6 +2,7 @@ import bs58 from 'bs58';
 import nacl from 'tweetnacl';
 import type {
   ClaimBody,
+  ClaimQuotaStatus,
   CostOfForgeryRemediationFlow,
   PopProofBody,
   PopProofResponse,
@@ -493,6 +494,13 @@ type ClaimTransferSnapshot = {
   txSignature: string | null;
   receiptPubkey: string | null;
   mint: string | null;
+};
+
+type ConfirmedOnchainClaim = {
+  at: number;
+  confirmationCode?: string;
+  txSignature?: string;
+  receiptPubkey?: string;
 };
 
 type ConfirmationCodeIndexRecord = {
@@ -4914,6 +4922,21 @@ export class SchoolStore implements DurableObject {
     return { code, eventId, subject, issuedAt };
   }
 
+  private async confirmationCodeBelongsToSubject(params: {
+    eventId: string;
+    subject: string;
+    confirmationCode: string;
+  }): Promise<boolean> {
+    const confirmationCode = params.confirmationCode.trim();
+    const eventId = params.eventId.trim();
+    const subject = params.subject.trim();
+    if (!confirmationCode || !eventId || !subject) return false;
+    const record = this.parseConfirmationCodeIndexRecord(
+      await this.ctx.storage.get(confirmationCodeIndexKey(confirmationCode))
+    );
+    return record?.eventId === eventId && record.subject === subject;
+  }
+
   private parseUserIdIndexRecord(raw: unknown): UserIdIndexRecord | null {
     if (!raw || typeof raw !== 'object') return null;
     const obj = raw as Record<string, unknown>;
@@ -6051,6 +6074,199 @@ export class SchoolStore implements DurableObject {
     return null;
   }
 
+  private resolveClaimPolicy(event?: Pick<SchoolEvent, 'claimIntervalDays' | 'maxClaimsPerInterval'> | null): {
+    claimIntervalDays: number;
+    maxClaimsPerInterval: number | null;
+  } {
+    const claimIntervalDays =
+      typeof event?.claimIntervalDays === 'number' && Number.isFinite(event.claimIntervalDays) && event.claimIntervalDays > 0
+        ? Math.floor(event.claimIntervalDays)
+        : 30;
+    const maxClaimsPerInterval =
+      event?.maxClaimsPerInterval === null
+        ? null
+        : (typeof event?.maxClaimsPerInterval === 'number' &&
+          Number.isFinite(event.maxClaimsPerInterval) &&
+          event.maxClaimsPerInterval > 0
+          ? Math.floor(event.maxClaimsPerInterval)
+          : 1);
+    return { claimIntervalDays, maxClaimsPerInterval };
+  }
+
+  private buildClaimQuotaStatusFromConfirmedOnchainClaims(
+    event: Pick<SchoolEvent, 'claimIntervalDays' | 'maxClaimsPerInterval'> | null | undefined,
+    claims: ConfirmedOnchainClaim[],
+    now: number = Date.now()
+  ): ClaimQuotaStatus {
+    const policy = this.resolveClaimPolicy(event);
+    const windowMs = policy.claimIntervalDays * 24 * 60 * 60 * 1000;
+    const windowStart = now - windowMs;
+    const inWindow = claims.filter((claim) => claim.at >= windowStart);
+
+    if (policy.maxClaimsPerInterval === null) {
+      return {
+        claimIntervalDays: policy.claimIntervalDays,
+        maxClaimsPerInterval: null,
+        claimsUsedInCurrentInterval: inWindow.length,
+        remainingClaimsInCurrentInterval: null,
+        canClaimNow: true,
+      };
+    }
+
+    const remainingClaimsInCurrentInterval = Math.max(policy.maxClaimsPerInterval - inWindow.length, 0);
+    let nextAvailableAt: number | undefined;
+    if (remainingClaimsInCurrentInterval === 0) {
+      const thresholdIndex = inWindow.length - policy.maxClaimsPerInterval;
+      const thresholdEntry = inWindow[Math.max(0, thresholdIndex)];
+      nextAvailableAt = thresholdEntry ? thresholdEntry.at + windowMs : undefined;
+    }
+
+    return {
+      claimIntervalDays: policy.claimIntervalDays,
+      maxClaimsPerInterval: policy.maxClaimsPerInterval,
+      claimsUsedInCurrentInterval: inWindow.length,
+      remainingClaimsInCurrentInterval,
+      canClaimNow: remainingClaimsInCurrentInterval > 0,
+      ...(nextAvailableAt ? { nextAvailableAt } : {}),
+    };
+  }
+
+  private matchesWalletTransferSubject(
+    view: TransferLogView,
+    params: { walletAddress?: string | null; joinToken?: string | null }
+  ): boolean {
+    const walletAddress = this.normalizeStringField(params.walletAddress);
+    const joinToken = this.normalizeStringField(params.joinToken);
+    const piiWalletAddress = this.normalizeStringField(view.pii?.walletAddress);
+    const piiJoinToken = this.normalizeStringField(view.pii?.joinToken);
+    const recipientWalletAddress =
+      view.transfer.recipient.type === 'wallet'
+        ? this.normalizeStringField(view.transfer.recipient.id)
+        : null;
+    const recipientJoinToken =
+      view.transfer.recipient.type === 'join_token'
+        ? this.normalizeStringField(view.transfer.recipient.id)
+        : null;
+
+    return Boolean(
+      (walletAddress && (piiWalletAddress === walletAddress || recipientWalletAddress === walletAddress)) ||
+      (joinToken && (piiJoinToken === joinToken || recipientJoinToken === joinToken))
+    );
+  }
+
+  private matchesUserTransferSubject(view: TransferLogView, userId: string): boolean {
+    const normalizedUserId = this.normalizeUserId(userId);
+    if (!normalizedUserId) return false;
+    const piiUserId = this.normalizeUserId(view.pii?.userId);
+    const recipientUserId =
+      view.transfer.recipient.type === 'user'
+        ? this.normalizeUserId(view.transfer.recipient.id)
+        : '';
+    return piiUserId === normalizedUserId || recipientUserId === normalizedUserId;
+  }
+
+  private buildConfirmedOnchainClaim(entry: AuditEvent, view: TransferLogView): ConfirmedOnchainClaim | null {
+    const txSignature = this.normalizeStringField(view.transfer.txSignature) ?? undefined;
+    const receiptPubkey = this.normalizeStringField(view.transfer.receiptPubkey) ?? undefined;
+    if (!txSignature && !receiptPubkey) return null;
+    const at = Date.parse(entry.ts);
+    if (!Number.isFinite(at) || at <= 0) return null;
+    const data = (entry.data ?? {}) as Record<string, unknown>;
+    const confirmationCode = this.normalizeStringField(data.confirmationCode) ?? undefined;
+    return {
+      at,
+      confirmationCode,
+      txSignature,
+      receiptPubkey,
+    };
+  }
+
+  private async collectConfirmedOnchainClaims(options: {
+    eventId: string;
+    auditEvent: 'USER_CLAIM' | 'WALLET_CLAIM';
+    matches: (view: TransferLogView) => boolean;
+  }): Promise<ConfirmedOnchainClaim[]> {
+    const rows = await this.ctx.storage.list({
+      prefix: AUDIT_HISTORY_PREFIX,
+      limit: AUDIT_ENTRY_SCAN_LIMIT,
+      reverse: true,
+    });
+
+    const deduped = new Set<string>();
+    const claims: ConfirmedOnchainClaim[] = [];
+    for (const value of rows.values()) {
+      if (!value || typeof value !== 'object') continue;
+      const entry = value as AuditEvent;
+      if (entry.event !== options.auditEvent || entry.eventId !== options.eventId) continue;
+
+      const view = this.toTransferLogView(entry);
+      if (!view || !options.matches(view)) continue;
+
+      const claim = this.buildConfirmedOnchainClaim(entry, view);
+      if (!claim) continue;
+
+      const dedupeKey = claim.txSignature ?? `receipt:${claim.receiptPubkey}`;
+      if (deduped.has(dedupeKey)) continue;
+      deduped.add(dedupeKey);
+      claims.push(claim);
+    }
+    return claims;
+  }
+
+  private async getWalletOnchainClaimQuotaStatus(params: {
+    eventId: string;
+    event: Pick<SchoolEvent, 'claimIntervalDays' | 'maxClaimsPerInterval'> | null | undefined;
+    walletAddress?: string | null;
+    joinToken?: string | null;
+  }): Promise<ClaimQuotaStatus> {
+    const claims = await this.collectConfirmedOnchainClaims({
+      eventId: params.eventId,
+      auditEvent: 'WALLET_CLAIM',
+      matches: (view) => this.matchesWalletTransferSubject(view, params),
+    });
+    return this.buildClaimQuotaStatusFromConfirmedOnchainClaims(params.event, claims);
+  }
+
+  private async getUserOnchainClaimQuotaStatus(params: {
+    eventId: string;
+    event: Pick<SchoolEvent, 'claimIntervalDays' | 'maxClaimsPerInterval'> | null | undefined;
+    userId: string;
+  }): Promise<ClaimQuotaStatus> {
+    const claims = await this.collectConfirmedOnchainClaims({
+      eventId: params.eventId,
+      auditEvent: 'USER_CLAIM',
+      matches: (view) => this.matchesUserTransferSubject(view, params.userId),
+    });
+    return this.buildClaimQuotaStatusFromConfirmedOnchainClaims(params.event, claims);
+  }
+
+  private async hasConfirmedWalletOnchainClaimForCode(params: {
+    eventId: string;
+    confirmationCode: string;
+    walletAddress?: string | null;
+    joinToken?: string | null;
+  }): Promise<boolean> {
+    const claims = await this.collectConfirmedOnchainClaims({
+      eventId: params.eventId,
+      auditEvent: 'WALLET_CLAIM',
+      matches: (view) => this.matchesWalletTransferSubject(view, params),
+    });
+    return claims.some((claim) => claim.confirmationCode === params.confirmationCode);
+  }
+
+  private async hasConfirmedUserOnchainClaimForCode(params: {
+    eventId: string;
+    confirmationCode: string;
+    userId: string;
+  }): Promise<boolean> {
+    const claims = await this.collectConfirmedOnchainClaims({
+      eventId: params.eventId,
+      auditEvent: 'USER_CLAIM',
+      matches: (view) => this.matchesUserTransferSubject(view, params.userId),
+    });
+    return claims.some((claim) => claim.confirmationCode === params.confirmationCode);
+  }
+
   private async buildUserTicketSyncItems(userId: string): Promise<UserTicketSyncItem[]> {
     const normalizedUserId = this.normalizeUserId(userId);
     if (!normalizedUserId) return [];
@@ -6072,7 +6288,11 @@ export class SchoolStore implements DurableObject {
       const receipt = this.parseParticipationTicketReceipt(
         await this.ctx.storage.get(ticketReceiptBySubjectKey(claim.eventId, normalizedUserId))
       );
-      const claimQuota = await this.store.getClaimQuotaStatus(claim.eventId, normalizedUserId, event);
+      const claimQuota = await this.getUserOnchainClaimQuotaStatus({
+        eventId: claim.eventId,
+        event,
+        userId: normalizedUserId,
+      });
       const mint = snapshot?.mint ?? this.normalizeStringField(event?.solanaMint);
       const confirmationCode = claim.confirmationCode ?? receipt?.confirmationCode;
 
@@ -9189,6 +9409,12 @@ export class SchoolStore implements DurableObject {
           error: { code: 'not_found', message: 'イベントが見つかりません' },
         } as SchoolClaimResult);
       }
+      if (event.state && event.state !== 'published') {
+        return Response.json({
+          success: false,
+          error: { code: 'eligibility', message: 'このイベントは参加できません' },
+        } as SchoolClaimResult);
+      }
       const proofFields = this.getOnchainProofFields(body);
       const hasOnchainProof = this.hasAnyOnchainProofField(proofFields);
       const onchainResponseFields = this.buildOnchainClaimResponseFields({
@@ -9224,6 +9450,7 @@ export class SchoolStore implements DurableObject {
         this.normalizeStringField(proofFields.walletAddress) ??
         this.normalizeStringField(body.walletAddress);
       const joinToken = this.normalizeStringField(body.joinToken);
+      const requestedConfirmationCode = this.normalizeStringField(body.confirmationCode);
       const txSignature = this.normalizeStringField(proofFields.txSignature);
       const receiptPubkey = this.normalizeStringField(proofFields.receiptPubkey);
       const subject = normalizeSubject(walletAddress ?? undefined, joinToken ?? undefined);
@@ -9233,87 +9460,46 @@ export class SchoolStore implements DurableObject {
           error: { code: 'wallet_required', message: 'Phantomに接続してください' },
         } as SchoolClaimResult);
       }
-      const alreadyClaimed = await this.store.hasClaimed(eventId, subject, event);
-      if (!alreadyClaimed) {
-        const costOfForgeryError = await this.enforceCostOfForgeryRisk({
-          request,
-          action: 'wallet_claim',
-          event,
+      let pendingClaim = await this.store.getPendingClaim(eventId, subject);
+      if (
+        pendingClaim &&
+        await this.hasConfirmedWalletOnchainClaimForCode({
+          eventId,
+          confirmationCode: pendingClaim.confirmationCode,
+          walletAddress,
+          joinToken,
+        })
+      ) {
+        await this.store.resolvePendingClaim(eventId, subject, pendingClaim.confirmationCode);
+        pendingClaim = null;
+      }
+
+      if (hasOnchainProof) {
+        if (!requestedConfirmationCode) {
+          return Response.json({
+            success: false,
+            error: { code: 'retryable', message: 'on-chain claim requires off-chain receipt verification first' },
+          } as SchoolClaimResult, { status: 409 });
+        }
+        if (!(await this.confirmationCodeBelongsToSubject({
           eventId,
           subject,
-          walletAddress: walletAddress ?? undefined,
-          costOfForgeryToken: costOfForgeryToken || undefined,
-        });
-        if (costOfForgeryError) {
-          return Response.json(this.mapCostOfForgeryErrorToSchoolClaimResult(costOfForgeryError), {
-            status: costOfForgeryError.status,
-          });
+          confirmationCode: requestedConfirmationCode,
+        }))) {
+          return Response.json({
+            success: false,
+            error: { code: 'retryable', message: 'off-chain receipt not found for this participation' },
+          } as SchoolClaimResult, { status: 409 });
         }
-      }
 
-      let issuedConfirmationCode: string;
-      try {
-        issuedConfirmationCode = await this.reserveUniqueConfirmationCode(eventId, subject);
-      } catch {
-        return Response.json({
-          success: false,
-          error: { code: 'retryable', message: '確認コードの発行に失敗しました。時間を置いて再試行してください。' },
-        } as SchoolClaimResult);
-      }
-
-      let result: SchoolClaimResult;
-      try {
-        result = await this.store.submitClaim(body, { confirmationCode: issuedConfirmationCode });
-      } catch (err) {
-        await this.releaseReservedConfirmationCode(eventId, subject, issuedConfirmationCode);
-        throw err;
-      }
-      if (!result.success) {
-        await this.releaseReservedConfirmationCode(eventId, subject, issuedConfirmationCode);
-        return Response.json(result);
-      }
-
-      let confirmationCode = result.confirmationCode;
-      if (!confirmationCode) {
-        const rec = await this.store.getClaimRecord(eventId, subject);
-        confirmationCode = rec?.confirmationCode;
-      }
-      if (confirmationCode) {
-        await this.ensureConfirmationCodeIndexed(eventId, subject, confirmationCode);
-        if (confirmationCode !== issuedConfirmationCode) {
-          await this.releaseReservedConfirmationCode(eventId, subject, issuedConfirmationCode);
-        }
-      }
-
-      if (result.alreadyJoined) {
-        await this.releaseReservedConfirmationCode(eventId, subject, issuedConfirmationCode);
-        let ticketReceipt =
-          confirmationCode
-            ? await this.getParticipationTicketReceipt(eventId, subject, confirmationCode)
-            : null;
+        let ticketReceipt = await this.getParticipationTicketReceipt(eventId, subject, requestedConfirmationCode);
         let needsTicketReceiptBackfill = false;
-        const existingOnchainSnapshot = hasOnchainProof
-          ? null
-          : await this.getLatestWalletTransferSnapshot({
-            eventId,
-            walletAddress,
-            joinToken,
-          });
-        const resolvedOnchainResponseFields = this.buildOnchainClaimResponseFields({
-          txSignature: txSignature ?? existingOnchainSnapshot?.txSignature,
-          receiptPubkey: receiptPubkey ?? existingOnchainSnapshot?.receiptPubkey,
-        });
-
-        if (hasOnchainProof) {
-          if (!ticketReceipt) {
-            // 旧データで receipt が欠損している場合は、on-chain 同期時に再発行して監査整合を回復する。
+        if (!ticketReceipt) {
+          needsTicketReceiptBackfill = true;
+        } else {
+          const verification = await this.verifyParticipationTicketReceipt(ticketReceipt);
+          if (!verification.ok) {
             needsTicketReceiptBackfill = true;
-          } else {
-            const verification = await this.verifyParticipationTicketReceipt(ticketReceipt);
-            if (!verification.ok) {
-              // 既存 receipt が壊れている場合も on-chain 監査を優先し、復旧用 receipt を再生成する。
-              needsTicketReceiptBackfill = true;
-            }
           }
         }
 
@@ -9326,14 +9512,14 @@ export class SchoolStore implements DurableObject {
         if (walletAddress) pii.walletAddress = walletAddress;
         if (joinToken) pii.joinToken = joinToken;
         let onchainAuditEntry: AuditEvent | null = null;
-        if (hasOnchainProof && recipient) {
+        if (recipient) {
           onchainAuditEntry = await this.appendAuditLog(
             'WALLET_CLAIM',
             { type: 'wallet', id: recipient.id },
             {
               eventId,
               status: 'already',
-              ...(confirmationCode ? { confirmationCode } : {}),
+              confirmationCode: requestedConfirmationCode,
               transfer: this.buildClaimTransferPayload({
                 eventId,
                 event,
@@ -9346,24 +9532,110 @@ export class SchoolStore implements DurableObject {
             eventId
           );
         }
-        if (needsTicketReceiptBackfill && confirmationCode && onchainAuditEntry) {
+        if (needsTicketReceiptBackfill && onchainAuditEntry) {
           ticketReceipt = await this.buildParticipationTicketReceipt({
             eventId,
             subject,
-            confirmationCode,
+            confirmationCode: requestedConfirmationCode,
             auditEntry: onchainAuditEntry,
           });
           await this.storeParticipationTicketReceipt(eventId, subject, ticketReceipt);
         }
+        await this.store.resolvePendingClaim(eventId, subject, requestedConfirmationCode);
+        const claimQuota = await this.getWalletOnchainClaimQuotaStatus({
+          eventId,
+          event,
+          walletAddress,
+          joinToken,
+        });
+        return Response.json({
+          success: true,
+          eventName: event.title,
+          alreadyJoined: true,
+          confirmationCode: requestedConfirmationCode,
+          ...(ticketReceipt ? { ticketReceipt } : {}),
+          claimQuota,
+          ...onchainResponseFields,
+        } as SchoolClaimResultSuccess);
+      }
 
-        const alreadyResponse: SchoolClaimResultSuccess = {
-          ...result,
+      const claimQuota = await this.getWalletOnchainClaimQuotaStatus({
+        eventId,
+        event,
+        walletAddress,
+        joinToken,
+      });
+      const existingOnchainSnapshot = await this.getLatestWalletTransferSnapshot({
+        eventId,
+        walletAddress,
+        joinToken,
+      });
+      const resolvedOnchainResponseFields = this.buildOnchainClaimResponseFields({
+        txSignature: existingOnchainSnapshot?.txSignature,
+        receiptPubkey: existingOnchainSnapshot?.receiptPubkey,
+      });
+
+      if (pendingClaim) {
+        const ticketReceipt = await this.getParticipationTicketReceipt(eventId, subject, pendingClaim.confirmationCode);
+        return Response.json({
+          success: true,
+          eventName: event.title,
+          alreadyJoined: true,
+          confirmationCode: pendingClaim.confirmationCode,
+          ...(ticketReceipt ? { ticketReceipt } : {}),
+          claimQuota,
+          ...resolvedOnchainResponseFields,
+        } as SchoolClaimResultSuccess);
+      }
+
+      if (!claimQuota.canClaimNow) {
+        const rec = await this.store.getClaimRecord(eventId, subject);
+        const confirmationCode = rec?.confirmationCode;
+        const ticketReceipt =
+          confirmationCode
+            ? await this.getParticipationTicketReceipt(eventId, subject, confirmationCode)
+            : null;
+        return Response.json({
+          success: true,
+          eventName: event.title,
+          alreadyJoined: true,
           ...(confirmationCode ? { confirmationCode } : {}),
           ...(ticketReceipt ? { ticketReceipt } : {}),
+          claimQuota,
           ...resolvedOnchainResponseFields,
-        };
-        return Response.json(alreadyResponse);
+        } as SchoolClaimResultSuccess);
       }
+
+      const costOfForgeryError = await this.enforceCostOfForgeryRisk({
+        request,
+        action: 'wallet_claim',
+        event,
+        eventId,
+        subject,
+        walletAddress: walletAddress ?? undefined,
+        costOfForgeryToken: costOfForgeryToken || undefined,
+      });
+      if (costOfForgeryError) {
+        return Response.json(this.mapCostOfForgeryErrorToSchoolClaimResult(costOfForgeryError), {
+          status: costOfForgeryError.status,
+        });
+      }
+
+      let issuedConfirmationCode = '';
+      try {
+        issuedConfirmationCode = await this.reserveUniqueConfirmationCode(eventId, subject);
+        await this.store.addClaim(eventId, subject, issuedConfirmationCode);
+      } catch {
+        if (issuedConfirmationCode) {
+          await this.releaseReservedConfirmationCode(eventId, subject, issuedConfirmationCode);
+        }
+        return Response.json({
+          success: false,
+          error: { code: 'retryable', message: '確認コードの発行に失敗しました。時間を置いて再試行してください。' },
+        } as SchoolClaimResult);
+      }
+      await this.ensureConfirmationCodeIndexed(eventId, subject, issuedConfirmationCode);
+
       const recipient: TransferParty | null = walletAddress
         ? { type: 'wallet', id: walletAddress }
         : joinToken
@@ -9381,13 +9653,13 @@ export class SchoolStore implements DurableObject {
           {
             eventId,
             status: 'created',
-            ...(confirmationCode ? { confirmationCode } : {}),
+            confirmationCode: issuedConfirmationCode,
             transfer: this.buildClaimTransferPayload({
               eventId,
               event,
               recipient,
-              txSignature,
-              receiptPubkey,
+              txSignature: null,
+              receiptPubkey: null,
             }),
             ...(Object.keys(pii).length > 0 ? { pii } : {}),
           },
@@ -9400,18 +9672,18 @@ export class SchoolStore implements DurableObject {
           {
             eventId,
             status: 'created',
-            ...(confirmationCode ? { confirmationCode } : {}),
+            confirmationCode: issuedConfirmationCode,
           },
           eventId
         );
       }
 
       const ticketReceipt =
-        confirmationCode
+        issuedConfirmationCode
           ? await this.buildParticipationTicketReceipt({
             eventId,
             subject,
-            confirmationCode,
+            confirmationCode: issuedConfirmationCode,
             auditEntry,
           })
           : null;
@@ -9420,10 +9692,12 @@ export class SchoolStore implements DurableObject {
       }
 
       const createdResponse: SchoolClaimResultSuccess = {
-        ...result,
-        ...(confirmationCode ? { confirmationCode } : {}),
+        success: true,
+        eventName: event.title,
+        alreadyJoined: false,
+        confirmationCode: issuedConfirmationCode,
         ...(ticketReceipt ? { ticketReceipt } : {}),
-        ...onchainResponseFields,
+        claimQuota,
       };
       return Response.json(createdResponse);
     }
@@ -9602,27 +9876,46 @@ export class SchoolStore implements DurableObject {
           return Response.json({ error: `on-chain claim proof required: ${invalidReason}` }, { status: 400 });
         }
       }
-      const already = await this.store.hasClaimed(eventId, userId, event);
-      if (!already && hasOnchainProof) {
+      let pendingClaim = await this.store.getPendingClaim(eventId, userId);
+      if (
+        pendingClaim &&
+        await this.hasConfirmedUserOnchainClaimForCode({
+          eventId,
+          confirmationCode: pendingClaim.confirmationCode,
+          userId,
+        })
+      ) {
+        await this.store.resolvePendingClaim(eventId, userId, pendingClaim.confirmationCode);
+        pendingClaim = null;
+      }
+      if (hasOnchainProof) {
         if (!requestedConfirmationCode) {
           return Response.json({
             error: 'on-chain claim requires off-chain receipt verification first',
             code: 'offchain_receipt_required',
           }, { status: 409 });
         }
-
-        let ticketReceipt = await this.getParticipationTicketReceipt(eventId, userId, requestedConfirmationCode);
-        if (!ticketReceipt) {
+        if (!(await this.confirmationCodeBelongsToSubject({
+          eventId,
+          subject: userId,
+          confirmationCode: requestedConfirmationCode,
+        }))) {
           return Response.json({
             error: 'off-chain receipt not found for this participation',
             code: 'offchain_receipt_not_found',
           }, { status: 409 });
         }
+
+        let ticketReceipt = await this.getParticipationTicketReceipt(eventId, userId, requestedConfirmationCode);
         let needsTicketReceiptBackfill = false;
-        const verification = await this.verifyParticipationTicketReceipt(ticketReceipt);
-        if (!verification.ok) {
-          // 旧データで receipt が壊れている場合は on-chain 監査を優先して復旧する。
+        if (!ticketReceipt) {
           needsTicketReceiptBackfill = true;
+        } else {
+          const verification = await this.verifyParticipationTicketReceipt(ticketReceipt);
+          if (!verification.ok) {
+            // 旧データで receipt が壊れている場合は on-chain 監査を優先して復旧する。
+            needsTicketReceiptBackfill = true;
+          }
         }
 
         const displayName = this.normalizeStringField((userRaw as { displayName?: unknown }).displayName);
@@ -9659,7 +9952,12 @@ export class SchoolStore implements DurableObject {
           });
           await this.storeParticipationTicketReceipt(eventId, userId, ticketReceipt);
         }
-        const claimQuota = await this.store.getClaimQuotaStatus(eventId, userId, event);
+        await this.store.resolvePendingClaim(eventId, userId, requestedConfirmationCode);
+        const claimQuota = await this.getUserOnchainClaimQuotaStatus({
+          eventId,
+          event,
+          userId,
+        });
         return Response.json({
           status: 'already',
           confirmationCode: requestedConfirmationCode,
@@ -9668,98 +9966,55 @@ export class SchoolStore implements DurableObject {
           ...onchainResponseFields,
         } as UserClaimResponse);
       }
-      if (!already) {
-        const costOfForgeryError = await this.enforceCostOfForgeryRisk({
-          request,
-          action: 'user_claim',
-          event,
-          eventId,
-          userId,
-          subject: userId,
-          costOfForgeryToken: costOfForgeryToken || undefined,
-        });
-        if (costOfForgeryError) {
-          return this.costOfForgeryErrorResponse(costOfForgeryError);
-        }
-      }
-      if (already) {
-        const rec = await this.store.getClaimRecord(eventId, userId);
-        let confirmationCode = rec?.confirmationCode;
-        if (!confirmationCode) {
-          try {
-            confirmationCode = await this.reserveUniqueConfirmationCode(eventId, userId);
-            await this.store.setLatestClaimConfirmationCode(eventId, userId, confirmationCode);
-          } catch {
-            return Response.json({ error: 'failed to issue confirmation code' }, { status: 500 });
-          }
-        }
-        await this.ensureConfirmationCodeIndexed(eventId, userId, confirmationCode);
-        let ticketReceipt = await this.getParticipationTicketReceipt(eventId, userId, confirmationCode);
-        let needsTicketReceiptBackfill = false;
-        const existingOnchainSnapshot = hasOnchainProof
-          ? null
-          : await this.getLatestUserTransferSnapshot(userId, eventId);
-        const resolvedOnchainResponseFields = this.buildOnchainClaimResponseFields({
-          txSignature: proofFields.txSignature || existingOnchainSnapshot?.txSignature,
-          receiptPubkey: proofFields.receiptPubkey || existingOnchainSnapshot?.receiptPubkey,
-        });
-        if (hasOnchainProof) {
-          if (!ticketReceipt) {
-            // 旧データで receipt が欠損している場合は、on-chain 同期時に再発行して監査整合を回復する。
-            needsTicketReceiptBackfill = true;
-          } else {
-            const verification = await this.verifyParticipationTicketReceipt(ticketReceipt);
-            if (!verification.ok) {
-              // 既存 receipt が壊れている場合も on-chain 監査を優先し、復旧用 receipt を再生成する。
-              needsTicketReceiptBackfill = true;
-            }
-          }
-        }
-        let onchainAuditEntry: AuditEvent | null = null;
-        if (hasOnchainProof) {
-          const displayName = this.normalizeStringField((userRaw as { displayName?: unknown }).displayName);
-          const recipient: TransferParty = proofFields.walletAddress
-            ? { type: 'wallet', id: proofFields.walletAddress }
-            : { type: 'user', id: userId };
-          const pii: Record<string, string> = { userId };
-          if (proofFields.walletAddress) pii.walletAddress = proofFields.walletAddress;
-          if (displayName) pii.displayName = displayName;
-          onchainAuditEntry = await this.appendAuditLog(
-            'USER_CLAIM',
-            { type: 'user', id: userId },
-            {
-              eventId,
-              status: 'already',
-              confirmationCode,
-              transfer: this.buildClaimTransferPayload({
-                eventId,
-                event,
-                recipient,
-                txSignature: proofFields.txSignature,
-                receiptPubkey: proofFields.receiptPubkey,
-              }),
-              pii,
-            },
-            eventId
-          );
-        }
-        if (needsTicketReceiptBackfill && onchainAuditEntry) {
-          ticketReceipt = await this.buildParticipationTicketReceipt({
-            eventId,
-            subject: userId,
-            confirmationCode,
-            auditEntry: onchainAuditEntry,
-          });
-          await this.storeParticipationTicketReceipt(eventId, userId, ticketReceipt);
-        }
-        const claimQuota = await this.store.getClaimQuotaStatus(eventId, userId, event);
+      const claimQuota = await this.getUserOnchainClaimQuotaStatus({
+        eventId,
+        event,
+        userId,
+      });
+      const existingOnchainSnapshot = await this.getLatestUserTransferSnapshot(userId, eventId);
+      const resolvedOnchainResponseFields = this.buildOnchainClaimResponseFields({
+        txSignature: existingOnchainSnapshot?.txSignature,
+        receiptPubkey: existingOnchainSnapshot?.receiptPubkey,
+      });
+
+      if (pendingClaim) {
+        const ticketReceipt = await this.getParticipationTicketReceipt(eventId, userId, pendingClaim.confirmationCode);
         return Response.json({
           status: 'already',
-          confirmationCode,
+          confirmationCode: pendingClaim.confirmationCode,
           ...(ticketReceipt ? { ticketReceipt } : {}),
           claimQuota,
           ...resolvedOnchainResponseFields,
         } as UserClaimResponse);
+      }
+
+      if (!claimQuota.canClaimNow) {
+        const rec = await this.store.getClaimRecord(eventId, userId);
+        const confirmationCode = rec?.confirmationCode;
+        const ticketReceipt =
+          confirmationCode
+            ? await this.getParticipationTicketReceipt(eventId, userId, confirmationCode)
+            : null;
+        return Response.json({
+          status: 'already',
+          ...(confirmationCode ? { confirmationCode } : {}),
+          ...(ticketReceipt ? { ticketReceipt } : {}),
+          claimQuota,
+          ...resolvedOnchainResponseFields,
+        } as UserClaimResponse);
+      }
+
+      const costOfForgeryError = await this.enforceCostOfForgeryRisk({
+        request,
+        action: 'user_claim',
+        event,
+        eventId,
+        userId,
+        subject: userId,
+        costOfForgeryToken: costOfForgeryToken || undefined,
+      });
+      if (costOfForgeryError) {
+        return this.costOfForgeryErrorResponse(costOfForgeryError);
       }
       let confirmationCode: string | null = null;
       try {
@@ -9799,8 +10054,8 @@ export class SchoolStore implements DurableObject {
             eventId,
             event,
             recipient,
-            txSignature: hasOnchainProof ? proofFields.txSignature : body.txSignature,
-            receiptPubkey: hasOnchainProof ? proofFields.receiptPubkey : body.receiptPubkey,
+            txSignature: null,
+            receiptPubkey: null,
           }),
           pii,
         },
@@ -9813,14 +10068,12 @@ export class SchoolStore implements DurableObject {
         auditEntry,
       });
       await this.storeParticipationTicketReceipt(eventId, userId, ticketReceipt);
-      const claimQuota = await this.store.getClaimQuotaStatus(eventId, userId, event);
 
       return Response.json({
         status: 'created',
         confirmationCode,
         ticketReceipt,
         claimQuota,
-        ...onchainResponseFields,
       } as UserClaimResponse);
     }
 

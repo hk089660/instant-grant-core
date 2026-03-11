@@ -22,6 +22,7 @@ export function createHttpSchoolClaimClient(options: HttpSchoolClaimClientOption
           eventId,
           walletAddress: opts?.walletAddress,
           joinToken: opts?.joinToken,
+          confirmationCode: opts?.confirmationCode,
           txSignature: opts?.txSignature,
           receiptPubkey: opts?.receiptPubkey,
           costOfForgeryToken: opts?.costOfForgeryToken,
