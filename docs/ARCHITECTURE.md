@@ -2,6 +2,12 @@
 
 この文書では、we-ne / instant-grant-core の全体アーキテクチャを高水準で整理します。現在のプロトタイプは、Solana プログラム、Cloudflare Worker API、Expo / Cloudflare Pages フロントエンドの 3 層で構成されています。
 
+補足:
+
+- 現行 repository は **Phase 1: 機能検証の PoC** です
+- 目標は **Phase 2: 自律的で動的なセキュリティ基盤** です
+- 詳細な思想背景は [DESIGN_PRINCIPLES.md](./DESIGN_PRINCIPLES.md) を参照してください
+
 ## システム概要
 
 ```text
@@ -37,6 +43,49 @@
 │  - ClaimReceipt による二重 claim 防止                              │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+## フェーズ構造
+
+| フェーズ | 位置づけ | アーキテクチャ上の意味 |
+| --- | --- | --- |
+| Phase 1 | 現在の repo | UX、L1 / L2 連動、PoP、hash chain、監査導線を短期間で検証する PoC |
+| Phase 2 | 目標 | 単一鍵、静的導線、中央集約境界を減らし、検知、隔離、零化、復旧を内包する基盤 |
+
+## 次フェーズで目指すアーキテクチャ
+
+現行アーキテクチャは「機能を成立させる最短経路」を優先しています。次フェーズでは、特に次の 2 つを置き換える前提です。
+
+### 1. 単一 signer / 中央集約境界の縮小
+
+現在の `api-worker` は PoP signer と運用制御の中心です。これは PoC としては合理的ですが、本命構成では長寿命の単一鍵をエッジ境界へ置き続けない方針です。
+
+方向性:
+
+- TEE / secure enclave を使った署名環境
+- エフェメラル鍵のラチェット
+- role-key separation
+- threshold signer / multisig
+
+### 2. 物理空間の静的入口の縮小
+
+会場導線に静的 QR や紙の URL を残すと、盗撮や再利用の余地が残ります。次フェーズでは、物理層を短寿命の動的導線へ切り替える前提です。
+
+方向性:
+
+- 会場タブレットでの動的 QR
+- TOTP ベースのワンタイムコード
+- 数秒単位での無効化と更新
+
+### 3. 復旧を前提にした防御
+
+Phase 2 の防御原則は「防ぐ」だけではなく、侵害時に次を行うことです。
+
+- 検知する
+- 隔離する
+- 零化する
+- 証跡を壊さずに復旧する
+
+これは `Moving Target Defense`、`zeroization`、`evidence-preserving recovery` を組み合わせる方向です。
 
 ## 主要コンポーネント
 
@@ -174,11 +223,12 @@
 | --- | --- |
 | Phantom Wallet | 秘密鍵保持とユーザー承認を担う |
 | `wene-mobile` | 鍵を保持せず、トランザクションや API 呼び出しを組み立てる |
-| `api-worker` | off-chain 運用と監査を司る中央集約境界。現時点では trust assumption の中心 |
+| `api-worker` | off-chain 運用と監査を司る中央集約境界。現時点では trust assumption の中心であり、Phase 2 では縮小対象 |
 | Solana | 署名検証、状態遷移、receipt 記録を担う trustless 層 |
 
 ## 補足ドキュメント
 
 - [DEVELOPMENT.md](./DEVELOPMENT.md): 開発環境と実行手順
+- [DESIGN_PRINCIPLES.md](./DESIGN_PRINCIPLES.md): 設計思想、Phase 1 / Phase 2 の位置づけ
 - [SECURITY.md](./SECURITY.md): 脅威分析と残余リスク
 - [ROADMAP.md](./ROADMAP.md): 分散化とパイロット計画

@@ -1,5 +1,9 @@
 # instant-grant-core
 
+[![CI](https://github.com/hk089660/instant-grant-core/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hk089660/instant-grant-core/actions/workflows/ci.yml)
+[![Local Validation](https://img.shields.io/badge/local_validation-2026--03--12-passed-success)](#local-validation-snapshot)
+[![Public Readiness](https://img.shields.io/badge/public_readiness-11%2F11%20checks%20passed-success)](#validation-and-deployment-checks)
+
 Prototype platform for addressing the social problem of black-box grant administration by making school participation operations and grant operations auditable on Solana.
 This repository combines an Anchor program, a Cloudflare Worker API, and an Expo / Cloudflare Pages frontend for the We-ne / Asuka Network Core prototype.
 
@@ -12,6 +16,34 @@ _We-ne mobile flow from first-time registration to event participation and token
 ## At a Glance
 
 This README reflects the public-environment snapshot from 2026-03-10 plus implementation updates through 2026-03-12.
+
+### Current Status
+
+| Area | Status | Latest signal |
+| --- | --- | --- |
+| CI | active | GitHub Actions `CI` runs on `push`, `pull_request`, and `workflow_dispatch`, covering lockfile policy, Rust, Anchor, Worker, and mobile checks |
+| `grant_program` | passing | `cargo check --all-features`, `cargo clippy --all-targets -- -D warnings`, `anchor build`, and `anchor test --skip-build --provider.cluster localnet` were rerun on 2026-03-12 |
+| `api-worker` | passing | `npm test` passed with 86 tests, and `npx tsc --noEmit` passed |
+| `wene-mobile` | passing | `npm run test:server` passed with 22 tests, and `npx tsc --noEmit` passed |
+| public readiness | passing | `npm run verify:production` reported 11/11 checks passed on 2026-03-10 |
+| code maturity | Phase 1 PoC | automated checks exist, but the trust model is still prototype-centralized and the next phase explicitly targets single-key and static-entry weaknesses |
+
+### Design Direction
+
+This repository is not presented as a finished trustless system. It is **Phase 1: a functional PoC** focused on validating UX, L1 / L2 linkage, PoP, hash-chain-backed auditability, and real operator flows.
+
+The intended next phase is a **dynamic security substrate that can detect attacks, zeroize vulnerable surfaces, isolate damage, and recover without destroying evidence**. The two main explicit weaknesses being carried forward are:
+
+- a still-centralized signer / operator boundary around `api-worker`
+- reliance on static venue-entry surfaces such as QR-based offline entry points
+
+The planned direction is:
+
+- network / control plane: TEE or secure enclave signing, ephemeral key ratchets, role-key separation, threshold signer / multisig
+- physical / venue plane: TOTP-backed dynamic QR, short-lived tokens, stronger anti-replay venue flows
+- recovery plane: detection, isolation, zeroization, and evidence-preserving cutover / recovery
+
+For the full design rationale, see [docs/DESIGN_PRINCIPLES.md](./docs/DESIGN_PRINCIPLES.md).
 
 ### Public Surfaces
 
@@ -42,12 +74,14 @@ Admin demo passcode: `83284ab4d9874e54b301dcf7ea6a6056`
 
 | Area | Command | Verified on | Result |
 | --- | --- | --- | --- |
+| `grant_program` | `cargo check --all-features` | 2026-03-12 | passed |
+| `grant_program` | `cargo clippy --all-targets -- -D warnings` | 2026-03-12 | passed |
+| `grant_program` | `anchor build` | 2026-03-12 | passed |
+| `grant_program` | `anchor test --skip-build --provider.cluster localnet` | 2026-03-12 | 4 tests passed |
 | `api-worker` | `npm test` | 2026-03-12 | 86 tests passed |
 | `wene-mobile` | `npm run test:server` | 2026-03-12 | 22 tests passed |
 | `api-worker` | `npx tsc --noEmit` | 2026-03-12 | passed |
 | `wene-mobile` | `npx tsc --noEmit` | 2026-03-12 | passed |
-| `grant_program` | `anchor build` | 2026-03-10 | passed |
-| `grant_program` | `anchor test --skip-build --provider.cluster localnet` | 2026-03-10 | passed |
 | root | `npm run check:lockfiles` | 2026-03-10 | passed |
 | root | `npm run verify:production` | 2026-03-10 | 11/11 checks passed |
 
