@@ -27,6 +27,7 @@ import {
   getClaimQuotaUsageLabel,
   supportsRepeatClaimPolicy,
 } from '../../utils/claimQuota';
+import { selectCodeScopedStoredOnchainProof } from '../../utils/codeScopedOnchainProof';
 
 function shortenCode(value: string, head = 8, tail = 8): string {
   const normalized = value.trim();
@@ -210,17 +211,19 @@ export const UserSuccessScreen: React.FC = () => {
   const reflectedOnchain = reflectedParam === '1';
   const onchainBlockedByPeriod = onchainBlockedParam === '1';
   const storedTicket = targetEventId ? getTicketByEventId(targetEventId) : undefined;
-  const fallbackTx = txSignature ?? normalizeOptionalString(storedTicket?.txSignature);
-  const fallbackReceipt = receiptPubkey ?? normalizeOptionalString(storedTicket?.receiptPubkey);
-  const resolvedMintAddress = mintAddress ?? storedTicket?.mintAddress;
   const resolvedConfirmationCode =
     (typeof confirmationCodeParam === 'string' && confirmationCodeParam.trim() ? confirmationCodeParam.trim() : undefined) ??
     storedTicket?.confirmationCode;
+  const storedCurrentOnchainProof = useMemo(
+    () => selectCodeScopedStoredOnchainProof(storedTicket, resolvedConfirmationCode),
+    [storedTicket, resolvedConfirmationCode]
+  );
+  const resolvedMintAddress = mintAddress ?? storedTicket?.mintAddress;
   const resolvedAuditReceiptId = auditReceiptId ?? storedTicket?.auditReceiptId;
   const resolvedAuditReceiptHash = auditReceiptHash ?? storedTicket?.auditReceiptHash;
-  const resolvedPopEntryHash = popEntryHash ?? storedTicket?.popEntryHash;
-  const resolvedPopAuditHash = popAuditHash ?? storedTicket?.popAuditHash;
-  const resolvedPopSigner = popSigner ?? storedTicket?.popSigner;
+  const resolvedPopEntryHash = popEntryHash ?? storedCurrentOnchainProof.popEntryHash;
+  const resolvedPopAuditHash = popAuditHash ?? storedCurrentOnchainProof.popAuditHash;
+  const resolvedPopSigner = popSigner ?? storedCurrentOnchainProof.popSigner;
   const resolvedClaimQuota = storedTicket?.claimQuota;
   const isWalletConnected = Boolean(walletPubkey);
   const isUserLoggedIn = Boolean(userId);
@@ -231,14 +234,37 @@ export const UserSuccessScreen: React.FC = () => {
   const claimPolicyLabel = formatClaimPolicyLabel(resolvedClaimQuota ?? event);
   const nextAvailableLabel = formatClaimQuotaNextAvailableAt(resolvedClaimQuota?.nextAvailableAt);
   const txParamClaimedAt = useRef(Date.now()).current;
+  const currentOnchainTxHistory = useMemo(
+    () =>
+      normalizeOnchainTxHistory([
+        {
+          txSignature: storedCurrentOnchainProof.txSignature,
+          receiptPubkey: storedCurrentOnchainProof.receiptPubkey,
+          claimedAt: storedCurrentOnchainProof.claimedAt,
+        },
+        {
+          txSignature,
+          receiptPubkey,
+          claimedAt: txParamClaimedAt,
+        },
+      ]),
+    [
+      storedCurrentOnchainProof.txSignature,
+      storedCurrentOnchainProof.receiptPubkey,
+      storedCurrentOnchainProof.claimedAt,
+      txSignature,
+      receiptPubkey,
+      txParamClaimedAt,
+    ]
+  );
   const onchainTxHistory = useMemo(
     () =>
       normalizeOnchainTxHistory([
         ...(storedTicket?.onchainReceipts ?? []),
         {
-          txSignature: storedTicket?.txSignature,
-          receiptPubkey: storedTicket?.receiptPubkey,
-          claimedAt: storedTicket?.joinedAt,
+          txSignature: storedCurrentOnchainProof.txSignature,
+          receiptPubkey: storedCurrentOnchainProof.receiptPubkey,
+          claimedAt: storedCurrentOnchainProof.claimedAt,
         },
         {
           txSignature,
@@ -248,16 +274,16 @@ export const UserSuccessScreen: React.FC = () => {
       ]),
     [
       storedTicket?.onchainReceipts,
-      storedTicket?.txSignature,
-      storedTicket?.receiptPubkey,
-      storedTicket?.joinedAt,
+      storedCurrentOnchainProof.txSignature,
+      storedCurrentOnchainProof.receiptPubkey,
+      storedCurrentOnchainProof.claimedAt,
       txSignature,
       receiptPubkey,
       txParamClaimedAt,
     ]
   );
-  const resolvedTx = onchainTxHistory[0]?.txSignature ?? fallbackTx;
-  const resolvedReceipt = onchainTxHistory[0]?.receiptPubkey ?? fallbackReceipt;
+  const resolvedTx = currentOnchainTxHistory[0]?.txSignature ?? txSignature;
+  const resolvedReceipt = currentOnchainTxHistory[0]?.receiptPubkey ?? receiptPubkey;
   const checkScale = useRef(new Animated.Value(0.7)).current;
   const checkOpacity = useRef(new Animated.Value(0)).current;
   const ringScale = useRef(new Animated.Value(0.75)).current;
@@ -374,7 +400,7 @@ export const UserSuccessScreen: React.FC = () => {
 
   const isAlready = alreadyParam === '1' || statusParam === 'already';
   const explorerTxUrl =
-    onchainTxHistory[0]?.txExplorerUrl ??
+    currentOnchainTxHistory[0]?.txExplorerUrl ??
     explorerTxUrlParam ??
     buildExplorerTxUrl(resolvedTx) ??
     null;
@@ -383,7 +409,7 @@ export const UserSuccessScreen: React.FC = () => {
   const hasOffchainReceipt = Boolean(
     resolvedConfirmationCode || resolvedAuditReceiptId || resolvedAuditReceiptHash
   );
-  const hasOnchainReceipt = onchainTxHistory.length > 0 || Boolean(explorerTxUrl);
+  const hasOnchainReceipt = currentOnchainTxHistory.length > 0 || Boolean(explorerTxUrl);
   const eventSupportsOnchainReceive = Boolean(
     event?.solanaMint && event?.solanaAuthority && event?.solanaGrantId
   );
