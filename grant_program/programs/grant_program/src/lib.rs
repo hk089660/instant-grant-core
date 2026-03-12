@@ -33,11 +33,18 @@ const POP_MESSAGE_LEN_V1: usize = 1 + 32 + 32 + 8 + 32 + 32 + 32 + 8;
 const POP_MESSAGE_LEN_V2: usize = 1 + 32 + 32 + 8 + 32 + 32 + 32 + 32 + 8;
 const POP_MAX_SKEW_SECONDS: i64 = 600; // 10 minutes
 
+// ===== PoP（Proof of Process）が保証すること =====
+// PoP は「特定の signer が認証したプロセスレシートが、当該 claim に binding されている」こと
+// ——すなわち signer-authenticated process receipt binding——を保証する。
+// 「オンチェーン canonical chain の連続性」は PoP の要求仕様に含まない。
+// chain head（last_global_hash / last_stream_hash）はベスト・エフォートで最新値に追従するが、
+// 並行 claim を拒否しない。唯一の二重受給ガードは receipt PDA の init-dup である。
+
 #[program]
 pub mod grant_program {
     use super::*;
 
-    /// Grant（給付キャンペーン）を作成する
+    /// Grant（給付キャンペーン）を新規作成する
     /// - mint: 配布するSPLトークン
     /// - amount_per_period: 1期間あたりの配布量（最小単位）
     /// - period_seconds: 期間秒（MVPは月次=2,592,000を推奨）
@@ -45,6 +52,8 @@ pub mod grant_program {
     /// - expires_at: 期限（0なら無期限）
     ///
     /// NOTE: 固定レート方式のため「円換算」はオフチェーン運用ルール。
+    /// SECURITY: init を使うため、同一 PDA への再呼び出しは Anchor がエラーとする。
+    ///           パラメータを変更する場合は update_grant を使うこと。
     pub fn create_grant(
         ctx: Context<CreateGrant>,
         grant_id: u64,
@@ -74,6 +83,27 @@ pub mod grant_program {
         grant.merkle_root = [0u8; 32];
         grant.paused = false;
         grant.bump = ctx.bumps.grant;
+
+        Ok(())
+    }
+
+    /// Grant パラメータを明示的に更新する（authority 限定）
+    /// create_grant とは別命令として分離することで、更新意図を明示的かつ監査可能にする。
+    /// - amount_per_period / period_seconds は既に受給が始まっている場合は変更注意。
+    /// - mint / vault / grant_id は変更不可（PDA seed に含まれるため）。
+    pub fn update_grant(
+        ctx: Context<UpdateGrant>,
+        amount_per_period: u64,
+        period_seconds: i64,
+        expires_at: i64,
+    ) -> Result<()> {
+        require!(amount_per_period > 0, ErrorCode::InvalidAmount);
+        require!(period_seconds > 0, ErrorCode::InvalidPeriod);
+
+        let grant = &mut ctx.accounts.grant;
+        grant.amount_per_period = amount_per_period;
+        grant.period_seconds = period_seconds;
+        grant.expires_at = expires_at;
 
         Ok(())
     }
@@ -272,8 +302,10 @@ pub mod grant_program {
 #[derive(Accounts)]
 #[instruction(grant_id: u64)]
 pub struct CreateGrant<'info> {
+    /// init: 同一 PDA への再呼び出しは Anchor がエラーとする（隠れ更新を防ぐ）。
+    /// パラメータ変更は update_grant 命令を使うこと。
     #[account(
-        init_if_needed,
+        init,
         payer = authority,
         space = 8 + Grant::INIT_SPACE,
         seeds = [b"grant", authority.key().as_ref(), mint.key().as_ref(), &grant_id.to_le_bytes()],
@@ -285,7 +317,7 @@ pub struct CreateGrant<'info> {
 
     /// Program-owned vault (TokenAccount). Authority is the grant PDA.
     #[account(
-        init_if_needed,
+        init,
         payer = authority,
         token::mint = mint,
         token::authority = grant,
@@ -300,6 +332,19 @@ pub struct CreateGrant<'info> {
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct UpdateGrant<'info> {
+    #[account(
+        mut,
+        has_one = authority,
+        seeds = [b"grant", authority.key().as_ref(), grant.mint.as_ref(), &grant.grant_id.to_le_bytes()],
+        bump = grant.bump
+    )]
+    pub grant: Account<'info, Grant>,
+
+    pub authority: Signer<'info>,
 }
 
 #[derive(Accounts)]

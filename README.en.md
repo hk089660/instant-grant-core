@@ -68,6 +68,9 @@ Admin demo passcode: `83284ab4d9874e54b301dcf7ea6a6056`
 - `api-worker` `POST /v1/school/pop-proof` now reuses a fresh proof for the same claim request, preventing unnecessary PoP chain advancement when users or admins retry from another device
 - PoP proof issuance is still serialized with `popProofLock`, so both concurrent access and rapid repeated retries are handled on the Worker side
 - Combined with duplicate `solanaAuthority + solanaMint + solanaGrantId` rejection, this reduces grant-scoped PoP stream contention in multi-terminal operations
+- Added `update_grant` instruction to `grant_program` and changed `create_grant` from `init_if_needed` to `init`, eliminating the hidden update capability. Grant parameter changes now require an explicit `update_grant` call
+- Documented PoP's guarantee as **signer-authenticated process receipt binding** in both code comments and README
+- Clarified the dual-backend structure: `wene-mobile/server` is a test-only stub; `api-worker` is the sole production backend
 - The `api-worker` regression check for this change was rerun with `npm test`, and passed with `86 tests passed`
 
 ### Local Validation Snapshot
@@ -92,8 +95,11 @@ Admin demo passcode: `83284ab4d9874e54b301dcf7ea6a6056`
 | Directory | Role | Notes |
 | --- | --- | --- |
 | `grant_program/` | Solana program built with Anchor | Handles on-chain grant claim execution. On-chain claims require PoP-linked claim evidence inside claim instructions. |
-| `api-worker/` | Cloudflare Worker + Durable Object backend | Issues off-chain participation receipts, exposes admin/master audit APIs, and publishes readiness endpoints. |
+| `api-worker/` | Production backend (Cloudflare Worker + Durable Object) | Issues off-chain participation receipts, exposes admin/master audit APIs, and publishes readiness endpoints. The sole runtime for production and Devnet. |
 | `wene-mobile/` | Expo application for user, admin, and local master flows | Deployed as Cloudflare Pages for the web surfaces. |
+| `wene-mobile/server/` | Test and local-dev stub only (Node.js / Express) | **Not a production backend.** Used only by `npm run test:server` (Vitest) and local development. Storage is in-memory (volatile). PoP and audit chain are not implemented. |
+
+> **Why two backends?** `api-worker` is the sole production backend. `wene-mobile/server` is a Node.js equivalent stub of the same API surface used exclusively for unit tests. Nothing in `wene-mobile/server` is ever deployed.
 
 ### Implemented Flows
 
@@ -106,6 +112,16 @@ Admin demo passcode: `83284ab4d9874e54b301dcf7ea6a6056`
 - API guardrails for rate limiting, payload limits, and Cost of Forgery integration hooks
 
 ## Trust and Verification Model
+
+### What PoP (Proof of Process) guarantees
+
+**PoP guarantees that a specific signer has authenticated a process receipt that is binding to the claim being executed — that is, a *signer-authenticated process receipt binding*.**
+
+- PoP does **not** guarantee continuity of an on-chain canonical chain. The chain head (`last_global_hash` / `last_stream_hash`) advances on a best-effort basis and does not reject concurrent claims.
+- The sole on-chain double-claim guard is the receipt PDA `init` constraint: a second initialization for the same period fails at the Anchor level.
+- Including a non-zero `audit_hash` in the v2 message format is mandatory; a zero field is rejected.
+
+### Trust boundary and verification
 
 - Off-chain Attend can be verified through public receipt APIs such as `POST /api/audit/receipts/verify-code`, but this still relies on the Worker and stored audit data.
 - On-chain Redeem can be verified independently from Solana transaction and account state.

@@ -633,6 +633,8 @@ To make the project easier to build and verify for contributors and third partie
 * CI: Added `.github/workflows/ci.yml` so every push / PR can run lockfile policy, `api-worker` Vitest, `wene-mobile` server tests + TypeScript check, and Anchor build / test
 * Docs: `../docs/DEVELOPMENT.md` updated with root-level build/test and CI usage
 * Double-claim fix: In `grant_program`, the claim receipt account was changed from `init_if_needed` to `init`. This correctly rejects a second claim in the same period (receipt PDA already exists, so init fails). All Anchor tests, including "claimer can claim once per period", now pass.
+* Hidden update removed from `create_grant`: The `grant` and `vault` account constraints were changed from `init_if_needed` to `init`. Re-calling `create_grant` for the same grant ID now fails at the Anchor level, closing the hidden update path. To modify grant parameters (`amount_per_period`, `period_seconds`, `expires_at`), use the new `update_grant` instruction.
+* Dual-backend clarified: `wene-mobile/server/` is a Node.js / Express stub used only for `npm run test:server` and local development. It is not a production backend and is never deployed. The sole production backend is `api-worker` (Cloudflare Workers + Durable Object).
 
 ---
 

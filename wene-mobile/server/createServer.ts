@@ -1,5 +1,10 @@
 /**
- * テスト起動しやすい HTTP サーバ
+ * 【開発・テスト専用】Express スタブ API
+ *
+ * このサーバは本番バックエンドではない。
+ * 本番は api-worker（Cloudflare Workers + Durable Object）を使用する。
+ * 詳細: wene-mobile/server/index.ts の先頭コメントを参照。
+ *
  * PORT=0 で起動可能（port 衝突回避）
  */
 
