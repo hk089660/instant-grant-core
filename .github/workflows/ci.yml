@@ -1,12 +1,19 @@
-# we-ne: Build and test (contract + mobile)
-# Third-party / contributor build verification
+# we-ne: build, lint, and automated test checks
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   SOLANA_VERSION: "1.18.0"
@@ -33,7 +40,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
@@ -44,6 +51,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: grant_program/package-lock.json
+
+      - name: Rust checks
+        working-directory: grant_program/programs/grant_program
+        run: |
+          cargo check --all-features
+          cargo clippy --all-targets -- -D warnings
 
       - name: Cache Solana CLI tools
         uses: actions/cache@v4
@@ -78,11 +93,36 @@ jobs:
           solana-keygen new --no-bip39-passphrase --silent -o "$ANCHOR_WALLET"
           anchor test --skip-build --provider.cluster localnet
 
-  mobile:
-    name: Mobile app (Expo / TypeScript)
+  api_worker:
+    name: API worker (Vitest + TypeScript)
     runs-on: ubuntu-latest
     needs: lockfile_policy
-    # School claim flow (useSchoolClaim, schoolRoutes, eventId, Result types) validated via tsc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: api-worker/package-lock.json
+
+      - name: Install dependencies
+        working-directory: api-worker
+        run: npm ci
+
+      - name: Run tests
+        working-directory: api-worker
+        run: npm test
+
+      - name: Type check
+        working-directory: api-worker
+        run: npx tsc --noEmit
+
+  mobile:
+    name: Mobile app (Vitest + TypeScript)
+    runs-on: ubuntu-latest
+    needs: lockfile_policy
     steps:
       - uses: actions/checkout@v4
 
@@ -96,6 +136,10 @@ jobs:
       - name: Install dependencies
         working-directory: wene-mobile
         run: npm ci --legacy-peer-deps
+
+      - name: Run server tests
+        working-directory: wene-mobile
+        run: npm run test:server
 
       - name: Type check
         working-directory: wene-mobile

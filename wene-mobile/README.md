@@ -630,7 +630,7 @@ To make the project easier to build and verify for contributors and third partie
 
   * `wene-mobile/.npmrc (legacy-peer-deps=true)`
   * `--legacy-peer-deps` in root scripts and CI
-* CI: Added `.github/workflows/ci.yml` so every push/PR runs Anchor build & test and mobile install & TypeScript check
+* CI: Added `.github/workflows/ci.yml` so every push / PR can run lockfile policy, `api-worker` Vitest, `wene-mobile` server tests + TypeScript check, and Anchor build / test
 * Docs: `../docs/DEVELOPMENT.md` updated with root-level build/test and CI usage
 * Double-claim fix: In `grant_program`, the claim receipt account was changed from `init_if_needed` to `init`. This correctly rejects a second claim in the same period (receipt PDA already exists, so init fails). All Anchor tests, including "claimer can claim once per period", now pass.
 

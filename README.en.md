@@ -36,16 +36,16 @@ Admin demo passcode: `83284ab4d9874e54b301dcf7ea6a6056`
 - `api-worker` `POST /v1/school/pop-proof` now reuses a fresh proof for the same claim request, preventing unnecessary PoP chain advancement when users or admins retry from another device
 - PoP proof issuance is still serialized with `popProofLock`, so both concurrent access and rapid repeated retries are handled on the Worker side
 - Combined with duplicate `solanaAuthority + solanaMint + solanaGrantId` rejection, this reduces grant-scoped PoP stream contention in multi-terminal operations
-- The `api-worker` regression check for this change was rerun with `npm test`, and passed with `84 tests passed`
+- The `api-worker` regression check for this change was rerun with `npm test`, and passed with `86 tests passed`
 
 ### Local Validation Snapshot
 
 | Area | Command | Verified on | Result |
 | --- | --- | --- | --- |
-| `api-worker` | `npm test` | 2026-03-12 | 84 tests passed |
-| `wene-mobile` | `npm run test:server` | 2026-03-10 | 18 tests passed |
-| `api-worker` | `npx tsc --noEmit` | 2026-03-10 | passed |
-| `wene-mobile` | `npx tsc --noEmit` | 2026-03-10 | passed |
+| `api-worker` | `npm test` | 2026-03-12 | 86 tests passed |
+| `wene-mobile` | `npm run test:server` | 2026-03-12 | 22 tests passed |
+| `api-worker` | `npx tsc --noEmit` | 2026-03-12 | passed |
+| `wene-mobile` | `npx tsc --noEmit` | 2026-03-12 | passed |
 | `grant_program` | `anchor build` | 2026-03-10 | passed |
 | `grant_program` | `anchor test --skip-build --provider.cluster localnet` | 2026-03-10 | passed |
 | root | `npm run check:lockfiles` | 2026-03-10 | passed |

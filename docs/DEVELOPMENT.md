@@ -123,13 +123,22 @@ GitHub Actions では主に以下を検証します。
 
 - lockfile policy
   - `yarn.lock`、`pnpm-lock.yaml`、非正規 lockfile 名を拒否
+- `api-worker`
+  - `npm ci`
+  - `npm test`
+  - `npx tsc --noEmit`
 - `grant_program`
+  - `cargo check --all-features`
+  - `cargo clippy --all-targets -- -D warnings`
   - `npm ci`
   - `anchor build`
-  - `anchor test`
+  - `anchor test --skip-build --provider.cluster localnet`
 - `wene-mobile`
   - `npm ci --legacy-peer-deps`
+  - `npm run test:server`
   - `npx tsc --noEmit`
+
+workflow 定義は [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) にあります。push / pull request に加えて manual dispatch にも対応しています。
 
 ## リポジトリ構成
 

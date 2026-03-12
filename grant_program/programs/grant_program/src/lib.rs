@@ -99,7 +99,7 @@ pub mod grant_program {
     }
 
     /// 受給（期間内1回のみ）
-    pub fn claim_grant(mut ctx: Context<ClaimGrant>, period_index: u64) -> Result<()> {
+    pub fn claim_grant(ctx: Context<ClaimGrant>, period_index: u64) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
 
         require!(!ctx.accounts.grant.paused, ErrorCode::Paused);
@@ -109,7 +109,7 @@ pub mod grant_program {
             ErrorCode::AllowlistRequired
         );
 
-        verify_and_record_pop_proof(&mut ctx.accounts, period_index, now, ctx.bumps.pop_state)?;
+        verify_and_record_pop_proof(ctx.accounts, period_index, now, ctx.bumps.pop_state)?;
         let grant = &ctx.accounts.grant;
         require_claim_timing(grant, now, period_index)?;
         // receipt PDA の seed に period_index が含まれているため
@@ -223,7 +223,7 @@ pub mod grant_program {
     /// allowlist（Merkle）を用いた受給
     /// - Grant に merkle_root が設定されている場合はこちらを使用
     pub fn claim_grant_with_proof(
-        mut ctx: Context<ClaimGrant>,
+        ctx: Context<ClaimGrant>,
         period_index: u64,
         proof: Vec<[u8; 32]>,
     ) -> Result<()> {
@@ -244,7 +244,7 @@ pub mod grant_program {
             ErrorCode::NotInAllowlist
         );
 
-        verify_and_record_pop_proof(&mut ctx.accounts, period_index, now, ctx.bumps.pop_state)?;
+        verify_and_record_pop_proof(ctx.accounts, period_index, now, ctx.bumps.pop_state)?;
         let grant = &ctx.accounts.grant;
         require_claim_timing(grant, now, period_index)?;
         transfer_from_vault(
@@ -623,6 +623,17 @@ fn record_receipt(
     receipt.claimed_at = claimed_at;
 }
 
+struct PopEntryHashInput<'a> {
+    version: u8,
+    prev_hash: &'a [u8; 32],
+    stream_prev_hash: &'a [u8; 32],
+    audit_hash: &'a [u8; 32],
+    grant: &'a Pubkey,
+    claimer: &'a Pubkey,
+    period_index: u64,
+    issued_at: i64,
+}
+
 #[derive(Clone)]
 struct PopProofMessage {
     version: u8,
@@ -681,16 +692,16 @@ fn verify_and_record_pop_proof<'info>(
         ErrorCode::PopAuditHashMissing
     );
 
-    let expected_entry_hash = pop_entry_hash(
-        message.version,
-        &message.prev_hash,
-        &message.stream_prev_hash,
-        &message.audit_hash,
-        &message.grant,
-        &message.claimer,
-        message.period_index,
-        message.issued_at,
-    )?;
+    let expected_entry_hash = pop_entry_hash(PopEntryHashInput {
+        version: message.version,
+        prev_hash: &message.prev_hash,
+        stream_prev_hash: &message.stream_prev_hash,
+        audit_hash: &message.audit_hash,
+        grant: &message.grant,
+        claimer: &message.claimer,
+        period_index: message.period_index,
+        issued_at: message.issued_at,
+    })?;
     require!(
         expected_entry_hash == message.entry_hash,
         ErrorCode::PopEntryHashMismatch
@@ -816,36 +827,27 @@ fn parse_pop_message(message: &[u8]) -> Result<PopProofMessage> {
     })
 }
 
-fn pop_entry_hash(
-    version: u8,
-    prev_hash: &[u8; 32],
-    stream_prev_hash: &[u8; 32],
-    audit_hash: &[u8; 32],
-    grant: &Pubkey,
-    claimer: &Pubkey,
-    period_index: u64,
-    issued_at: i64,
-) -> Result<[u8; 32]> {
-    let period_bytes = period_index.to_le_bytes();
-    let issued_at_bytes = issued_at.to_le_bytes();
-    match version {
+fn pop_entry_hash(input: PopEntryHashInput<'_>) -> Result<[u8; 32]> {
+    let period_bytes = input.period_index.to_le_bytes();
+    let issued_at_bytes = input.issued_at.to_le_bytes();
+    match input.version {
         POP_MESSAGE_VERSION_V1 => Ok(hashv(&[
             b"we-ne:pop:v1",
-            prev_hash.as_ref(),
-            stream_prev_hash.as_ref(),
-            grant.as_ref(),
-            claimer.as_ref(),
+            input.prev_hash.as_ref(),
+            input.stream_prev_hash.as_ref(),
+            input.grant.as_ref(),
+            input.claimer.as_ref(),
             period_bytes.as_ref(),
             issued_at_bytes.as_ref(),
         ])
         .to_bytes()),
         POP_MESSAGE_VERSION_V2 => Ok(hashv(&[
             b"we-ne:pop:v2",
-            prev_hash.as_ref(),
-            stream_prev_hash.as_ref(),
-            audit_hash.as_ref(),
-            grant.as_ref(),
-            claimer.as_ref(),
+            input.prev_hash.as_ref(),
+            input.stream_prev_hash.as_ref(),
+            input.audit_hash.as_ref(),
+            input.grant.as_ref(),
+            input.claimer.as_ref(),
             period_bytes.as_ref(),
             issued_at_bytes.as_ref(),
         ])

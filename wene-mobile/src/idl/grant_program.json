@@ -132,6 +132,63 @@
           }
         },
         {
+          "name": "pop_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  112,
+                  45,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "grant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pop_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  112,
+                  45,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "grant.authority",
+                "account": "Grant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
@@ -275,6 +332,63 @@
               }
             ]
           }
+        },
+        {
+          "name": "pop_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  112,
+                  45,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "grant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pop_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  112,
+                  45,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "grant.authority",
+                "account": "Grant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
         },
         {
           "name": "token_program",
@@ -764,6 +878,70 @@
           "type": "bool"
         }
       ]
+    },
+    {
+      "name": "upsert_pop_config",
+      "docs": [
+        "PoP（Proof of Process）署名者を設定/更新"
+      ],
+      "discriminator": [
+        103,
+        79,
+        37,
+        9,
+        166,
+        255,
+        209,
+        132
+      ],
+      "accounts": [
+        {
+          "name": "pop_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  112,
+                  45,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "signer_pubkey",
+          "type": "pubkey"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -791,6 +969,32 @@
         135,
         205,
         54
+      ]
+    },
+    {
+      "name": "PopConfig",
+      "discriminator": [
+        200,
+        142,
+        140,
+        153,
+        221,
+        32,
+        168,
+        190
+      ]
+    },
+    {
+      "name": "PopState",
+      "discriminator": [
+        118,
+        78,
+        161,
+        56,
+        134,
+        196,
+        213,
+        58
       ]
     }
   ],
@@ -864,6 +1068,96 @@
       "code": 6013,
       "name": "NotInAllowlist",
       "msg": "Claimer is not in allowlist"
+    },
+    {
+      "code": 6014,
+      "name": "InvalidPopConfigAuthority",
+      "msg": "PoP config authority mismatch"
+    },
+    {
+      "code": 6015,
+      "name": "MissingPopSignatureInstruction",
+      "msg": "Missing PoP signature instruction"
+    },
+    {
+      "code": 6016,
+      "name": "InvalidPopSignatureProgram",
+      "msg": "Invalid PoP signature program"
+    },
+    {
+      "code": 6017,
+      "name": "InvalidPopSignatureData",
+      "msg": "Invalid PoP signature data"
+    },
+    {
+      "code": 6018,
+      "name": "InvalidPopSigner",
+      "msg": "Invalid PoP signer"
+    },
+    {
+      "code": 6019,
+      "name": "InvalidPopMessageVersion",
+      "msg": "Invalid PoP message version"
+    },
+    {
+      "code": 6020,
+      "name": "InvalidPopMessageLength",
+      "msg": "Invalid PoP message length"
+    },
+    {
+      "code": 6021,
+      "name": "PopProofGrantMismatch",
+      "msg": "PoP proof grant mismatch"
+    },
+    {
+      "code": 6022,
+      "name": "PopProofClaimerMismatch",
+      "msg": "PoP proof claimer mismatch"
+    },
+    {
+      "code": 6023,
+      "name": "PopProofPeriodMismatch",
+      "msg": "PoP proof period mismatch"
+    },
+    {
+      "code": 6024,
+      "name": "PopProofExpired",
+      "msg": "PoP proof expired"
+    },
+    {
+      "code": 6025,
+      "name": "PopEntryHashMismatch",
+      "msg": "PoP entry hash mismatch"
+    },
+    {
+      "code": 6026,
+      "name": "PopHashChainBroken",
+      "msg": "PoP hash chain continuity is broken"
+    },
+    {
+      "code": 6027,
+      "name": "PopStreamChainBroken",
+      "msg": "PoP stream chain continuity is broken"
+    },
+    {
+      "code": 6028,
+      "name": "PopGenesisMismatch",
+      "msg": "PoP genesis hash mismatch"
+    },
+    {
+      "code": 6029,
+      "name": "PopStateGrantMismatch",
+      "msg": "PoP state grant mismatch"
+    },
+    {
+      "code": 6030,
+      "name": "PopReceiptCommitmentRequired",
+      "msg": "PoP proof must include off-chain receipt commitment (v2)"
+    },
+    {
+      "code": 6031,
+      "name": "PopAuditHashMissing",
+      "msg": "PoP audit hash is missing"
     }
   ],
   "types": [
@@ -942,6 +1236,72 @@
           },
           {
             "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PopConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "signer_pubkey",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PopState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "grant",
+            "type": "pubkey"
+          },
+          {
+            "name": "last_global_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "last_stream_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "last_period_index",
+            "type": "u64"
+          },
+          {
+            "name": "last_issued_at",
+            "type": "i64"
+          },
+          {
+            "name": "initialized",
             "type": "bool"
           },
           {
