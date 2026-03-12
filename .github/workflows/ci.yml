@@ -40,12 +40,27 @@ jobs:
         with:
           workspaces: grant_program
 
-      - name: Setup Anchor (Solana + Node + Anchor CLI)
-        uses: metaDAOproject/setup-anchor@v3.3
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          anchor-version: ${{ env.ANCHOR_VERSION }}
-          solana-cli-version: ${{ env.SOLANA_VERSION }}
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache Solana CLI tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/solana/
+            ~/.local/share/solana/
+          key: solana-cli-${{ runner.os }}-build-${{ env.SOLANA_VERSION }}
+
+      - name: Install Solana CLI tools
+        run: |
+          SOLANA_BIN_DIR="$(bash scripts/install-solana-cli.sh "${SOLANA_VERSION}")"
+          echo "${SOLANA_BIN_DIR}" >> "${GITHUB_PATH}"
+          "${SOLANA_BIN_DIR}/solana" --version
+
+      - name: Install Anchor CLI
+        run: npm install --global --fetch-retries=5 @coral-xyz/anchor-cli@${{ env.ANCHOR_VERSION }}
 
       - name: Install grant_program deps (npm ci)
         run: |
