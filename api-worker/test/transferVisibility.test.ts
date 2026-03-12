@@ -50,6 +50,7 @@ interface TransferLogItem {
     sender: { type: string; id: string };
     recipient: { type: string; id: string };
     mode: 'onchain' | 'offchain';
+    asset: 'ticket_token' | 'participation_receipt';
     amount: number | null;
     mint: string | null;
     txSignature: string | null;
@@ -177,12 +178,18 @@ describe('transfer visibility role levels (master > admin)', () => {
     expect(walletEntry).toBeTruthy();
     expect(walletEntry?.transfer.sender.id).toBe(authority);
     expect(walletEntry?.transfer.recipient.id).toBe(claimerWallet);
+    expect(walletEntry?.transfer.asset).toBe('participation_receipt');
+    expect(walletEntry?.transfer.amount).toBeNull();
+    expect(walletEntry?.transfer.mint).toBeNull();
     expect(walletEntry?.pii).toBeUndefined();
 
     const userEntry = adminBody.items?.find((item) => item.event === 'USER_CLAIM');
     expect(userEntry).toBeTruthy();
     expect(userEntry?.transfer.recipient.type).toBe('user');
     expect(userEntry?.transfer.recipient.id).toBe(userId);
+    expect(userEntry?.transfer.asset).toBe('participation_receipt');
+    expect(userEntry?.transfer.amount).toBeNull();
+    expect(userEntry?.transfer.mint).toBeNull();
     expect(userEntry?.pii).toBeUndefined();
   });
 
@@ -249,11 +256,17 @@ describe('transfer visibility role levels (master > admin)', () => {
     expect(walletEntry).toBeTruthy();
     expect(walletEntry?.transfer.sender.id).toBe(authority);
     expect(walletEntry?.transfer.recipient.id).toBe(claimerWallet);
+    expect(walletEntry?.transfer.asset).toBe('participation_receipt');
+    expect(walletEntry?.transfer.amount).toBeNull();
+    expect(walletEntry?.transfer.mint).toBeNull();
     expect(walletEntry?.pii?.walletAddress).toBe(claimerWallet);
 
     const userEntry = masterBody.items?.find((item) => item.event === 'USER_CLAIM');
     expect(userEntry).toBeTruthy();
     expect(userEntry?.transfer.recipient.id).toBe(userId);
+    expect(userEntry?.transfer.asset).toBe('participation_receipt');
+    expect(userEntry?.transfer.amount).toBeNull();
+    expect(userEntry?.transfer.mint).toBeNull();
     expect(userEntry?.pii?.userId).toBe(userId);
     expect(userEntry?.pii?.displayName).toBe('User B');
   });
@@ -321,6 +334,9 @@ describe('transfer visibility role levels (master > admin)', () => {
     expect(onchainOnlyBody.mode).toBe('onchain');
     expect(onchainOnlyBody.items?.length).toBe(1);
     expect(onchainOnlyBody.items?.[0]?.transfer.mode).toBe('onchain');
+    expect(onchainOnlyBody.items?.[0]?.transfer.asset).toBe('ticket_token');
+    expect(onchainOnlyBody.items?.[0]?.transfer.amount).toBe(3);
+    expect(onchainOnlyBody.items?.[0]?.transfer.mint).toBe(mint);
     expect(onchainOnlyBody.items?.[0]?.transfer.txSignature).toBe(
       '5KJvsngHeMpm884twD2r5kPu6x2R2h32L6M9n7Yjv9ByM8r4WQ6xAzM9Y4o7b2w1'
     );
@@ -339,6 +355,9 @@ describe('transfer visibility role levels (master > admin)', () => {
     expect(offchainOnlyBody.mode).toBe('offchain');
     expect(offchainOnlyBody.items?.length).toBe(5);
     expect(offchainOnlyBody.items?.every((item) => item.transfer.mode === 'offchain')).toBe(true);
+    expect(offchainOnlyBody.items?.every((item) => item.transfer.asset === 'participation_receipt')).toBe(true);
+    expect(offchainOnlyBody.items?.every((item) => item.transfer.amount === null)).toBe(true);
+    expect(offchainOnlyBody.items?.every((item) => item.transfer.mint === null)).toBe(true);
   });
 
   it('rejects unauthenticated transfer endpoint access', async () => {

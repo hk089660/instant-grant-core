@@ -263,7 +263,7 @@ export const AdminEventDetailScreen: React.FC = () => {
     return `${value.slice(0, start)}...${value.slice(-end)}`;
   };
 
-  const totalTransfers = onchainTransfers.length + offchainTransfers.length;
+  const totalTransferAuditEntries = onchainTransfers.length + offchainTransfers.length;
   const splitTransferPanels = windowWidth >= 1080;
   const transferLogMaxHeight = useMemo(
     () => Math.max(280, Math.min(windowHeight * (splitTransferPanels ? 0.46 : 0.5), 560)),
@@ -484,10 +484,10 @@ export const AdminEventDetailScreen: React.FC = () => {
           <View style={styles.sectionHeaderMeta}>
             <View>
               <AppText variant="small" style={styles.muted}>
-                {totalTransfers} 件 / レベル: {transferStrictLevel ?? '-'}
+                監査エントリ {totalTransferAuditEntries} 件 / レベル: {transferStrictLevel ?? '-'}
               </AppText>
               <AppText variant="small" style={styles.muted}>
-                On-chain署名: {onchainTransfers.length} 件 / Off-chain監査署名: {offchainTransfers.length} 件
+                実トークン配布: {onchainTransfers.length} 件 / オフチェーン参加レシート: {offchainTransfers.length} 件
               </AppText>
               <AppText variant="small" style={styles.muted}>
                 最終取得: {formatTime(transferCheckedAt ?? undefined)}
@@ -521,7 +521,7 @@ export const AdminEventDetailScreen: React.FC = () => {
             <View style={styles.transferGroupHeader}>
               <View>
                 <AppText variant="body" style={styles.cardText}>
-                  On-chain署名ログ
+                  On-chainトークン配布ログ
                 </AppText>
                 <AppText variant="small" style={styles.cardMuted}>
                   {onchainTransfers.length} 件
@@ -583,14 +583,14 @@ export const AdminEventDetailScreen: React.FC = () => {
             <View style={styles.transferGroupHeader}>
               <View>
                 <AppText variant="body" style={styles.cardText}>
-                  Off-chain監査署名ログ
+                  Off-chain参加レシートログ
                 </AppText>
                 <AppText variant="small" style={styles.cardMuted}>
                   {offchainTransfers.length} 件
                 </AppText>
               </View>
               <View style={[styles.transferModeBadge, styles.offchainBadge]}>
-                <AppText variant="small" style={styles.transferModeText}>hash chain receipt</AppText>
+                <AppText variant="small" style={styles.transferModeText}>receipt only</AppText>
               </View>
             </View>
 
@@ -621,13 +621,10 @@ export const AdminEventDetailScreen: React.FC = () => {
                       </AppText>
                     </View>
                     <AppText variant="small" style={styles.cardMuted}>
-                      送金主: {item.transfer.sender.type}:{item.transfer.sender.id}
+                      対象: {item.transfer.recipient.type}:{item.transfer.recipient.id}
                     </AppText>
                     <AppText variant="small" style={styles.cardMuted}>
-                      送金先: {item.transfer.recipient.type}:{item.transfer.recipient.id}
-                    </AppText>
-                    <AppText variant="small" style={styles.cardMuted}>
-                      配布量: {item.transfer.amount ?? '-'} / Mint: {shorten(item.transfer.mint)}
+                      内容: {item.transfer.asset === 'participation_receipt' ? 'オフチェーン参加レシート発行' : `配布量 ${item.transfer.amount ?? '-'} / Mint ${shorten(item.transfer.mint)}`}
                     </AppText>
                     <AppText variant="small" style={styles.hashMono}>
                       監査署名(hash): {shorten(item.entryHash, 10, 10)}

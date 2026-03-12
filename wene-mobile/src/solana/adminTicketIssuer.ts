@@ -30,9 +30,8 @@ import { createSimulationFailedError, sendSignedTx, isSimulationFailedError } fr
 import { setPhantomWebReturnPath } from '../utils/phantomWebReturnPath';
 import type { PhantomExtensionProvider } from '../wallet/phantomExtension';
 import { resolveApiBaseUrl } from '../api/resolveApiBaseUrl';
+import { computeIssueMintPlan, toPositiveU64 } from './issueMintPlan';
 
-const MAX_U64 = (BigInt(1) << BigInt(64)) - BigInt(1);
-const MIN_PREFUND_MULTIPLIER = 100;
 const UPSERT_POP_CONFIG_DISCRIMINATOR = Buffer.from([103, 79, 37, 9, 166, 255, 209, 132]);
 
 interface AdminPhantomMobileContext {
@@ -86,29 +85,6 @@ function buildSignRedirectContext(): { redirectLink: string; appUrl: string } {
     redirectLink: 'wene://phantom/sign?cluster=devnet',
     appUrl: 'https://wene.app',
   };
-}
-
-function toU64(value: bigint, name: string): bigint {
-  if (value <= BigInt(0)) {
-    throw new Error(`${name} must be greater than 0`);
-  }
-  if (value > MAX_U64) {
-    throw new Error(`${name} exceeds u64 limit`);
-  }
-  return value;
-}
-
-function computeBootstrapAmount(
-  amountPerPeriod: bigint,
-  maxClaimsPerInterval: number | null
-): bigint {
-  const expectedClaimsPerInterval = maxClaimsPerInterval == null
-    ? 100
-    : Math.max(1, Math.floor(maxClaimsPerInterval));
-  const expectedIntervals = maxClaimsPerInterval == null ? 30 : 60;
-  const base = amountPerPeriod * BigInt(expectedClaimsPerInterval) * BigInt(expectedIntervals);
-  const floor = amountPerPeriod * BigInt(MIN_PREFUND_MULTIPLIER);
-  return base > floor ? base : floor;
 }
 
 function clipUtf8(input: string, maxBytes: number): string {
@@ -356,20 +332,19 @@ async function signAndSendTx(
 export async function issueEventTicketToken(
   params: IssueEventTicketTokenParams
 ): Promise<IssueEventTicketTokenResult> {
-  const amountPerPeriod = toU64(BigInt(Math.floor(params.ticketTokenAmount)), 'ticketTokenAmount');
-  const bootstrapAmount = toU64(
-    computeBootstrapAmount(amountPerPeriod, params.maxClaimsPerInterval),
-    'bootstrapMintAmount'
-  );
-  const adminRetainedAmount = BigInt(1);
-  const initialMintAmount = toU64(
-    bootstrapAmount + adminRetainedAmount,
-    'initialMintAmount'
-  );
+  const {
+    amountPerPeriod,
+    bootstrapAmount,
+    adminRetainedAmount,
+    initialMintAmount,
+  } = computeIssueMintPlan({
+    ticketTokenAmount: params.ticketTokenAmount,
+    maxClaimsPerInterval: params.maxClaimsPerInterval,
+  });
 
   const mintDecimals = 0;
   const claimIntervalDays = Math.max(1, Math.floor(params.claimIntervalDays));
-  const periodSeconds = toU64(BigInt(claimIntervalDays * 24 * 60 * 60), 'periodSeconds');
+  const periodSeconds = toPositiveU64(BigInt(claimIntervalDays * 24 * 60 * 60), 'periodSeconds');
 
   const authority = new PublicKey(params.phantom.walletPubkey);
   const popSignerPubkey = await resolvePopSignerPubkey();

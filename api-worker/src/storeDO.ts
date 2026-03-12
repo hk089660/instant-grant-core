@@ -467,7 +467,7 @@ type TransferParty = {
 
 type TransferAuditPayload = {
   mode: 'onchain' | 'offchain';
-  asset: 'ticket_token';
+  asset: 'ticket_token' | 'participation_receipt';
   amount: number | null;
   mint: string | null;
   txSignature: string | null;
@@ -5772,13 +5772,15 @@ export class SchoolStore implements DurableObject {
   }): TransferAuditPayload {
     const senderId = this.normalizeStringField(params.event.solanaAuthority) ?? `grant:${params.eventId}`;
     const txSignature = this.normalizeStringField(params.txSignature);
+    const receiptPubkey = this.normalizeStringField(params.receiptPubkey);
+    const hasOnchainProof = Boolean(txSignature || receiptPubkey);
     return {
-      mode: txSignature ? 'onchain' : 'offchain',
-      asset: 'ticket_token',
-      amount: this.normalizeNumberField(params.event.ticketTokenAmount),
-      mint: this.normalizeStringField(params.event.solanaMint),
+      mode: hasOnchainProof ? 'onchain' : 'offchain',
+      asset: hasOnchainProof ? 'ticket_token' : 'participation_receipt',
+      amount: hasOnchainProof ? this.normalizeNumberField(params.event.ticketTokenAmount) : null,
+      mint: hasOnchainProof ? this.normalizeStringField(params.event.solanaMint) : null,
       txSignature,
-      receiptPubkey: this.normalizeStringField(params.receiptPubkey),
+      receiptPubkey,
       sender: { type: 'grant_authority', id: senderId },
       recipient: params.recipient,
     };
@@ -5820,14 +5822,17 @@ export class SchoolStore implements DurableObject {
     const modeRaw = this.normalizeStringField(transferObj.mode);
     const mode = modeRaw === 'onchain' ? 'onchain' : 'offchain';
     const assetRaw = this.normalizeStringField(transferObj.asset);
-    const asset = assetRaw === 'ticket_token' ? 'ticket_token' : 'ticket_token';
+    const asset =
+      assetRaw === 'participation_receipt'
+        ? 'participation_receipt'
+        : (assetRaw === 'ticket_token' ? 'ticket_token' : (mode === 'onchain' ? 'ticket_token' : 'participation_receipt'));
     const amount = this.normalizeNumberField(transferObj.amount);
 
     return {
       mode,
       asset,
-      amount,
-      mint: this.normalizeStringField(transferObj.mint),
+      amount: asset === 'ticket_token' ? amount : null,
+      mint: asset === 'ticket_token' ? this.normalizeStringField(transferObj.mint) : null,
       txSignature: this.normalizeStringField(transferObj.txSignature),
       receiptPubkey: this.normalizeStringField(transferObj.receiptPubkey),
       sender,
@@ -5846,6 +5851,9 @@ export class SchoolStore implements DurableObject {
     const txSignature = this.normalizeStringField(data.txSignature);
     const receiptPubkey = this.normalizeStringField(data.receiptPubkey);
     const mode: 'onchain' | 'offchain' = txSignature ? 'onchain' : 'offchain';
+    const asset: TransferAuditPayload['asset'] = mode === 'onchain' ? 'ticket_token' : 'participation_receipt';
+    const normalizedAmount = asset === 'ticket_token' ? amount : null;
+    const normalizedMint = asset === 'ticket_token' ? mint : null;
 
     if (entry.event === 'WALLET_CLAIM') {
       const walletAddress = this.normalizeStringField(data.walletAddress);
@@ -5854,9 +5862,9 @@ export class SchoolStore implements DurableObject {
       if (!recipientId) return null;
       return {
         mode,
-        asset: 'ticket_token',
-        amount,
-        mint,
+        asset,
+        amount: normalizedAmount,
+        mint: normalizedMint,
         txSignature,
         receiptPubkey,
         sender: { type: 'grant_authority', id: senderId },
@@ -5872,9 +5880,9 @@ export class SchoolStore implements DurableObject {
         'unknown';
       return {
         mode,
-        asset: 'ticket_token',
-        amount,
-        mint,
+        asset,
+        amount: normalizedAmount,
+        mint: normalizedMint,
         txSignature,
         receiptPubkey,
         sender: { type: 'grant_authority', id: senderId },

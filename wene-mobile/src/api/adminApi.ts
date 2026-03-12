@@ -728,7 +728,7 @@ export interface TransferParty {
 
 export interface TransferAuditPayload {
   mode: 'onchain' | 'offchain';
-  asset: 'ticket_token';
+  asset: 'ticket_token' | 'participation_receipt';
   amount: number | null;
   mint: string | null;
   txSignature: string | null;
