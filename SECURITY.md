@@ -1,5 +1,7 @@
 # セキュリティポリシー
 
+> 最終更新: 2026-04-27
+
 ## 脆弱性の報告
 
 **セキュリティ脆弱性は、公開 GitHub Issue では報告しないでください。**
@@ -29,6 +31,9 @@
 - 非保管型: ユーザーは自分のウォレットを保持する
 - PDA ベース: 主要状態は Program Derived Address で管理する
 - 特権の最小化: grant owner 以外の常設管理キーを持たない設計を基本とする
+- 命令分離: `create_grant` と `update_grant` を分離し、暴黙更新を防止
+- PoP v2 必須: off-chain 参加証跡の `audit_hash` コミットを含む v2 形式のみ受付
+- 並行 claim 許容: PoP chain head は best-effort 追従。二重受給ガードは receipt PDA init-dup に一本化
 - 監査状況: **未監査**。本番利用前の外部監査が前提
 
 ### Mobile App（`wene-mobile`）
@@ -41,8 +46,9 @@
 ## 既知の制約
 
 1. Sybil resistance は現状 allowlist ベースであり、本人確認ベースではない
-2. リプレイ攻撃は `period_index + ClaimReceipt PDA` で抑止している
+2. リプレイ攻撃は `period_index + ClaimReceipt PDA`（init-dup）で抑止している
 3. Front-running は公開 mempool 上で理論上あり得るが、現行 claim モデルでは影響は限定的
+4. `update_grant` によるパラメータ変更は authority 限定だが、監視は off-chain 側の責任に残る
 
 ## コントリビューター向けベストプラクティス
 
